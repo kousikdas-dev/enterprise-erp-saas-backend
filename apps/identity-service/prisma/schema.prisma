@@ -159,7 +159,8 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Composite FK so an optional user must belong to the same tenant as this log.
+  user   User?  @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: NoAction)
 
   @@index([tenantId])
   @@index([userId])
