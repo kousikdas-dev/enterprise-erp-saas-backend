@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Domain models are added incrementally. This service owns accounting_db only.
+// Planned: Account, JournalEntry, JournalLine (balanced double-entry),
+// FiscalPeriod, TrialBalance snapshots.
+// This service never reads sales_db or inventory_db directly.
+
+/// Infrastructure-only marker so Prisma Client can be generated before domain models exist.
+/// Not a business entity. Do not expose via API.
+model SchemaMeta {
+  id        String   @id @default("foundation")
+  appliedAt DateTime @default(now())
+
+  @@map("_schema_meta")
+}
