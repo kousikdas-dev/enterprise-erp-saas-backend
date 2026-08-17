@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_local_only}
       POSTGRES_DB: postgres
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Host port comes from POSTGRES_PORT in .env (local default 15432).
+      # Inside the compose network the database always listens on 5432.
+      - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init-databases.sql:ro
@@ -26,7 +28,7 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-erp}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-erp_local_only}
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_PORT:-25672}:5672"
       - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
@@ -48,6 +50,7 @@ services:
       SERVICE_NAME: identity-service
       NODE_ENV: production
       PORT: 3001
+      # Container network hostname; do not use localhost from the host .env.
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp}:${POSTGRES_PASSWORD:-erp_local_only}@postgres:5432/identity_db?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
       RABBITMQ_QUEUE: identity.events

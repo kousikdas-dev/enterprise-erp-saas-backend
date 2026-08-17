@@ -111,7 +111,7 @@ Start the full stack (build images, generate Prisma clients, run services):
 docker compose up --build
 ```
 
-RabbitMQ management UI: `http://localhost:15672` (credentials from `.env`).
+RabbitMQ management UI: `http://localhost:15672` (credentials from `.env`). Host AMQP uses `RABBITMQ_PORT` (default `25672`); containers use `rabbitmq:5672`.
 
 ## Environment variables
 
@@ -121,7 +121,7 @@ Copy `.env.example` to `.env`. Important variables:
 | --- | --- | --- |
 | `NODE_ENV` | all | `development` \| `test` \| `production` |
 | `SERVICE_NAME` | all | Log and health identity |
-| `PORT` | all | HTTP port |
+| `PORT` | API Gateway (shared `.env`) | Gateway HTTP port (`3000`). Identity does not use this value; it listens on `3001`. |
 | `DATABASE_URL` | domain services | PostgreSQL connection for **that** service only |
 | `RABBITMQ_URL` | all | AMQP URL |
 | `RABBITMQ_QUEUE` | domain services | Service event queue |
@@ -132,11 +132,11 @@ Copy `.env.example` to `.env`. Important variables:
 | `INVENTORY_SERVICE_URL` | gateway | Downstream inventory base URL |
 | `ACCOUNTING_SERVICE_URL` | gateway | Downstream accounting base URL |
 | `LOG_LEVEL` | all | Pino log level |
-| `POSTGRES_*` / `RABBITMQ_*` | compose | Local infrastructure credentials |
+| `POSTGRES_*` / `RABBITMQ_*` | compose | Local infrastructure credentials. `POSTGRES_PORT` is the host publish port (default `15432`). |
 
 Do not hard-code secrets. Do not commit `.env`.
 
-When running a domain service locally, set `DATABASE_URL` and `RABBITMQ_QUEUE` for that service. Docker Compose overrides these per container.
+When running a domain service on the host (`npm run start:identity`, Prisma CLI), `.env` `DATABASE_URL` must use `localhost` and `POSTGRES_PORT` (default `15432`). Docker Compose keeps using the internal hostname `postgres:5432` via per-service `environment` overrides, so you do not switch the same URL when moving between host and containers.
 
 ## Running the services
 
@@ -155,6 +155,8 @@ npm run start:sales
 npm run start:inventory
 npm run start:accounting
 ```
+
+`npm run start:identity` listens on **3001**, even when the shared `.env` has `PORT=3000` for the gateway. Docker Compose already sets `PORT: 3001` for the identity container.
 
 Or run the compiled stack with `docker compose up --build`.
 
@@ -190,6 +192,12 @@ npx prisma migrate deploy --schema=apps/identity-service/prisma/schema.prisma
 ```
 
 Repeat for the other three schemas.
+
+Development-only Identity seed (Demo tenant `DEMO` + `admin@demo.local`). Refuses to run when `NODE_ENV=production`. Password comes from `DEV_ADMIN_PASSWORD` (local default documented in `.env.example`):
+
+```bash
+npm run prisma:seed:identity
+```
 
 ## Swagger / API documentation
 

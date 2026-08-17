@@ -39,7 +39,8 @@
     "prisma:migrate:identity": "prisma migrate dev --schema=apps/identity-service/prisma/schema.prisma",
     "prisma:migrate:sales": "prisma migrate dev --schema=apps/sales-service/prisma/schema.prisma",
     "prisma:migrate:inventory": "prisma migrate dev --schema=apps/inventory-service/prisma/schema.prisma",
-    "prisma:migrate:accounting": "prisma migrate dev --schema=apps/accounting-service/prisma/schema.prisma"
+    "prisma:migrate:accounting": "prisma migrate dev --schema=apps/accounting-service/prisma/schema.prisma",
+    "prisma:seed:identity": "ts-node --transpile-only apps/identity-service/prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
