@@ -14,6 +14,8 @@ process.env.JWT_ACCESS_SECRET =
   process.env.JWT_ACCESS_SECRET ?? 'test-access-secret-change-me';
 process.env.JWT_REFRESH_SECRET =
   process.env.JWT_REFRESH_SECRET ?? 'test-refresh-secret-change-me';
+process.env.JWT_ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN ?? '15m';
+process.env.JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN ?? '7d';
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ??
   'postgresql://erp:erp_local_only@localhost:5432/identity_db?schema=public';
