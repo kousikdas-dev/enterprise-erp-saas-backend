@@ -16,6 +16,7 @@ import { requestContextMiddleware } from '../tenancy/request-context.middleware'
 export interface HttpBootstrapOptions {
   serviceName: string;
   configureSwagger?: (app: INestApplication) => void;
+  globalPrefixExcludes?: Array<{ path: string; method: RequestMethod }>;
 }
 
 export async function bootstrapHttpApp(
@@ -34,7 +35,9 @@ export async function bootstrapHttpApp(
   app.use(requestContextMiddleware);
 
   app.setGlobalPrefix(DEFAULT_API_PREFIX, {
-    exclude: [{ path: 'health', method: RequestMethod.GET }],
+    exclude: options.globalPrefixExcludes ?? [
+      { path: 'health', method: RequestMethod.GET },
+    ],
   });
   app.enableVersioning({
     type: VersioningType.URI,

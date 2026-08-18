@@ -10,7 +10,8 @@ import {
   validateEnv,
 } from '@app/common';
 import { MessagingModule } from '@app/messaging';
-import { DownstreamRegistry } from './downstream/downstream.registry';
+import { DownstreamModule } from './downstream/downstream.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -21,6 +22,8 @@ import { DownstreamRegistry } from './downstream/downstream.registry';
     }),
     LoggingModule,
     HealthModule,
+    DownstreamModule,
+    AuthModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,
@@ -31,7 +34,6 @@ import { DownstreamRegistry } from './downstream/downstream.registry';
     MessagingModule.register(),
   ],
   providers: [
-    DownstreamRegistry,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
