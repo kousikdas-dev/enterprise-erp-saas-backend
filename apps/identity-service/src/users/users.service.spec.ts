@@ -39,6 +39,12 @@ describe('UsersService', () => {
         findFirst: jest.Mock;
         update: jest.Mock;
       };
+      role: { findFirst: jest.Mock };
+      userRole: {
+        create: jest.Mock;
+        findUnique: jest.Mock;
+        delete: jest.Mock;
+      };
       $transaction: jest.Mock;
     } = {
       user: {
@@ -46,6 +52,12 @@ describe('UsersService', () => {
         findMany: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
+      },
+      role: { findFirst: jest.fn() },
+      userRole: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        delete: jest.fn(),
       },
       $transaction: jest.fn(),
     };
@@ -143,5 +155,74 @@ describe('UsersService', () => {
       orderBy: { email: 'asc' },
     });
     expect(result.items[0]).not.toHaveProperty('passwordHash');
+  });
+
+  it('assigns a same-tenant role and rejects duplicates', async () => {
+    const { service, prisma, audit } = createService();
+    const role = {
+      id: '55555555-5555-4555-8555-555555555555',
+      tenantId: actor.tenantId,
+      name: 'MANAGER',
+    };
+    prisma.user.findFirst.mockResolvedValue(userRecord());
+    prisma.role.findFirst.mockResolvedValue(role);
+    prisma.userRole.create.mockResolvedValue({
+      userId: userRecord().id,
+      roleId: role.id,
+      tenantId: actor.tenantId,
+      createdAt: new Date('2026-01-03'),
+    });
+
+    const assigned = await service.assignRole(actor, userRecord().id, role.id);
+    expect(assigned.roleName).toBe('MANAGER');
+    expect(assigned.tenantId).toBe(actor.tenantId);
+    expect(firstArg<{ action: string }>(audit.record).action).toBe(
+      'user.role_assigned',
+    );
+
+    prisma.userRole.create.mockRejectedValue({ code: 'P2002' });
+    await expect(
+      service.assignRole(actor, userRecord().id, role.id),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('does not assign a role from another tenant', async () => {
+    const { service, prisma } = createService();
+    prisma.user.findFirst.mockResolvedValue(userRecord());
+    prisma.role.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.assignRole(
+        actor,
+        userRecord().id,
+        '55555555-5555-4555-8555-555555555555',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.userRole.create).not.toHaveBeenCalled();
+    expect(prisma.role.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: '55555555-5555-4555-8555-555555555555',
+        tenantId: actor.tenantId,
+      },
+    });
+  });
+
+  it('returns 404 when removing a missing user-role assignment', async () => {
+    const { service, prisma } = createService();
+    prisma.user.findFirst.mockResolvedValue(userRecord());
+    prisma.role.findFirst.mockResolvedValue({
+      id: '55555555-5555-4555-8555-555555555555',
+      tenantId: actor.tenantId,
+      name: 'MANAGER',
+    });
+    prisma.userRole.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.removeRole(
+        actor,
+        userRecord().id,
+        '55555555-5555-4555-8555-555555555555',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

@@ -23,7 +23,7 @@ interface IdentityEnvelope<T> {
 }
 
 export interface IdentityForwardOptions {
-  method: 'GET' | 'POST' | 'PATCH';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string;
   user: AuthenticatedUser;
   body?: Record<string, unknown>;

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -26,10 +27,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import { ApiManagementErrors } from './api-management-errors';
+import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserDto, UserListDto } from './dto/user.dto';
+import { UserRoleDto, UserRoleRemovedDto } from './dto/user-role.dto';
 import { IdentityForwardService } from './identity-forward.service';
 
 function headerString(
@@ -86,6 +89,59 @@ export class UsersController {
       method: 'GET',
       path: '/api/v1/users',
       user,
+    });
+  }
+
+  @Post(':id/roles')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(PERMISSIONS.USERS_ROLES)
+  @ApiTags('User Roles')
+  @ApiOperation({
+    summary: 'Assign role to user',
+    description:
+      'Assigns a JWT-tenant role to a JWT-tenant user. Permission: users.roles.',
+  })
+  @ApiCreatedResponse({ type: UserRoleDto })
+  @ApiConflictResponse({ description: 'Role already assigned' })
+  @ApiManagementErrors()
+  assignRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignRoleDto,
+    @Req() request: Request,
+  ): Promise<UserRoleDto> {
+    return this.identity.forward<UserRoleDto>({
+      method: 'POST',
+      path: `/api/v1/users/${id}/roles`,
+      user,
+      body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Delete(':id/roles/:roleId')
+  @RequirePermissions(PERMISSIONS.USERS_ROLES)
+  @ApiTags('User Roles')
+  @ApiOperation({
+    summary: 'Remove role from user',
+    description:
+      'Removes a role assignment in the JWT tenant. Missing assignment: 404. Permission: users.roles.',
+  })
+  @ApiOkResponse({ type: UserRoleRemovedDto })
+  @ApiManagementErrors()
+  removeRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('roleId', ParseUUIDPipe) roleId: string,
+    @Req() request: Request,
+  ): Promise<UserRoleRemovedDto> {
+    return this.identity.forward<UserRoleRemovedDto>({
+      method: 'DELETE',
+      path: `/api/v1/users/${id}/roles/${roleId}`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
     });
   }
 

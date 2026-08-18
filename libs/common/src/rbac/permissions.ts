@@ -7,6 +7,13 @@ export const PERMISSIONS = {
   USERS_CREATE: 'users.create',
   USERS_UPDATE: 'users.update',
   USERS_STATUS: 'users.status',
+  USERS_ROLES: 'users.roles',
+  ROLES_READ: 'roles.read',
+  ROLES_CREATE: 'roles.create',
+  ROLES_UPDATE: 'roles.update',
+  ROLES_STATUS: 'roles.status',
+  ROLES_PERMISSIONS: 'roles.permissions',
+  PERMISSIONS_READ: 'permissions.read',
   RBAC_TEST: 'rbac.test',
 } as const;
 

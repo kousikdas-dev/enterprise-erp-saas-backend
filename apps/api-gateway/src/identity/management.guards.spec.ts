@@ -22,6 +22,16 @@ class TenantsProbeController {
   }
 }
 
+@Controller('roles-probe')
+class RolesProbeController {
+  @Get()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.ROLES_READ)
+  list(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 describe('management JWT and RBAC', () => {
   const secret = 'test-access-secret-change-me';
   let app: INestApplication;
@@ -37,7 +47,7 @@ describe('management JWT and RBAC', () => {
         PassportModule.register({ defaultStrategy: 'jwt' }),
         JwtModule.register({ secret }),
       ],
-      controllers: [TenantsProbeController],
+      controllers: [TenantsProbeController, RolesProbeController],
       providers: [
         JwtStrategy,
         JwtAuthGuard,
@@ -70,12 +80,17 @@ describe('management JWT and RBAC', () => {
 
   it('returns 401 when the JWT is missing', async () => {
     await request(server).get('/tenants-probe').expect(401);
+    await request(server).get('/roles-probe').expect(401);
   });
 
   it('returns 403 when the permission is missing', async () => {
     getPermissionKeys.mockResolvedValue(['rbac.test']);
     await request(server)
       .get('/tenants-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+    await request(server)
+      .get('/roles-probe')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(403);
   });

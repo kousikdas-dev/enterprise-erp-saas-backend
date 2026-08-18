@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -14,6 +15,7 @@ import { ActorContext } from '../audit/audit.types';
 import { ActorGuard } from '../auth/actor.guard';
 import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
+import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -36,6 +38,31 @@ export class UsersController {
   @Get()
   list(@CurrentActor() actor: ActorContext) {
     return this.users.list(actor);
+  }
+
+  @Post(':id/roles')
+  assignRole(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignRoleDto,
+    @Req() request: Request,
+  ) {
+    return this.users.assignRole(
+      actor,
+      id,
+      dto.roleId,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Delete(':id/roles/:roleId')
+  removeRole(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('roleId', ParseUUIDPipe) roleId: string,
+    @Req() request: Request,
+  ) {
+    return this.users.removeRole(actor, id, roleId, requestAuditMeta(request));
   }
 
   @Get(':id')

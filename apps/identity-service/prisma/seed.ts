@@ -44,6 +44,29 @@ const MANAGEMENT_PERMISSIONS: Array<{
   { resource: 'users', action: 'create', description: 'Create users' },
   { resource: 'users', action: 'update', description: 'Update users' },
   { resource: 'users', action: 'status', description: 'Change user status' },
+  {
+    resource: 'users',
+    action: 'roles',
+    description: 'Assign and remove user roles',
+  },
+  { resource: 'roles', action: 'read', description: 'Read roles' },
+  { resource: 'roles', action: 'create', description: 'Create roles' },
+  { resource: 'roles', action: 'update', description: 'Update roles' },
+  {
+    resource: 'roles',
+    action: 'status',
+    description: 'Change role status',
+  },
+  {
+    resource: 'roles',
+    action: 'permissions',
+    description: 'Assign and remove role permissions',
+  },
+  {
+    resource: 'permissions',
+    action: 'read',
+    description: 'Read the permission catalog',
+  },
 ];
 
 async function seedSuperAdminPermissions(
@@ -209,7 +232,7 @@ async function main(): Promise<void> {
       `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
     );
     console.log(
-      'Identity RBAC seed: SUPER_ADMIN has rbac.test and tenant/user management permissions; viewer and OTHER remain unprivileged',
+      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, and permissions.read; viewer and OTHER remain unprivileged',
     );
   } finally {
     await prisma.$disconnect();

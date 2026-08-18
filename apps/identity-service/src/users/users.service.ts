@@ -164,6 +164,103 @@ export class UsersService {
     return toUserResponse(user);
   }
 
+  async assignRole(
+    actor: ActorContext,
+    userId: string,
+    roleId: string,
+    request?: RequestAuditMeta,
+  ) {
+    const user = await this.requireTenantUser(actor, userId);
+    const role = await this.prisma.role.findFirst({
+      where: { id: roleId, tenantId: actor.tenantId },
+    });
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const assignment = await tx.userRole.create({
+          data: {
+            userId: user.id,
+            roleId: role.id,
+            tenantId: actor.tenantId,
+          },
+        });
+        await this.audit.record(
+          {
+            actor,
+            resourceTenantId: actor.tenantId,
+            action: 'user.role_assigned',
+            resource: 'user',
+            resourceId: user.id,
+            metadata: {
+              userId: user.id,
+              roleId: role.id,
+              roleName: role.name,
+            },
+            request,
+          },
+          tx,
+        );
+        return {
+          userId: assignment.userId,
+          roleId: assignment.roleId,
+          tenantId: assignment.tenantId,
+          roleName: role.name,
+          createdAt: assignment.createdAt,
+        };
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new ConflictException('Role already assigned to this user');
+      }
+      throw error;
+    }
+  }
+
+  async removeRole(
+    actor: ActorContext,
+    userId: string,
+    roleId: string,
+    request?: RequestAuditMeta,
+  ) {
+    const user = await this.requireTenantUser(actor, userId);
+    const role = await this.prisma.role.findFirst({
+      where: { id: roleId, tenantId: actor.tenantId },
+    });
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+    const assignment = await this.prisma.userRole.findUnique({
+      where: { userId_roleId: { userId: user.id, roleId: role.id } },
+    });
+    if (!assignment || assignment.tenantId !== actor.tenantId) {
+      throw new NotFoundException('User role assignment not found');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userRole.delete({
+        where: { userId_roleId: { userId: user.id, roleId: role.id } },
+      });
+      await this.audit.record(
+        {
+          actor,
+          resourceTenantId: actor.tenantId,
+          action: 'user.role_removed',
+          resource: 'user',
+          resourceId: user.id,
+          metadata: {
+            userId: user.id,
+            roleId: role.id,
+            roleName: role.name,
+          },
+          request,
+        },
+        tx,
+      );
+    });
+    return { userId: user.id, roleId: role.id, removed: true as const };
+  }
+
   private async requireTenantUser(
     actor: ActorContext,
     id: string,

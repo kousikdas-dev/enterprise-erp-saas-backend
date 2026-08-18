@@ -4,8 +4,9 @@ describe('permission helpers', () => {
   it('formats resource and action as resource.action', () => {
     expect(permissionKey('users', 'read')).toBe('users.read');
     expect(permissionKey('rbac', 'test')).toBe('rbac.test');
-    expect(PERMISSIONS.USERS_CREATE).toBe('users.create');
-    expect(PERMISSIONS.TENANTS_READ).toBe('tenants.read');
+    expect(PERMISSIONS.ROLES_PERMISSIONS).toBe('roles.permissions');
+    expect(PERMISSIONS.USERS_ROLES).toBe('users.roles');
+    expect(PERMISSIONS.PERMISSIONS_READ).toBe('permissions.read');
   });
 
   it('allows when all required permissions are owned', () => {

@@ -18,6 +18,10 @@ async function bootstrap(): Promise<void> {
       { path: 'tenants/{*path}', method: RequestMethod.ALL },
       { path: 'users', method: RequestMethod.ALL },
       { path: 'users/{*path}', method: RequestMethod.ALL },
+      { path: 'roles', method: RequestMethod.ALL },
+      { path: 'roles/{*path}', method: RequestMethod.ALL },
+      { path: 'permissions', method: RequestMethod.ALL },
+      { path: 'permissions/{*path}', method: RequestMethod.ALL },
     ],
   });
 }

@@ -9,6 +9,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RbacModule } from './rbac/rbac.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { UsersModule } from './users/users.module';
+import { RolesModule } from './roles/roles.module';
+import { PermissionsCatalogModule } from './permissions/permissions.module';
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { UsersModule } from './users/users.module';
     AuditModule,
     TenantsModule,
     UsersModule,
+    RolesModule,
+    PermissionsCatalogModule,
     MessagingModule.register(),
   ],
 })
