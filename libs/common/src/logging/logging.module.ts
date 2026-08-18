@@ -17,6 +17,7 @@ import { LoggerModule } from 'nestjs-pino';
           paths: [
             'req.headers.authorization',
             'req.headers.cookie',
+            'req.headers.x-internal-service-secret',
             'password',
             'accessToken',
             'refreshToken',

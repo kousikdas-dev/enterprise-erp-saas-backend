@@ -13,6 +13,7 @@ import { MessagingModule } from '@app/messaging';
 import { DownstreamModule } from './downstream/downstream.module';
 import { AuthModule } from './auth/auth.module';
 import { IdentityAdminModule } from './identity/identity-admin.module';
+import { InventoryAdminModule } from './inventory/inventory-admin.module';
 import { RbacModule } from './rbac/rbac.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { RbacModule } from './rbac/rbac.module';
     AuthModule,
     RbacModule,
     IdentityAdminModule,
+    InventoryAdminModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,

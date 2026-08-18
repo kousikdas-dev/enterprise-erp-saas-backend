@@ -8,14 +8,138 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Domain models are added incrementally. This service owns inventory_db only.
-// Planned: Item, Warehouse, StockLedger, Reservation.
-
-/// Infrastructure-only marker so Prisma Client can be generated before domain models exist.
-/// Not a business entity. Do not expose via API.
+/// Infrastructure-only marker. Not a business entity. Do not expose via API.
 model SchemaMeta {
   id        String   @id @default("foundation")
   appliedAt DateTime @default(now())
 
   @@map("_schema_meta")
+}
+
+enum StockMovementType {
+  OPENING
+  PURCHASE
+  SALE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+}
+
+model Category {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("categories")
+}
+
+model UnitOfMeasure {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  code      String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("units_of_measure")
+}
+
+model Warehouse {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  code      String
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stocks     Stock[]
+  movements  StockMovement[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("warehouses")
+}
+
+model Product {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  sku              String
+  name             String
+  description      String?
+  categoryId       String   @db.Uuid
+  unitOfMeasureId  String   @db.Uuid
+  sellingPrice     Decimal  @db.Decimal(19, 4)
+  costPrice        Decimal  @db.Decimal(19, 4)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  category      Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  unitOfMeasure UnitOfMeasure @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
+  stocks        Stock[]
+  movements     StockMovement[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([categoryId])
+  @@index([unitOfMeasureId])
+  @@map("products")
+}
+
+model Stock {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  productId   String   @db.Uuid
+  warehouseId String   @db.Uuid
+  quantity    Decimal  @db.Decimal(19, 6)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, productId, warehouseId])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@map("stocks")
+}
+
+model StockMovement {
+  id            String             @id @default(uuid()) @db.Uuid
+  tenantId      String             @db.Uuid
+  productId     String             @db.Uuid
+  warehouseId   String             @db.Uuid
+  type          StockMovementType
+  quantity      Decimal            @db.Decimal(19, 6)
+  referenceType String?
+  referenceId   String?            @db.Uuid
+  reason        String?
+  createdBy     String             @db.Uuid
+  createdAt     DateTime           @default(now())
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@index([productId])
+  @@index([warehouseId])
+  @@map("stock_movements")
 }

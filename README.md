@@ -126,8 +126,9 @@ Copy `.env.example` to `.env`. Important variables:
 | `RABBITMQ_URL` | all | AMQP URL |
 | `RABBITMQ_QUEUE` | domain services | Service event queue |
 | `JWT_ACCESS_SECRET` | gateway + services | Access-token signing (auth not implemented yet) |
-| `JWT_REFRESH_SECRET` | gateway | Refresh-token signing |
-| `IDENTITY_SERVICE_URL` | gateway | Downstream identity base URL |
+| `JWT_REFRESH_SECRET` | gateway + identity | Refresh-token signing |
+| `INTERNAL_SERVICE_SECRET` | identity + inventory | Shared secret for Identity `POST /api/v1/internal/audit`. Not used by browsers. |
+| `IDENTITY_SERVICE_URL` | gateway + inventory | Downstream identity base URL |
 | `SALES_SERVICE_URL` | gateway | Downstream sales base URL |
 | `INVENTORY_SERVICE_URL` | gateway | Downstream inventory base URL |
 | `ACCOUNTING_SERVICE_URL` | gateway | Downstream accounting base URL |
@@ -158,13 +159,15 @@ npm run start:accounting
 
 `npm run start:identity` listens on **3001**, even when the shared `.env` has `PORT=3000` for the gateway. Docker Compose already sets `PORT: 3001` for the identity container.
 
+`npm run start:inventory` listens on **3003** on the host for local hybrid development. In Docker Compose, Inventory still listens on **3003 inside the compose network** (`http://inventory-service:3003`) and is **not** published on the host. The browser must use Gateway `:3000` only.
+
 Or run the compiled stack with `docker compose up --build`.
 
 Health:
 
 - Orchestrator: `GET http://localhost:3000/health`
 - Versioned: `GET http://localhost:3000/v1/health`
-- Same pattern on ports 3001–3004
+- Identity (host/dev): `GET http://localhost:3001/health` when that service is started on the host
 
 ## Database migration instructions
 

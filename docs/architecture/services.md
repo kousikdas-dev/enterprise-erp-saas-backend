@@ -44,7 +44,9 @@ Sales must not write journals itself.
 
 ## Inventory Service (`apps/inventory-service`)
 
-Port **3003**, database **inventory_db**.
+Listens on **3003**, database **inventory_db**.
+
+In Docker Compose the container is reachable as `http://inventory-service:3003` on the internal network. That port is not published on the host; clients use API Gateway **3000**. Local `npm run start:inventory` still binds host **3003** for hybrid development.
 
 Target domain: items, warehouses, stock ledger, reservations. Stock and goods-receipt events will drive accounting (inventory vs accounts payable) without sharing tables.
 

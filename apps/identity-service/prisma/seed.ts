@@ -67,6 +67,53 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'read',
     description: 'Read the permission catalog',
   },
+  { resource: 'products', action: 'create', description: 'Create products' },
+  { resource: 'products', action: 'read', description: 'Read products' },
+  { resource: 'products', action: 'update', description: 'Update products' },
+  {
+    resource: 'categories',
+    action: 'create',
+    description: 'Create categories',
+  },
+  { resource: 'categories', action: 'read', description: 'Read categories' },
+  {
+    resource: 'categories',
+    action: 'update',
+    description: 'Update categories',
+  },
+  {
+    resource: 'units',
+    action: 'create',
+    description: 'Create units of measure',
+  },
+  { resource: 'units', action: 'read', description: 'Read units of measure' },
+  {
+    resource: 'units',
+    action: 'update',
+    description: 'Update units of measure',
+  },
+  {
+    resource: 'warehouses',
+    action: 'create',
+    description: 'Create warehouses',
+  },
+  { resource: 'warehouses', action: 'read', description: 'Read warehouses' },
+  {
+    resource: 'warehouses',
+    action: 'update',
+    description: 'Update warehouses',
+  },
+  { resource: 'stock', action: 'read', description: 'Read stock balances' },
+  {
+    resource: 'stock',
+    action: 'adjust',
+    description: 'Adjust stock quantities',
+  },
+  {
+    resource: 'stock.movements',
+    action: 'read',
+    description: 'Read stock movement history',
+  },
 ];
 
 async function seedSuperAdminPermissions(
@@ -232,7 +279,7 @@ async function main(): Promise<void> {
       `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
     );
     console.log(
-      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, and permissions.read; viewer and OTHER remain unprivileged',
+      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, and Inventory V1 permissions; viewer and OTHER remain unprivileged',
     );
   } finally {
     await prisma.$disconnect();

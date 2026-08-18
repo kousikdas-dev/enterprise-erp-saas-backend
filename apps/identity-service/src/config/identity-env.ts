@@ -1,4 +1,4 @@
-import { IsString } from 'class-validator';
+import { IsString, MinLength } from 'class-validator';
 import { ServiceEnvironmentVariables } from '@app/common';
 
 export class IdentityEnvironmentVariables extends ServiceEnvironmentVariables {
@@ -10,4 +10,8 @@ export class IdentityEnvironmentVariables extends ServiceEnvironmentVariables {
 
   @IsString()
   JWT_REFRESH_EXPIRES_IN!: string;
+
+  @IsString()
+  @MinLength(16)
+  INTERNAL_SERVICE_SECRET!: string;
 }

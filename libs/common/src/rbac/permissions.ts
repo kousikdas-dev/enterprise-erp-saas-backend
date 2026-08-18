@@ -15,6 +15,21 @@ export const PERMISSIONS = {
   ROLES_PERMISSIONS: 'roles.permissions',
   PERMISSIONS_READ: 'permissions.read',
   RBAC_TEST: 'rbac.test',
+  PRODUCTS_CREATE: 'products.create',
+  PRODUCTS_READ: 'products.read',
+  PRODUCTS_UPDATE: 'products.update',
+  CATEGORIES_CREATE: 'categories.create',
+  CATEGORIES_READ: 'categories.read',
+  CATEGORIES_UPDATE: 'categories.update',
+  UNITS_CREATE: 'units.create',
+  UNITS_READ: 'units.read',
+  UNITS_UPDATE: 'units.update',
+  WAREHOUSES_CREATE: 'warehouses.create',
+  WAREHOUSES_READ: 'warehouses.read',
+  WAREHOUSES_UPDATE: 'warehouses.update',
+  STOCK_READ: 'stock.read',
+  STOCK_ADJUST: 'stock.adjust',
+  STOCK_MOVEMENTS_READ: 'stock.movements.read',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

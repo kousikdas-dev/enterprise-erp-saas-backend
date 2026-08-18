@@ -13,7 +13,12 @@ describe('AuditService', () => {
 
   it('stores actor userId when the resource belongs to the same tenant', async () => {
     const create = jest.fn().mockResolvedValue({});
-    const prisma = { auditLog: { create } };
+    const prisma = {
+      auditLog: { create },
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ id: actor.userId }),
+      },
+    };
     const service = new AuditService(prisma as never);
 
     await service.record({
@@ -47,7 +52,10 @@ describe('AuditService', () => {
 
   it('omits userId when the resource tenant differs from the actor', async () => {
     const create = jest.fn().mockResolvedValue({});
-    const prisma = { auditLog: { create } };
+    const prisma = {
+      auditLog: { create },
+      user: { findFirst: jest.fn() },
+    };
     const service = new AuditService(prisma as never);
     const createdTenantId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 

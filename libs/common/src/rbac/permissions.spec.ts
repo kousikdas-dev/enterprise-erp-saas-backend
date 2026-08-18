@@ -7,6 +7,9 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.ROLES_PERMISSIONS).toBe('roles.permissions');
     expect(PERMISSIONS.USERS_ROLES).toBe('users.roles');
     expect(PERMISSIONS.PERMISSIONS_READ).toBe('permissions.read');
+    expect(PERMISSIONS.PRODUCTS_CREATE).toBe('products.create');
+    expect(PERMISSIONS.STOCK_ADJUST).toBe('stock.adjust');
+    expect(PERMISSIONS.STOCK_MOVEMENTS_READ).toBe('stock.movements.read');
   });
 
   it('allows when all required permissions are owned', () => {

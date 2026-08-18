@@ -8,7 +8,7 @@ The web client talks only to the API Gateway. The gateway will call domain servi
 
 - `IDENTITY_SERVICE_URL`
 - `SALES_SERVICE_URL`
-- `INVENTORY_SERVICE_URL`
+- `INVENTORY_SERVICE_URL` (Compose: `http://inventory-service:3003`)
 - `ACCOUNTING_SERVICE_URL`
 
 Public and internal HTTP APIs use `/api/v1/...`.

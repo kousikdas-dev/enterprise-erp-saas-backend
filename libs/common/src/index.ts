@@ -4,6 +4,7 @@ export * from './config/validate-env';
 export * from './constants';
 export * from './health/health.module';
 export * from './http/actor-headers';
+export * from './http/internal-service-headers';
 export * from './http/api-response';
 export * from './http/http-exception.filter';
 export * from './http/response.interceptor';
