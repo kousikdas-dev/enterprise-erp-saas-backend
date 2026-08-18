@@ -12,6 +12,7 @@ import {
 import { MessagingModule } from '@app/messaging';
 import { DownstreamModule } from './downstream/downstream.module';
 import { AuthModule } from './auth/auth.module';
+import { RbacModule } from './rbac/rbac.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AuthModule } from './auth/auth.module';
     HealthModule,
     DownstreamModule,
     AuthModule,
+    RbacModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,

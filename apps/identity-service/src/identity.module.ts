@@ -5,6 +5,7 @@ import { MessagingModule } from '@app/messaging';
 import { AuthModule } from './auth/auth.module';
 import { IdentityEnvironmentVariables } from './config/identity-env';
 import { PrismaModule } from './prisma/prisma.module';
+import { RbacModule } from './rbac/rbac.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PrismaModule } from './prisma/prisma.module';
     HealthModule,
     PrismaModule,
     AuthModule,
+    RbacModule,
     MessagingModule.register(),
   ],
 })

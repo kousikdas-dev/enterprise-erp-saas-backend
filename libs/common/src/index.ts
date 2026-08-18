@@ -7,5 +7,4 @@ export * from './http/api-response';
 export * from './http/http-exception.filter';
 export * from './http/response.interceptor';
 export * from './logging/logging.module';
-export * from './tenancy/request-context';
-export * from './tenancy/request-context.middleware';
+export * from './rbac/permissions';

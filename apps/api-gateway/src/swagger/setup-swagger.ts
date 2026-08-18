@@ -27,6 +27,7 @@ export function setupGatewaySwagger(app: INestApplication): void {
     )
     .addTag('health', 'Liveness and readiness')
     .addTag('Authentication', 'Login and token operations')
+    .addTag('RBAC', 'Role-based access control probes')
     .addTag('Tenants', 'Tenant administration')
     .addTag('Users', 'User administration')
     .addTag('Roles', 'Role administration')

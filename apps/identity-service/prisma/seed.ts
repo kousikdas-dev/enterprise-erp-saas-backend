@@ -1,6 +1,7 @@
 /**
  * DEVELOPMENT / LOCAL TEST ONLY.
- * Idempotent Identity seed: Demo tenant + one ACTIVE admin user.
+ * Idempotent Identity seed: Demo tenant, admin, RBAC probe role/permission,
+ * a DEMO viewer without rbac.test, and an OTHER tenant user for isolation tests.
  * Not an HTTP endpoint. Refuses to run when NODE_ENV=production.
  */
 import { config } from 'dotenv';
@@ -85,6 +86,106 @@ async function main(): Promise<void> {
 
     console.log(
       `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
+    );
+
+    const permission = await prisma.permission.upsert({
+      where: { resource_action: { resource: 'rbac', action: 'test' } },
+      create: {
+        resource: 'rbac',
+        action: 'test',
+        description: 'Development RBAC probe',
+      },
+      update: { description: 'Development RBAC probe' },
+    });
+
+    const adminRole = await prisma.role.upsert({
+      where: { tenantId_name: { tenantId: tenant.id, name: 'SUPER_ADMIN' } },
+      create: {
+        tenantId: tenant.id,
+        name: 'SUPER_ADMIN',
+        description: 'Development super-admin',
+      },
+      update: { description: 'Development super-admin' },
+    });
+
+    await prisma.rolePermission.upsert({
+      where: {
+        roleId_permissionId: {
+          roleId: adminRole.id,
+          permissionId: permission.id,
+        },
+      },
+      create: { roleId: adminRole.id, permissionId: permission.id },
+      update: {},
+    });
+
+    await prisma.userRole.upsert({
+      where: {
+        userId_roleId: { userId: user.id, roleId: adminRole.id },
+      },
+      create: {
+        userId: user.id,
+        roleId: adminRole.id,
+        tenantId: tenant.id,
+      },
+      update: { tenantId: tenant.id },
+    });
+
+    await prisma.user.upsert({
+      where: {
+        tenantId_email: { tenantId: tenant.id, email: 'viewer@demo.local' },
+      },
+      create: {
+        tenantId: tenant.id,
+        email: 'viewer@demo.local',
+        passwordHash,
+        firstName: 'Demo',
+        lastName: 'Viewer',
+        status: UserStatus.ACTIVE,
+      },
+      update: {
+        passwordHash,
+        firstName: 'Demo',
+        lastName: 'Viewer',
+        status: UserStatus.ACTIVE,
+      },
+    });
+
+    const otherTenant = await prisma.tenant.upsert({
+      where: { code: 'OTHER' },
+      create: {
+        name: 'Other Company',
+        code: 'OTHER',
+        status: TenantStatus.ACTIVE,
+      },
+      update: { name: 'Other Company', status: TenantStatus.ACTIVE },
+    });
+
+    await prisma.user.upsert({
+      where: {
+        tenantId_email: {
+          tenantId: otherTenant.id,
+          email: 'admin@other.local',
+        },
+      },
+      create: {
+        tenantId: otherTenant.id,
+        email: 'admin@other.local',
+        passwordHash,
+        firstName: 'Other',
+        lastName: 'Admin',
+        status: UserStatus.ACTIVE,
+      },
+      update: {
+        passwordHash,
+        firstName: 'Other',
+        lastName: 'Admin',
+        status: UserStatus.ACTIVE,
+      },
+    });
+
+    console.log(
+      'Identity RBAC seed: SUPER_ADMIN+rbac.test on DEMO admin; viewer has no rbac.test; OTHER tenant isolated',
     );
   } finally {
     await prisma.$disconnect();
