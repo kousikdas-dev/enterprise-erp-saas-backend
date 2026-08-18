@@ -1,8 +1,8 @@
 /**
  * DEVELOPMENT / LOCAL TEST ONLY.
- * Idempotent Identity seed: Demo tenant, admin, RBAC probe role/permission,
- * a DEMO viewer without rbac.test, and an OTHER tenant user for isolation tests.
- * Not an HTTP endpoint. Refuses to run when NODE_ENV=production.
+ * Idempotent Identity seed: Demo tenant, admin, RBAC probe + management
+ * permissions, a DEMO viewer without those permissions, and an OTHER tenant
+ * user for isolation tests. Not an HTTP endpoint. Refuses NODE_ENV=production.
  */
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
@@ -21,6 +21,72 @@ const ADMIN_EMAIL = 'admin@demo.local';
 const ADMIN_FIRST_NAME = 'System';
 const ADMIN_LAST_NAME = 'Administrator';
 const LOCAL_DEV_PASSWORD_DEFAULT = 'DevPassword123!';
+
+const MANAGEMENT_PERMISSIONS: Array<{
+  resource: string;
+  action: string;
+  description: string;
+}> = [
+  { resource: 'rbac', action: 'test', description: 'Development RBAC probe' },
+  { resource: 'tenants', action: 'read', description: 'Read tenant records' },
+  { resource: 'tenants', action: 'create', description: 'Create tenants' },
+  {
+    resource: 'tenants',
+    action: 'update',
+    description: 'Update tenant records',
+  },
+  {
+    resource: 'tenants',
+    action: 'status',
+    description: 'Change tenant status',
+  },
+  { resource: 'users', action: 'read', description: 'Read users' },
+  { resource: 'users', action: 'create', description: 'Create users' },
+  { resource: 'users', action: 'update', description: 'Update users' },
+  { resource: 'users', action: 'status', description: 'Change user status' },
+];
+
+async function seedSuperAdminPermissions(
+  prisma: PrismaClient,
+  tenantId: string,
+  adminUserId: string,
+): Promise<void> {
+  const adminRole = await prisma.role.upsert({
+    where: { tenantId_name: { tenantId, name: 'SUPER_ADMIN' } },
+    create: {
+      tenantId,
+      name: 'SUPER_ADMIN',
+      description: 'Development super-admin',
+    },
+    update: { description: 'Development super-admin' },
+  });
+
+  for (const item of MANAGEMENT_PERMISSIONS) {
+    const permission = await prisma.permission.upsert({
+      where: {
+        resource_action: { resource: item.resource, action: item.action },
+      },
+      create: item,
+      update: { description: item.description },
+    });
+    await prisma.rolePermission.upsert({
+      where: {
+        roleId_permissionId: {
+          roleId: adminRole.id,
+          permissionId: permission.id,
+        },
+      },
+      create: { roleId: adminRole.id, permissionId: permission.id },
+      update: {},
+    });
+  }
+
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: adminUserId, roleId: adminRole.id } },
+    create: { userId: adminUserId, roleId: adminRole.id, tenantId },
+    update: { tenantId },
+  });
+}
 
 async function main(): Promise<void> {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
@@ -84,52 +150,7 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log(
-      `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
-    );
-
-    const permission = await prisma.permission.upsert({
-      where: { resource_action: { resource: 'rbac', action: 'test' } },
-      create: {
-        resource: 'rbac',
-        action: 'test',
-        description: 'Development RBAC probe',
-      },
-      update: { description: 'Development RBAC probe' },
-    });
-
-    const adminRole = await prisma.role.upsert({
-      where: { tenantId_name: { tenantId: tenant.id, name: 'SUPER_ADMIN' } },
-      create: {
-        tenantId: tenant.id,
-        name: 'SUPER_ADMIN',
-        description: 'Development super-admin',
-      },
-      update: { description: 'Development super-admin' },
-    });
-
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: {
-          roleId: adminRole.id,
-          permissionId: permission.id,
-        },
-      },
-      create: { roleId: adminRole.id, permissionId: permission.id },
-      update: {},
-    });
-
-    await prisma.userRole.upsert({
-      where: {
-        userId_roleId: { userId: user.id, roleId: adminRole.id },
-      },
-      create: {
-        userId: user.id,
-        roleId: adminRole.id,
-        tenantId: tenant.id,
-      },
-      update: { tenantId: tenant.id },
-    });
+    await seedSuperAdminPermissions(prisma, tenant.id, user.id);
 
     await prisma.user.upsert({
       where: {
@@ -185,7 +206,10 @@ async function main(): Promise<void> {
     });
 
     console.log(
-      'Identity RBAC seed: SUPER_ADMIN+rbac.test on DEMO admin; viewer has no rbac.test; OTHER tenant isolated',
+      `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
+    );
+    console.log(
+      'Identity RBAC seed: SUPER_ADMIN has rbac.test and tenant/user management permissions; viewer and OTHER remain unprivileged',
     );
   } finally {
     await prisma.$disconnect();

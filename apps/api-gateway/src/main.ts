@@ -14,6 +14,10 @@ async function bootstrap(): Promise<void> {
       { path: 'auth/{*path}', method: RequestMethod.ALL },
       { path: 'rbac/test', method: RequestMethod.GET },
       { path: 'rbac/{*path}', method: RequestMethod.ALL },
+      { path: 'tenants', method: RequestMethod.ALL },
+      { path: 'tenants/{*path}', method: RequestMethod.ALL },
+      { path: 'users', method: RequestMethod.ALL },
+      { path: 'users/{*path}', method: RequestMethod.ALL },
     ],
   });
 }
