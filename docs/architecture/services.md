@@ -7,7 +7,7 @@ Public HTTP entry point on port **3000**.
 Responsibilities now:
 
 - URI versioning (`/api/v1`)
-- OpenAPI / Swagger at `/docs`
+- OpenAPI / Swagger at `/api/docs`
 - Structured logging, helmet, validation, global exception filter
 - Rate limiting
 - Health checks

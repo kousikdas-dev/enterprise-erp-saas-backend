@@ -201,18 +201,22 @@ npm run prisma:seed:identity
 
 ## Swagger / API documentation
 
-Swagger UI is enabled on the API Gateway:
+Swagger UI is enabled on the **API Gateway only**.
 
-`http://localhost:3000/docs`
+1. Start infrastructure if needed: `docker compose up -d postgres rabbitmq`
+2. Start the gateway from the repo root:
 
-OpenAPI JSON: `http://localhost:3000/docs-json`
+```bash
+npm run start:gateway
+```
 
-Domain APIs will be exposed through the gateway under `/api/v1/...`. Examples (not implemented yet):
+3. Open Swagger in a browser:
 
-- `POST /api/v1/auth/login`
-- `GET /api/v1/users`
-- `POST /api/v1/sales/orders`
-- `GET /api/v1/inventory/items`
+`http://localhost:3000/api/docs`
+
+OpenAPI JSON: `http://localhost:3000/api/docs-json`
+
+The document is API version **1**. Use **Authorize** and paste a JWT access token as `Bearer <access-token>` for future protected routes. Only currently implemented gateway routes appear as operations (health today). Identity login remains on the Identity Service (`POST http://localhost:3001/api/v1/auth/login`).
 
 ## Testing
 
