@@ -10,10 +10,10 @@ export function setupGatewaySwagger(app: INestApplication): void {
   const config = new DocumentBuilder()
     .setTitle('Enterprise ERP SaaS API')
     .setDescription(
-      'API documentation for the Enterprise ERP SaaS platform. OpenAPI covers API version 1 (`/api/v1`). Only implemented gateway routes are listed. Use Authorize with an Identity JWT access token for future protected operations.',
+      'API documentation for the Enterprise ERP SaaS platform. OpenAPI covers API version 1 (`/v1`). Only implemented gateway routes are listed. Use Authorize with an Identity JWT access token for future protected operations.',
     )
     .setVersion(`${DEFAULT_API_VERSION}.0`)
-    .addServer('/api', 'API version 1 (URI prefix /api/v1)')
+    .addServer('http://localhost:3000', 'Local API Gateway')
     .addBearerAuth(
       {
         type: 'http',
@@ -36,7 +36,9 @@ export function setupGatewaySwagger(app: INestApplication): void {
     .addTag('Accounting', 'General ledger and financial postings')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, config, {
+    ignoreGlobalPrefix: true,
+  });
 
   SwaggerModule.setup(GATEWAY_SWAGGER_PATH, app, document, {
     jsonDocumentUrl: GATEWAY_SWAGGER_JSON_PATH,

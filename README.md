@@ -163,7 +163,7 @@ Or run the compiled stack with `docker compose up --build`.
 Health:
 
 - Orchestrator: `GET http://localhost:3000/health`
-- Versioned: `GET http://localhost:3000/api/v1/health`
+- Versioned: `GET http://localhost:3000/v1/health`
 - Same pattern on ports 3001–3004
 
 ## Database migration instructions
