@@ -216,7 +216,7 @@ npm run start:gateway
 
 OpenAPI JSON: `http://localhost:3000/api/docs-json`
 
-The document is API version **1**. Login is `POST /v1/auth/login` (no JWT). Use **Authorize** with a JWT access token for future protected routes. Identity login remains available directly at `POST http://localhost:3001/api/v1/auth/login`.
+The document is API version **1**. Login is `POST /v1/auth/login` (no JWT). After login, use **Authorize** with the access token, then `GET /v1/auth/me`. Identity login remains available directly at `POST http://localhost:3001/api/v1/auth/login`.
 
 ## Testing
 

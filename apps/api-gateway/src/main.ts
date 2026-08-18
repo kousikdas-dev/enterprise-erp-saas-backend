@@ -10,7 +10,8 @@ async function bootstrap(): Promise<void> {
     globalPrefixExcludes: [
       { path: 'health', method: RequestMethod.GET },
       { path: 'auth/login', method: RequestMethod.POST },
-      { path: 'auth/{*path}', method: RequestMethod.POST },
+      { path: 'auth/me', method: RequestMethod.GET },
+      { path: 'auth/{*path}', method: RequestMethod.ALL },
     ],
   });
 }
