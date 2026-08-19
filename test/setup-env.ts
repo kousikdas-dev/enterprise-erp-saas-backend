@@ -10,6 +10,8 @@ process.env.INVENTORY_SERVICE_URL =
   process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3003';
 process.env.ACCOUNTING_SERVICE_URL =
   process.env.ACCOUNTING_SERVICE_URL ?? 'http://localhost:3004';
+process.env.PURCHASE_SERVICE_URL =
+  process.env.PURCHASE_SERVICE_URL ?? 'http://localhost:3005';
 process.env.JWT_ACCESS_SECRET =
   process.env.JWT_ACCESS_SECRET ?? 'test-access-secret-change-me';
 process.env.JWT_REFRESH_SECRET =

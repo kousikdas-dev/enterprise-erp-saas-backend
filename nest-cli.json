@@ -55,6 +55,15 @@
         "tsConfigPath": "apps/accounting-service/tsconfig.app.json"
       }
     },
+    "purchase-service": {
+      "type": "application",
+      "root": "apps/purchase-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/purchase-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/purchase-service/tsconfig.app.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",

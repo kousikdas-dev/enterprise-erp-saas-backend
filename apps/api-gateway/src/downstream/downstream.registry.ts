@@ -5,7 +5,8 @@ export type DownstreamServiceName =
   | 'identity'
   | 'sales'
   | 'inventory'
-  | 'accounting';
+  | 'accounting'
+  | 'purchase';
 
 @Injectable()
 export class DownstreamRegistry {
@@ -26,6 +27,7 @@ export class DownstreamRegistry {
       sales: this.getUrl('sales'),
       inventory: this.getUrl('inventory'),
       accounting: this.getUrl('accounting'),
+      purchase: this.getUrl('purchase'),
     };
   }
 }

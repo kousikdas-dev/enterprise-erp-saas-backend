@@ -14,14 +14,14 @@ Angular/Web Client
         v
    API Gateway
         |
-   +----+----+---------+------------+
-   |         |         |            |
-   v         v         v            v
-Identity   Sales    Inventory    Accounting
-Service    Service   Service       Service
-   |         |         |            |
-   v         v         v            v
-identity_db sales_db inventory_db accounting_db
+   +----+----+---------+------------+----------+
+   |         |         |            |          |
+   v         v         v            v          v
+Identity   Sales    Inventory    Accounting  Purchase
+Service    Service   Service       Service   Service
+   |         |         |            |          |
+   v         v         v            v          v
+identity_db sales_db inventory_db accounting_db purchase_db
 ```
 
 Synchronous calls use REST. Business events use RabbitMQ. See `docs/architecture/` for details.
@@ -33,10 +33,13 @@ flowchart TD
   Gateway --> Sales[Sales Service]
   Gateway --> Inventory[Inventory Service]
   Gateway --> Accounting[Accounting Service]
+  Gateway --> Purchase[Purchase Service]
+  Purchase -->|stock receipts| Inventory
   Identity --> IdentityDb[(identity_db)]
   Sales --> SalesDb[(sales_db)]
   Inventory --> InventoryDb[(inventory_db)]
   Accounting --> AccountingDb[(accounting_db)]
+  Purchase --> PurchaseDb[(purchase_db)]
   Identity -. events .-> Broker[RabbitMQ]
   Sales -. events .-> Broker
   Inventory -. events .-> Broker
@@ -71,8 +74,9 @@ flowchart TD
 | Sales | 3002 | `sales_db` | Orders, invoices; emits financial events |
 | Inventory | 3003 | `inventory_db` | Items, stock, warehouses |
 | Accounting | 3004 | `accounting_db` | GL, journals, trial balance, P&L, balance sheet |
+| Purchase | 3005 | `purchase_db` | Suppliers, purchase orders, goods receipts |
 
-Future services (not created yet): CRM, Purchase, Production, Reporting, Notification, Meeting, Advanced MRP, Capacity Planning, Shop Floor.
+Future services (not created yet): CRM, Production, Reporting, Notification, Meeting, Advanced MRP, Capacity Planning, Shop Floor.
 
 Shared libraries:
 
@@ -155,11 +159,14 @@ npm run start:identity
 npm run start:sales
 npm run start:inventory
 npm run start:accounting
+npm run start:purchase
 ```
 
 `npm run start:identity` listens on **3001**, even when the shared `.env` has `PORT=3000` for the gateway. Docker Compose already sets `PORT: 3001` for the identity container.
 
 `npm run start:inventory` listens on **3003** on the host for local hybrid development. In Docker Compose, Inventory still listens on **3003 inside the compose network** (`http://inventory-service:3003`) and is **not** published on the host. The browser must use Gateway `:3000` only.
+
+`npm run start:purchase` listens on **3005** on the host for local hybrid development. In Docker Compose, Purchase is internal-only (`http://purchase-service:3005`) and is **not** published on the host.
 
 Or run the compiled stack with `docker compose up --build`.
 
@@ -186,6 +193,7 @@ npm run prisma:migrate:identity
 npm run prisma:migrate:sales
 npm run prisma:migrate:inventory
 npm run prisma:migrate:accounting
+npm run prisma:migrate:purchase
 ```
 
 Production-style deploy:
@@ -194,7 +202,7 @@ Production-style deploy:
 npx prisma migrate deploy --schema=apps/identity-service/prisma/schema.prisma
 ```
 
-Repeat for the other three schemas.
+Repeat for sales, inventory, accounting, and purchase schemas.
 
 Development-only Identity seed (Demo tenant `DEMO` + `admin@demo.local`). Refuses to run when `NODE_ENV=production`. Password comes from `DEV_ADMIN_PASSWORD` (local default documented in `.env.example`):
 
@@ -238,7 +246,8 @@ Unit tests compile each application module and cover shared contracts. Integrati
 3. Sales: customers (refs), orders, invoices; `sales.invoice.posted` events
 4. Inventory: items, stock ledger, reservations
 5. Accounting: chart of accounts, balanced journals, GL, trial balance, P&L, balance sheet
-6. Later services: CRM, Purchase, Production, Reporting, Notification, Meeting, MRP, capacity, shop floor
+6. Purchase: suppliers, purchase orders, goods receipts → Inventory stock receipts
+7. Later services: CRM, Production, Reporting, Notification, Meeting, MRP, capacity, shop floor
 
 ## License
 

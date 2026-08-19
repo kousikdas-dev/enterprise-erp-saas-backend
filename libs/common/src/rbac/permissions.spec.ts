@@ -10,6 +10,9 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.PRODUCTS_CREATE).toBe('products.create');
     expect(PERMISSIONS.STOCK_ADJUST).toBe('stock.adjust');
     expect(PERMISSIONS.STOCK_MOVEMENTS_READ).toBe('stock.movements.read');
+    expect(PERMISSIONS.SUPPLIERS_CREATE).toBe('suppliers.create');
+    expect(PERMISSIONS.PURCHASE_ORDERS_CONFIRM).toBe('purchase-orders.confirm');
+    expect(PERMISSIONS.GOODS_RECEIPTS_CREATE).toBe('goods-receipts.create');
   });
 
   it('allows when all required permissions are owned', () => {

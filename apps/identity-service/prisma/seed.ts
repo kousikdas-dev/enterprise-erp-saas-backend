@@ -114,6 +114,44 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'read',
     description: 'Read stock movement history',
   },
+  { resource: 'suppliers', action: 'create', description: 'Create suppliers' },
+  { resource: 'suppliers', action: 'read', description: 'Read suppliers' },
+  { resource: 'suppliers', action: 'update', description: 'Update suppliers' },
+  {
+    resource: 'purchase-orders',
+    action: 'create',
+    description: 'Create purchase orders',
+  },
+  {
+    resource: 'purchase-orders',
+    action: 'read',
+    description: 'Read purchase orders',
+  },
+  {
+    resource: 'purchase-orders',
+    action: 'update',
+    description: 'Update purchase orders',
+  },
+  {
+    resource: 'purchase-orders',
+    action: 'confirm',
+    description: 'Confirm purchase orders',
+  },
+  {
+    resource: 'purchase-orders',
+    action: 'cancel',
+    description: 'Cancel purchase orders',
+  },
+  {
+    resource: 'goods-receipts',
+    action: 'create',
+    description: 'Create and post goods receipts',
+  },
+  {
+    resource: 'goods-receipts',
+    action: 'read',
+    description: 'Read goods receipts',
+  },
 ];
 
 async function seedSuperAdminPermissions(

@@ -30,6 +30,16 @@ export const PERMISSIONS = {
   STOCK_READ: 'stock.read',
   STOCK_ADJUST: 'stock.adjust',
   STOCK_MOVEMENTS_READ: 'stock.movements.read',
+  SUPPLIERS_CREATE: 'suppliers.create',
+  SUPPLIERS_READ: 'suppliers.read',
+  SUPPLIERS_UPDATE: 'suppliers.update',
+  PURCHASE_ORDERS_CREATE: 'purchase-orders.create',
+  PURCHASE_ORDERS_READ: 'purchase-orders.read',
+  PURCHASE_ORDERS_UPDATE: 'purchase-orders.update',
+  PURCHASE_ORDERS_CONFIRM: 'purchase-orders.confirm',
+  PURCHASE_ORDERS_CANCEL: 'purchase-orders.cancel',
+  GOODS_RECEIPTS_CREATE: 'goods-receipts.create',
+  GOODS_RECEIPTS_READ: 'goods-receipts.read',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

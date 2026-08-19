@@ -41,6 +41,9 @@ export function setupGatewaySwagger(app: INestApplication): void {
     .addTag('Stock', 'Stock balances')
     .addTag('Stock Adjustments', 'Stock quantity adjustments')
     .addTag('Stock Movements', 'Stock movement history')
+    .addTag('Suppliers', 'Purchase suppliers')
+    .addTag('Purchase Orders', 'Purchase orders')
+    .addTag('Goods Receipts', 'Goods receipts and stock posting')
     .addTag('Sales', 'Sales orders and invoices')
     .addTag('Accounting', 'General ledger and financial postings')
     .build();

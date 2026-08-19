@@ -14,6 +14,7 @@ import { DownstreamModule } from './downstream/downstream.module';
 import { AuthModule } from './auth/auth.module';
 import { IdentityAdminModule } from './identity/identity-admin.module';
 import { InventoryAdminModule } from './inventory/inventory-admin.module';
+import { PurchaseAdminModule } from './purchase/purchase-admin.module';
 import { RbacModule } from './rbac/rbac.module';
 
 @Module({
@@ -30,6 +31,7 @@ import { RbacModule } from './rbac/rbac.module';
     RbacModule,
     IdentityAdminModule,
     InventoryAdminModule,
+    PurchaseAdminModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,

@@ -36,6 +36,12 @@ async function bootstrap(): Promise<void> {
       { path: 'stock-adjustments/{*path}', method: RequestMethod.ALL },
       { path: 'stock-movements', method: RequestMethod.ALL },
       { path: 'stock-movements/{*path}', method: RequestMethod.ALL },
+      { path: 'suppliers', method: RequestMethod.ALL },
+      { path: 'suppliers/{*path}', method: RequestMethod.ALL },
+      { path: 'purchase-orders', method: RequestMethod.ALL },
+      { path: 'purchase-orders/{*path}', method: RequestMethod.ALL },
+      { path: 'goods-receipts', method: RequestMethod.ALL },
+      { path: 'goods-receipts/{*path}', method: RequestMethod.ALL },
     ],
   });
 }
