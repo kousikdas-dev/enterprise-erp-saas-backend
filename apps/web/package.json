@@ -1,0 +1,100 @@
+{
+  "name": "architectui-angular-free",
+  "version": "3.4.0",
+  "description": "Modern Angular 21 admin dashboard template with Bootstrap 5, Chart.js, and NgRx (zoneless)",
+  "keywords": [
+    "angular",
+    "angular-21",
+    "admin",
+    "dashboard",
+    "template",
+    "bootstrap",
+    "bootstrap-5",
+    "admin-template",
+    "angular-dashboard",
+    "responsive",
+    "chart.js",
+    "ngrx",
+    "typescript",
+    "free",
+    "open-source"
+  ],
+  "author": "DashboardPack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DashboardPack/architectui-angular-free.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DashboardPack/architectui-angular-free/issues"
+  },
+  "homepage": "https://dashboardpack.com",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "build:prod": "ng build --configuration production --base-href /architectui-angular-free/",
+    "test": "ng test",
+    "lint": "ng lint",
+    "e2e": "echo 'E2E testing can be added with Cypress, Playwright, or WebDriver if needed'"
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/animations": "^22.0.0",
+    "@angular/cdk": "^22.0.0",
+    "@angular/common": "^22.0.0",
+    "@angular/compiler": "^22.0.0",
+    "@angular/core": "^22.0.0",
+    "@angular/forms": "^22.0.0",
+    "@angular/localize": "^22.0.0",
+    "@angular/platform-browser": "^22.0.0",
+    "@angular/platform-browser-dynamic": "^22.0.0",
+    "@angular/router": "^22.0.0",
+    "@fortawesome/angular-fontawesome": "^5.0.0",
+    "@fortawesome/fontawesome-free": "^7.2.0",
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@ng-bootstrap/ng-bootstrap": "^20.0.0",
+    "@ngrx/store": "^21.1.0",
+    "@ngrx/store-devtools": "^21.1.0",
+    "@ngx-loading-bar/core": "^7.0.1",
+    "@ngx-loading-bar/router": "^7.0.1",
+    "@popperjs/core": "^2.11.8",
+    "animate-sass": "^0.8.2",
+    "bootstrap": "^5.3.8",
+    "chart.js": "^4.5.1",
+    "chartjs-plugin-annotation": "^3.1.0",
+    "chartjs-plugin-datalabels": "^2.2.0",
+    "lodash-es": "^4.18.1",
+    "ng2-charts": "^10.0.0",
+    "pe7-icon": "^1.0.4",
+    "rxjs": "^7.8.2",
+    "sass": "^1.100.0",
+    "tslib": "^2.8.1"
+  },
+  "overrides": {
+    "tmp": "^0.2.4",
+    "external-editor": {
+      "tmp": "^0.2.4"
+    }
+  },
+  "devDependencies": {
+    "@angular/build": "^22.0.0",
+    "@angular/cli": "^22.0.0",
+    "@angular/compiler-cli": "^22.0.0",
+    "@angular/language-service": "^22.0.0",
+    "@types/jasmine": "^6.0.0",
+    "@types/node": "^25.9.1",
+    "angular-eslint": "^22.0.0",
+    "eslint": "^10.4.1",
+    "istanbul-lib-instrument": "^6.0.3",
+    "jasmine-core": "~6.2.0",
+    "karma": "~6.4.4",
+    "karma-chrome-launcher": "~3.2.0",
+    "karma-coverage": "~2.2.1",
+    "karma-jasmine": "~5.1.0",
+    "karma-jasmine-html-reporter": "^2.2.0",
+    "ts-node": "~10.9.2",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.60.1"
+  }
+}

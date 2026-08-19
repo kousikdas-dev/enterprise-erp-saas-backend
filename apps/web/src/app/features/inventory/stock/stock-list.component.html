@@ -1,0 +1,127 @@
+<app-page-title
+  heading="Stock"
+  subheading="Warehouse stock balances"
+  icon="pe-7s-graph2"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Stock balances</div>
+    <div class="d-flex flex-wrap gap-2">
+      <select class="form-select form-select-sm" style="min-width: 180px;" [(ngModel)]="filterProductId" (ngModelChange)="load()">
+        <option value="">All products</option>
+        <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+      </select>
+      <select class="form-select form-select-sm" style="min-width: 180px;" [(ngModel)]="filterWarehouseId" (ngModelChange)="load()">
+        <option value="">All warehouses</option>
+        <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canAdjust" type="button" class="btn btn-sm btn-primary" (click)="openAdjust()">
+        Adjust Stock
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Quantities are controlled by backend stock operations. Use Adjust Stock for
+      <code>OPENING</code>, <code>ADJUSTMENT_IN</code>, or <code>ADJUSTMENT_OUT</code> only.
+      There is no direct quantity edit.
+    </p>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!items.length"
+      emptyMessage="No stock balances for the selected filters."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Warehouse</th>
+              <th class="text-end">Quantity</th>
+              <th>Updated</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of items">
+              <td>{{ productLabel(item.productId) }}</td>
+              <td>{{ warehouseLabel(item.warehouseId) }}</td>
+              <td class="text-end"><code>{{ item.quantity | qty }}</code></td>
+              <td>{{ item.updatedAt | date:'medium' }}</td>
+              <td class="text-end">
+                <button
+                  *ngIf="canAdjust"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  (click)="openAdjust(item)">
+                  Adjust
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #adjustModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Adjust Stock</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="submitAdjust()">
+    <div class="modal-body">
+      <div class="mb-3">
+        <label class="form-label" for="adjProduct">Product</label>
+        <select id="adjProduct" class="form-select" formControlName="productId">
+          <option value="">Select product…</option>
+          <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="adjWarehouse">Warehouse</label>
+        <select id="adjWarehouse" class="form-select" formControlName="warehouseId">
+          <option value="">Select warehouse…</option>
+          <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="adjType">Adjustment type</label>
+        <select id="adjType" class="form-select" formControlName="type">
+          <option *ngFor="let t of adjustmentTypes" [value]="t">{{ t }}</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="adjQty">Quantity</label>
+        <input
+          id="adjQty"
+          class="form-control"
+          formControlName="quantity"
+          placeholder="10.000000" />
+        <div class="form-text">Positive decimal string. Backend rejects negative resulting stock.</div>
+        <div class="text-danger small" *ngIf="form.controls.quantity.touched && form.controls.quantity.invalid">
+          Enter a positive decimal quantity.
+        </div>
+      </div>
+      <div class="mb-0">
+        <label class="form-label" for="adjReason">Reason</label>
+        <input id="adjReason" class="form-control" formControlName="reason" maxlength="255" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Posting…' : 'Post Adjustment' }}
+      </button>
+    </div>
+  </form>
+</ng-template>

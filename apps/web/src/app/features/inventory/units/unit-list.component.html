@@ -1,0 +1,103 @@
+<app-page-title
+  heading="Units"
+  subheading="Units of measure"
+  icon="pe-7s-calculator"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Units</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by code or name…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Unit
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No units yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.code }}</code></td>
+              <td>{{ item.name }}</td>
+              <td class="text-center">
+                <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
+                  {{ item.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              <td class="text-end">
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Unit' : 'Create Unit' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="mb-3">
+        <label class="form-label" for="unitCode">Code</label>
+        <input id="unitCode" class="form-control" formControlName="code" maxlength="32" />
+        <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+          Code is required (max 32 characters).
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="unitName">Name</label>
+        <input id="unitName" class="form-control" formControlName="name" maxlength="80" />
+        <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+          Name is required (max 80 characters).
+        </div>
+      </div>
+      <div class="form-check" *ngIf="editing">
+        <input class="form-check-input" type="checkbox" id="unitActive" formControlName="isActive" />
+        <label class="form-check-label" for="unitActive">Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>

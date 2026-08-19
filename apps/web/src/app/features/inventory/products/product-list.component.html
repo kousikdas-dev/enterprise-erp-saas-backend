@@ -1,0 +1,176 @@
+<app-page-title
+  heading="Products"
+  subheading="Inventory product catalog"
+  icon="pe-7s-box1"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Products</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 220px;"
+        placeholder="Filter by SKU or name…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Product
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No products yet. Create categories and units first, then add products."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th>Category</th>
+              <th>Unit</th>
+              <th class="text-end">Sell</th>
+              <th class="text-end">Cost</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.sku }}</code></td>
+              <td>
+                <div class="widget-heading">{{ item.name }}</div>
+                <div class="widget-subheading opacity-7" *ngIf="item.description">
+                  {{ item.description }}
+                </div>
+              </td>
+              <td>{{ categoryName(item.categoryId) }}</td>
+              <td>{{ unitLabel(item.unitOfMeasureId) }}</td>
+              <td class="text-end"><code>{{ item.sellingPrice | decimalText }}</code></td>
+              <td class="text-end"><code>{{ item.costPrice | decimalText }}</code></td>
+              <td class="text-center">
+                <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
+                  {{ item.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Product' : 'Create Product' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="prodSku">SKU</label>
+          <input id="prodSku" class="form-control" formControlName="sku" maxlength="64" />
+          <div class="text-danger small" *ngIf="form.controls.sku.touched && form.controls.sku.invalid">
+            SKU is required (max 64).
+          </div>
+        </div>
+        <div class="col-md-8 mb-3">
+          <label class="form-label" for="prodName">Name</label>
+          <input id="prodName" class="form-control" formControlName="name" maxlength="160" />
+          <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+            Name is required (max 160).
+          </div>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="prodDesc">Description</label>
+        <textarea id="prodDesc" class="form-control" rows="2" formControlName="description" maxlength="500"></textarea>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="prodCat">Category</label>
+          <select id="prodCat" class="form-select" formControlName="categoryId">
+            <option value="">Select category…</option>
+            <option *ngFor="let c of categories" [value]="c.id">{{ c.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="prodUnit">Unit of measure</label>
+          <select id="prodUnit" class="form-select" formControlName="unitOfMeasureId">
+            <option value="">Select unit…</option>
+            <option *ngFor="let u of units" [value]="u.id">{{ u.code }} — {{ u.name }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="prodSell">Selling price</label>
+          <input id="prodSell" class="form-control" formControlName="sellingPrice" placeholder="19.9900" />
+          <div class="form-text">Decimal string (as required by API).</div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="prodCost">Cost price</label>
+          <input id="prodCost" class="form-control" formControlName="costPrice" placeholder="10.0000" />
+        </div>
+      </div>
+      <div class="form-check" *ngIf="editing">
+        <input class="form-check-input" type="checkbox" id="prodActive" formControlName="isActive" />
+        <label class="form-check-label" for="prodActive">Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Product details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as p">
+    <dl class="row mb-0">
+      <dt class="col-sm-4">SKU</dt><dd class="col-sm-8"><code>{{ p.sku }}</code></dd>
+      <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ p.name }}</dd>
+      <dt class="col-sm-4">Description</dt><dd class="col-sm-8">{{ p.description || '—' }}</dd>
+      <dt class="col-sm-4">Category</dt><dd class="col-sm-8">{{ categoryName(p.categoryId) }}</dd>
+      <dt class="col-sm-4">Unit</dt><dd class="col-sm-8">{{ unitLabel(p.unitOfMeasureId) }}</dd>
+      <dt class="col-sm-4">Selling price</dt><dd class="col-sm-8"><code>{{ p.sellingPrice | decimalText }}</code></dd>
+      <dt class="col-sm-4">Cost price</dt><dd class="col-sm-8"><code>{{ p.costPrice | decimalText }}</code></dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">{{ p.isActive ? 'Active' : 'Inactive' }}</dd>
+      <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ p.updatedAt | date:'medium' }}</dd>
+    </dl>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

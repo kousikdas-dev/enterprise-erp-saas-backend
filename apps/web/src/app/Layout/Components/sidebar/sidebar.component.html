@@ -1,0 +1,396 @@
+<div [class]="'app-sidebar sidebar-shadow ' + (config$ | async)?.sidebarTheme"
+     (mouseenter)="onSidebarMouseEnter()"
+     (mouseleave)="onSidebarMouseLeave()">
+  <div class="app-header__logo">
+    <div class="logo-src">
+      <span class="logo-text">
+        <span class="logo-full">ArchitectUI</span>
+        <span class="logo-collapsed">A</span>
+      </span>
+    </div>
+  </div>
+  <div class="app-sidebar-content">
+    <div class="app-sidebar-scroll">
+      <div class="sidebar-scrollbar">
+        <div class="v-sidebar-menu vsm-default">
+          <div class="vsm-list">
+            <div class="vsm-header">ERP</div>
+
+            <!-- Dashboard -->
+            <div class="vsm-item" [class.vsm-active]="extraParameter === 'dashboardMenu'">
+              <a routerLink="/dashboard" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                <i class="vsm-icon pe-7s-rocket"></i>
+                <span class="vsm-title">Dashboard</span>
+              </a>
+            </div>
+
+            <!-- Sales -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('salesMenu')" [class.vsm-active]="extraParameter === 'salesMenu'">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('salesMenu')">
+                <i class="vsm-icon pe-7s-cart"></i>
+                <span class="vsm-title">Sales</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('salesMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/sales/customers" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Customers</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/sales/quotations" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Quotations</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/sales/proforma-invoices" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Proforma Invoices</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/sales/sales-orders" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Sales Orders</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/sales/shipments" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Shipments</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Purchase -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('purchaseMenu')" [class.vsm-active]="extraParameter === 'purchaseMenu'">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('purchaseMenu')">
+                <i class="vsm-icon pe-7s-shopbag"></i>
+                <span class="vsm-title">Purchase</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('purchaseMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/purchase/suppliers" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Suppliers</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/purchase/purchase-orders" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Purchase Orders</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/purchase/goods-receipts" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Goods Receipts</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Inventory -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('inventoryMenu')" [class.vsm-active]="extraParameter === 'inventoryMenu'">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('inventoryMenu')">
+                <i class="vsm-icon pe-7s-box1"></i>
+                <span class="vsm-title">Inventory</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('inventoryMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/inventory/products" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Products</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/inventory/categories" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Categories</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/inventory/units" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Units</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/inventory/warehouses" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Warehouses</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/inventory/stock" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Stock</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/inventory/stock-movements" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Stock Movements</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Administration -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('adminMenu')" [class.vsm-active]="extraParameter === 'adminMenu'">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('adminMenu')">
+                <i class="vsm-icon pe-7s-config"></i>
+                <span class="vsm-title">Administration</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('adminMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/admin/users" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Users</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/admin/roles" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Roles</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/admin/permissions" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Permissions</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Audit -->
+            <div class="vsm-item" [class.vsm-active]="extraParameter === 'auditMenu'">
+              <a routerLink="/audit" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                <i class="vsm-icon pe-7s-next-2"></i>
+                <span class="vsm-title">Audit Logs</span>
+              </a>
+            </div>
+
+            <div class="vsm-header">Theme Demo</div>
+
+            <!-- Dashboards (demo) -->
+            <div class="vsm-item" [class.vsm-active]="extraParameter === 'dashboardsMenu'">
+              <a routerLink="/dashboards/analytics" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                <i class="vsm-icon pe-7s-graph"></i>
+                <span class="vsm-title">Analytics Demo</span>
+              </a>
+            </div>
+
+            <!-- Documentation -->
+            <div class="vsm-item">
+              <a routerLink="/docs" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                <i class="vsm-icon pe-7s-note2"></i>
+                <span class="vsm-title">Documentation</span>
+              </a>
+            </div>
+
+            <!-- Pages -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('pagesMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('pagesMenu')">
+                <i class="vsm-icon pe-7s-browser"></i>
+                <span class="vsm-title">Pages</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('pagesMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/pages/login-boxed" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Login Boxed</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/pages/register-boxed" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Register Boxed</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/pages/forgot-password-boxed" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Forgot Password Boxed</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Elements -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('elementsMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('elementsMenu')">
+                <i class="vsm-icon pe-7s-car"></i>
+                <span class="vsm-title">Elements</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('elementsMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/elements/buttons-standard" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Standard Buttons</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/elements/dropdowns" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Dropdowns</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/elements/icons" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Icons</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/elements/cards" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Cards</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/elements/list-group" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">List Groups</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/elements/timeline" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Timeline</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Components -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('componentsMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('componentsMenu')">
+                <i class="vsm-icon pe-7s-diamond"></i>
+                <span class="vsm-title">Components</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('componentsMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/components/tabs" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Tabs</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/components/accordions" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Accordions</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/components/modals" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Modals</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/components/carousel" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Carousel</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/components/pagination" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Pagination</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/components/progress-bar" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Progress Bar</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/components/tooltips-popovers" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Tooltips & Popovers</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tables -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('tablesMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('tablesMenu')">
+                <i class="vsm-icon pe-7s-display2"></i>
+                <span class="vsm-title">Tables</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('tablesMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/tables/regular" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Regular Tables</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/tables/bootstrap" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Bootstrap Tables</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Forms -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('formsMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('formsMenu')">
+                <i class="vsm-icon pe-7s-display1"></i>
+                <span class="vsm-title">Forms</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('formsMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/forms/controls" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Form Controls</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/forms/layouts" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Form Layouts</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('chartsMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('chartsMenu')">
+                <i class="vsm-icon pe-7s-graph1"></i>
+                <span class="vsm-title">Charts</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('chartsMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/charts/chartjs" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">ChartJS</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Widgets -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('widgetsMenu')">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('widgetsMenu')">
+                <i class="vsm-icon pe-7s-plugin"></i>
+                <span class="vsm-title">Widgets</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('widgetsMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/widgets/chart-boxes-3" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Chart Boxes 3</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
