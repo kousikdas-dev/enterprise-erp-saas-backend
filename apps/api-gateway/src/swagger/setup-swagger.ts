@@ -44,7 +44,11 @@ export function setupGatewaySwagger(app: INestApplication): void {
     .addTag('Suppliers', 'Purchase suppliers')
     .addTag('Purchase Orders', 'Purchase orders')
     .addTag('Goods Receipts', 'Goods receipts and stock posting')
-    .addTag('Sales', 'Sales orders and invoices')
+    .addTag('Customers', 'Sales customers')
+    .addTag('Quotations', 'Sales quotations')
+    .addTag('Proforma Invoices', 'Sales proforma invoices')
+    .addTag('Sales Orders', 'Sales orders')
+    .addTag('Shipments', 'Sales shipments and stock posting')
     .addTag('Accounting', 'General ledger and financial postings')
     .build();
 

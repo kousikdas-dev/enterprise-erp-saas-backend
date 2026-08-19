@@ -15,6 +15,7 @@ import { AuthModule } from './auth/auth.module';
 import { IdentityAdminModule } from './identity/identity-admin.module';
 import { InventoryAdminModule } from './inventory/inventory-admin.module';
 import { PurchaseAdminModule } from './purchase/purchase-admin.module';
+import { SalesAdminModule } from './sales/sales-admin.module';
 import { RbacModule } from './rbac/rbac.module';
 
 @Module({
@@ -32,6 +33,7 @@ import { RbacModule } from './rbac/rbac.module';
     IdentityAdminModule,
     InventoryAdminModule,
     PurchaseAdminModule,
+    SalesAdminModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,

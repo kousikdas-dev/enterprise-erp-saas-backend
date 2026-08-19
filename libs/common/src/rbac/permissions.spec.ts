@@ -13,6 +13,11 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.SUPPLIERS_CREATE).toBe('suppliers.create');
     expect(PERMISSIONS.PURCHASE_ORDERS_CONFIRM).toBe('purchase-orders.confirm');
     expect(PERMISSIONS.GOODS_RECEIPTS_CREATE).toBe('goods-receipts.create');
+    expect(PERMISSIONS.CUSTOMERS_CREATE).toBe('customers.create');
+    expect(PERMISSIONS.QUOTATIONS_ACCEPT).toBe('quotations.accept');
+    expect(PERMISSIONS.PROFORMA_INVOICES_CREATE).toBe('proforma-invoices.create');
+    expect(PERMISSIONS.SALES_ORDERS_CONFIRM).toBe('sales-orders.confirm');
+    expect(PERMISSIONS.SHIPMENTS_POST).toBe('shipments.post');
   });
 
   it('allows when all required permissions are owned', () => {

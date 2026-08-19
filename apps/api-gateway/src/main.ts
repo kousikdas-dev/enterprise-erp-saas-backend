@@ -42,6 +42,16 @@ async function bootstrap(): Promise<void> {
       { path: 'purchase-orders/{*path}', method: RequestMethod.ALL },
       { path: 'goods-receipts', method: RequestMethod.ALL },
       { path: 'goods-receipts/{*path}', method: RequestMethod.ALL },
+      { path: 'customers', method: RequestMethod.ALL },
+      { path: 'customers/{*path}', method: RequestMethod.ALL },
+      { path: 'quotations', method: RequestMethod.ALL },
+      { path: 'quotations/{*path}', method: RequestMethod.ALL },
+      { path: 'proforma-invoices', method: RequestMethod.ALL },
+      { path: 'proforma-invoices/{*path}', method: RequestMethod.ALL },
+      { path: 'sales-orders', method: RequestMethod.ALL },
+      { path: 'sales-orders/{*path}', method: RequestMethod.ALL },
+      { path: 'shipments', method: RequestMethod.ALL },
+      { path: 'shipments/{*path}', method: RequestMethod.ALL },
     ],
   });
 }

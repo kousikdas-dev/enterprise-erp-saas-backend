@@ -8,15 +8,252 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Domain models are added incrementally. This service owns sales_db only.
-// Planned: Customer snapshot refs, SalesOrder, SalesInvoice.
-// Accounting postings are emitted as events; this service never writes to accounting_db.
-
-/// Infrastructure-only marker so Prisma Client can be generated before domain models exist.
-/// Not a business entity. Do not expose via API.
+/// Infrastructure-only marker. Not a business entity. Do not expose via API.
 model SchemaMeta {
   id        String   @id @default("foundation")
   appliedAt DateTime @default(now())
 
   @@map("_schema_meta")
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum ProformaSourceType {
+  QUOTATION
+  SALES_ORDER
+}
+
+enum ProformaInvoiceStatus {
+  DRAFT
+  ISSUED
+  CANCELLED
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  CONFIRMED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CANCELLED
+}
+
+enum ShipmentStatus {
+  PENDING_STOCK
+  POSTED
+}
+
+model Customer {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  code            String
+  name            String
+  email           String?
+  phone           String?
+  billingAddress  String?
+  shippingAddress String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  quotations  Quotation[]
+  salesOrders SalesOrder[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("customers")
+}
+
+model Quotation {
+  id              String          @id @default(uuid()) @db.Uuid
+  tenantId        String          @db.Uuid
+  customerId      String          @db.Uuid
+  status          QuotationStatus @default(DRAFT)
+  customerName    String
+  billingAddress  String?
+  shippingAddress String?
+  notes           String?
+  subtotal        Decimal         @db.Decimal(19, 4)
+  total           Decimal         @db.Decimal(19, 4)
+  validUntil      DateTime?
+  sentAt          DateTime?
+  acceptedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  customer   Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items      QuotationItem[]
+  salesOrder SalesOrder?
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, status])
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  quotationId  String   @db.Uuid
+  productId    String   @db.Uuid
+  productSku   String
+  productName  String
+  quantity     Decimal  @db.Decimal(19, 6)
+  unitPrice    Decimal  @db.Decimal(19, 4)
+  lineTotal    Decimal  @db.Decimal(19, 4)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([quotationId])
+  @@index([productId])
+  @@map("quotation_items")
+}
+
+model ProformaInvoice {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @db.Uuid
+  documentNumber  String
+  sourceType      ProformaSourceType
+  sourceId        String                @db.Uuid
+  status          ProformaInvoiceStatus @default(DRAFT)
+  customerId      String                @db.Uuid
+  customerName    String
+  billingAddress  String?
+  shippingAddress String?
+  notes           String?
+  subtotal        Decimal               @db.Decimal(19, 4)
+  total           Decimal               @db.Decimal(19, 4)
+  issuedAt        DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  items ProformaInvoiceItem[]
+
+  @@unique([tenantId, documentNumber])
+  @@index([tenantId])
+  @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, status])
+  @@map("proforma_invoices")
+}
+
+model ProformaInvoiceItem {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @db.Uuid
+  proformaInvoiceId String   @db.Uuid
+  productId         String   @db.Uuid
+  productSku        String
+  productName       String
+  quantity          Decimal  @db.Decimal(19, 6)
+  unitPrice         Decimal  @db.Decimal(19, 4)
+  lineTotal         Decimal  @db.Decimal(19, 4)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proformaInvoice ProformaInvoice @relation(fields: [proformaInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([proformaInvoiceId])
+  @@index([productId])
+  @@map("proforma_invoice_items")
+}
+
+model SalesOrder {
+  id              String           @id @default(uuid()) @db.Uuid
+  tenantId        String           @db.Uuid
+  customerId      String           @db.Uuid
+  quotationId     String?          @unique @db.Uuid
+  status          SalesOrderStatus @default(DRAFT)
+  customerName    String
+  billingAddress  String?
+  shippingAddress String?
+  notes           String?
+  subtotal        Decimal          @db.Decimal(19, 4)
+  total           Decimal          @db.Decimal(19, 4)
+  confirmedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  customer  Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  quotation Quotation?       @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  items     SalesOrderItem[]
+  shipments Shipment[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, status])
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  salesOrderId    String   @db.Uuid
+  productId       String   @db.Uuid
+  productSku      String
+  productName     String
+  quantity        Decimal  @db.Decimal(19, 6)
+  unitPrice       Decimal  @db.Decimal(19, 4)
+  lineTotal       Decimal  @db.Decimal(19, 4)
+  shippedQuantity Decimal  @default(0) @db.Decimal(19, 6)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  salesOrder    SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  shipmentItems ShipmentItem[]
+
+  @@index([tenantId])
+  @@index([salesOrderId])
+  @@index([productId])
+  @@map("sales_order_items")
+}
+
+model Shipment {
+  id           String         @id @default(uuid()) @db.Uuid
+  tenantId     String         @db.Uuid
+  salesOrderId String         @db.Uuid
+  warehouseId  String         @db.Uuid
+  status       ShipmentStatus @default(PENDING_STOCK)
+  shippedAt    DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
+  items      ShipmentItem[]
+
+  @@index([tenantId])
+  @@index([salesOrderId])
+  @@index([tenantId, status])
+  @@map("shipments")
+}
+
+model ShipmentItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  shipmentId       String   @db.Uuid
+  salesOrderItemId String   @db.Uuid
+  productId        String   @db.Uuid
+  productSku       String
+  productName      String
+  quantity         Decimal  @db.Decimal(19, 6)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  shipment       Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@index([salesOrderItemId])
+  @@index([productId])
+  @@map("shipment_items")
 }

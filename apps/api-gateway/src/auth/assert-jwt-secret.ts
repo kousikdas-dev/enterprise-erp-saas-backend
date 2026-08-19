@@ -1,5 +1,6 @@
 const INSECURE_JWT_SECRETS = new Set([
   'replace-with-a-long-random-access-secret',
+  'change-me-use-a-unique-jwt-access-secret-min-32-chars',
   'test-access-secret-change-me',
 ]);
 

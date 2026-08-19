@@ -62,7 +62,7 @@ export class StockReceiptsService {
     const lines = dto.lines.map((line) => ({
       productId: line.productId,
       quantity: parsePositiveDecimal(line.quantity),
-      quantityText: String(line.quantity).trim(),
+      quantityText: quantityToString(parsePositiveDecimal(line.quantity)),
     }));
     for (const line of lines) {
       const product = await this.prisma.product.findFirst({

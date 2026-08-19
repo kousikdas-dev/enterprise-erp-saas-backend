@@ -5,12 +5,18 @@ describe('assertJwtSecretForEnvironment', () => {
     expect(() =>
       assertJwtSecretForEnvironment(
         'development',
-        'replace-with-a-long-random-access-secret',
+        'change-me-use-a-unique-jwt-access-secret-min-32-chars',
       ),
     ).not.toThrow();
   });
 
   it('rejects insecure placeholder secrets in production', () => {
+    expect(() =>
+      assertJwtSecretForEnvironment(
+        'production',
+        'change-me-use-a-unique-jwt-access-secret-min-32-chars',
+      ),
+    ).toThrow(/production/);
     expect(() =>
       assertJwtSecretForEnvironment(
         'production',
@@ -23,5 +29,14 @@ describe('assertJwtSecretForEnvironment', () => {
     expect(() =>
       assertJwtSecretForEnvironment('production', 'short-secret'),
     ).toThrow(/production/);
+  });
+
+  it('allows a unique long secret in production', () => {
+    expect(() =>
+      assertJwtSecretForEnvironment(
+        'production',
+        'local-dev-only-unique-jwt-access-secret-value-48',
+      ),
+    ).not.toThrow();
   });
 });

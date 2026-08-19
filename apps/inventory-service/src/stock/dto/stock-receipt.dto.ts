@@ -8,6 +8,7 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
+import { parsePositiveDecimal, quantityToString } from '../../common/decimal';
 
 export class StockReceiptLineDto {
   @IsUUID()
@@ -34,6 +35,9 @@ export class CreateStockReceiptDto {
   lines!: StockReceiptLineDto[];
 }
 
+/**
+ * Canonical hash: quantities normalized to 6dp so "10" === "10.000000".
+ */
 export function stockReceiptPayloadHash(input: {
   warehouseId: string;
   lines: Array<{ productId: string; quantity: string }>;
@@ -43,7 +47,7 @@ export function stockReceiptPayloadHash(input: {
     lines: [...input.lines]
       .map((line) => ({
         productId: line.productId,
-        quantity: String(line.quantity).trim(),
+        quantity: quantityToString(parsePositiveDecimal(line.quantity)),
       }))
       .sort((a, b) => a.productId.localeCompare(b.productId)),
   };

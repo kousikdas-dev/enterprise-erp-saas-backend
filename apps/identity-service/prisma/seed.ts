@@ -152,6 +152,78 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'read',
     description: 'Read goods receipts',
   },
+  { resource: 'customers', action: 'create', description: 'Create customers' },
+  { resource: 'customers', action: 'read', description: 'Read customers' },
+  { resource: 'customers', action: 'update', description: 'Update customers' },
+  {
+    resource: 'quotations',
+    action: 'create',
+    description: 'Create quotations',
+  },
+  { resource: 'quotations', action: 'read', description: 'Read quotations' },
+  {
+    resource: 'quotations',
+    action: 'update',
+    description: 'Update quotations',
+  },
+  { resource: 'quotations', action: 'send', description: 'Send quotations' },
+  {
+    resource: 'quotations',
+    action: 'accept',
+    description: 'Accept quotations',
+  },
+  {
+    resource: 'quotations',
+    action: 'reject',
+    description: 'Reject quotations',
+  },
+  {
+    resource: 'quotations',
+    action: 'cancel',
+    description: 'Cancel quotations',
+  },
+  {
+    resource: 'proforma-invoices',
+    action: 'create',
+    description: 'Create proforma invoices',
+  },
+  {
+    resource: 'proforma-invoices',
+    action: 'read',
+    description: 'Read proforma invoices',
+  },
+  {
+    resource: 'sales-orders',
+    action: 'create',
+    description: 'Create sales orders',
+  },
+  {
+    resource: 'sales-orders',
+    action: 'read',
+    description: 'Read sales orders',
+  },
+  {
+    resource: 'sales-orders',
+    action: 'update',
+    description: 'Update sales orders',
+  },
+  {
+    resource: 'sales-orders',
+    action: 'confirm',
+    description: 'Confirm sales orders',
+  },
+  {
+    resource: 'sales-orders',
+    action: 'cancel',
+    description: 'Cancel sales orders',
+  },
+  { resource: 'shipments', action: 'create', description: 'Create shipments' },
+  { resource: 'shipments', action: 'read', description: 'Read shipments' },
+  {
+    resource: 'shipments',
+    action: 'post',
+    description: 'Post shipments to inventory',
+  },
 ];
 
 async function seedSuperAdminPermissions(
@@ -317,7 +389,7 @@ async function main(): Promise<void> {
       `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
     );
     console.log(
-      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, and Inventory V1 permissions; viewer and OTHER remain unprivileged',
+      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, Inventory V1, Purchase V1, and Sales V1 permissions; viewer and OTHER remain unprivileged',
     );
   } finally {
     await prisma.$disconnect();

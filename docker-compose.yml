@@ -79,14 +79,21 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp}:${POSTGRES_PASSWORD:-erp_local_only}@postgres:5432/sales_db?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
       RABBITMQ_QUEUE: sales.events
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      INVENTORY_SERVICE_URL: http://inventory-service:3003
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
       LOG_LEVEL: info
-    ports:
-      - "3002:3002"
+    # Internal only. Gateway reaches this at http://sales-service:3002.
+    # Do not publish 3002 on the host.
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      identity-service:
+        condition: service_started
+      inventory-service:
+        condition: service_started
 
   inventory-service:
     build:

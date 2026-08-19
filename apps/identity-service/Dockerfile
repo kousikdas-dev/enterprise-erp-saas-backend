@@ -2,7 +2,7 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 FROM node:22-alpine AS build
 WORKDIR /app
@@ -15,7 +15,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 COPY apps/identity-service/prisma ./apps/identity-service/prisma
 RUN npx prisma generate --schema=apps/identity-service/prisma/schema.prisma
 COPY --from=build /app/dist/apps/identity-service ./dist/apps/identity-service
