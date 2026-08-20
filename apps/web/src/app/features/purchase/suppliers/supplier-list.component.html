@@ -1,0 +1,131 @@
+<app-page-title
+  heading="Suppliers"
+  subheading="Purchase suppliers"
+  icon="pe-7s-id"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Suppliers</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Supplier
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No suppliers yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Address</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.code }}</code></td>
+              <td>{{ item.name }}</td>
+              <td class="text-muted">{{ item.address || '—' }}</td>
+              <td class="text-center">
+                <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
+                  {{ item.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Supplier' : 'Create Supplier' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="mb-3">
+        <label class="form-label" for="supCode">Code</label>
+        <input id="supCode" class="form-control" formControlName="code" maxlength="32" />
+        <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+          Code is required (max 32 characters).
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="supName">Name</label>
+        <input id="supName" class="form-control" formControlName="name" maxlength="160" />
+        <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+          Name is required (max 160 characters).
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="supAddress">Address</label>
+        <input id="supAddress" class="form-control" formControlName="address" maxlength="255" />
+      </div>
+      <div class="form-check" *ngIf="editing">
+        <input class="form-check-input" type="checkbox" id="supActive" formControlName="isActive" />
+        <label class="form-check-label" for="supActive">Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Supplier details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as s">
+    <dl class="row mb-0">
+      <dt class="col-sm-4">Code</dt><dd class="col-sm-8"><code>{{ s.code }}</code></dd>
+      <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ s.name }}</dd>
+      <dt class="col-sm-4">Address</dt><dd class="col-sm-8">{{ s.address || '—' }}</dd>
+      <dt class="col-sm-4">Status</dt><dd class="col-sm-8">{{ s.isActive ? 'Active' : 'Inactive' }}</dd>
+      <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ s.updatedAt | date:'medium' }}</dd>
+    </dl>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
