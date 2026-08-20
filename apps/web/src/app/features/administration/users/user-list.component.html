@@ -1,0 +1,207 @@
+<app-page-title
+  heading="Users"
+  subheading="Tenant users"
+  icon="pe-7s-user"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Users</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by name, email, status…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create User
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No users yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ fullName(item) }}</td>
+              <td class="text-muted">{{ item.email }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canChangeStatus"
+                  type="button"
+                  class="btn btn-sm"
+                  [class.btn-outline-danger]="item.status === 'ACTIVE'"
+                  [class.btn-outline-success]="item.status !== 'ACTIVE'"
+                  [disabled]="statusBusyId === item.id"
+                  (click)="toggleStatus(item)">
+                  {{ statusBusyId === item.id ? 'Working…' : (item.status === 'ACTIVE' ? 'Deactivate' : 'Activate') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit User' : 'Create User' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="mb-3">
+        <label class="form-label" for="userEmail">Email</label>
+        <input id="userEmail" type="email" class="form-control" formControlName="email" />
+        <div class="text-danger small" *ngIf="form.controls.email.touched && form.controls.email.invalid">
+          A valid email is required.
+        </div>
+      </div>
+      <div class="mb-3" *ngIf="!editing">
+        <label class="form-label" for="userPassword">Password</label>
+        <input id="userPassword" type="password" class="form-control" formControlName="password" />
+        <div class="text-danger small" *ngIf="form.controls.password.touched && form.controls.password.invalid">
+          Password must be 8–128 characters.
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="userFirstName">First name</label>
+          <input id="userFirstName" class="form-control" formControlName="firstName" maxlength="80" />
+          <div class="text-danger small" *ngIf="form.controls.firstName.touched && form.controls.firstName.invalid">
+            First name is required.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="userLastName">Last name</label>
+          <input id="userLastName" class="form-control" formControlName="lastName" maxlength="80" />
+          <div class="text-danger small" *ngIf="form.controls.lastName.touched && form.controls.lastName.invalid">
+            Last name is required.
+          </div>
+        </div>
+      </div>
+      <div class="mb-3" *ngIf="!editing">
+        <label class="form-label" for="userStatus">Initial status</label>
+        <select id="userStatus" class="form-select" formControlName="status">
+          <option value="ACTIVE">Active</option>
+          <option value="INVITED">Invited</option>
+          <option value="INACTIVE">Inactive</option>
+          <option value="LOCKED">Locked</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">User details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as u">
+    <dl class="row mb-3">
+      <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ fullName(u) }}</dd>
+      <dt class="col-sm-4">Email</dt><dd class="col-sm-8">{{ u.email }}</dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="statusBadgeClass(u.status)">{{ u.status }}</span>
+      </dd>
+      <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ u.updatedAt | date:'medium' }}</dd>
+    </dl>
+
+    <hr />
+
+    <h6>Roles</h6>
+    <p class="text-muted small">
+      The API only supports assigning and removing roles, not listing a user's current
+      assignments — so this shows roles assigned or removed during this session only.
+    </p>
+
+    <ul class="list-group mb-3" *ngIf="viewingRoles.length; else noSessionRoles">
+      <li
+        class="list-group-item d-flex justify-content-between align-items-center"
+        *ngFor="let role of viewingRoles">
+        {{ role.roleName }}
+        <button
+          *ngIf="canManageRoles"
+          type="button"
+          class="btn btn-sm btn-outline-danger"
+          [disabled]="roleActionBusy"
+          (click)="removeRole(role)">
+          Remove
+        </button>
+      </li>
+    </ul>
+    <ng-template #noSessionRoles>
+      <p class="text-muted small fst-italic">No roles assigned in this session.</p>
+    </ng-template>
+
+    <div class="d-flex gap-2" *ngIf="canManageRoles">
+      <select class="form-select form-select-sm" [(ngModel)]="assignRoleId">
+        <option value="">Select role to assign…</option>
+        <option *ngFor="let r of assignableRoles" [value]="r.id">{{ r.name }}</option>
+      </select>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary text-nowrap"
+        [disabled]="!assignRoleId || roleActionBusy"
+        (click)="assignRole()">
+        Assign
+      </button>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button
+      *ngIf="canChangeStatus && viewing"
+      type="button"
+      class="btn me-auto"
+      [class.btn-outline-danger]="viewing.status === 'ACTIVE'"
+      [class.btn-outline-success]="viewing.status !== 'ACTIVE'"
+      [disabled]="statusBusyId === viewing.id"
+      (click)="toggleStatus(viewing)">
+      {{ statusBusyId === viewing.id ? 'Working…' : (viewing.status === 'ACTIVE' ? 'Deactivate' : 'Activate') }}
+    </button>
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

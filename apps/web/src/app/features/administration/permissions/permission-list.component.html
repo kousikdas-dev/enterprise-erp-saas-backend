@@ -1,0 +1,80 @@
+<app-page-title
+  heading="Permissions"
+  subheading="Permission catalog"
+  icon="pe-7s-key"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Permission Catalog</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 220px;"
+        placeholder="Filter by resource, action, key…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Read-only global catalog. Permissions are assigned to roles from the Roles page.
+    </p>
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No permissions found."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Resource</th>
+              <th>Action</th>
+              <th>Description</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.key }}</code></td>
+              <td>{{ item.resource }}</td>
+              <td>{{ item.action }}</td>
+              <td class="text-muted">{{ item.description || '—' }}</td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary" (click)="openDetail(item)">
+                  View
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Permission details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as p">
+    <dl class="row mb-0">
+      <dt class="col-sm-4">Key</dt><dd class="col-sm-8"><code>{{ p.key }}</code></dd>
+      <dt class="col-sm-4">Resource</dt><dd class="col-sm-8">{{ p.resource }}</dd>
+      <dt class="col-sm-4">Action</dt><dd class="col-sm-8">{{ p.action }}</dd>
+      <dt class="col-sm-4">Description</dt><dd class="col-sm-8">{{ p.description || '—' }}</dd>
+    </dl>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

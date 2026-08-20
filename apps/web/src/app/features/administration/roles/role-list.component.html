@@ -1,0 +1,153 @@
+<app-page-title
+  heading="Roles"
+  subheading="Tenant roles"
+  icon="pe-7s-config"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Roles</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by name, description…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Role
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No roles yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Description</th>
+              <th class="text-center">Permissions</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ item.name }}</td>
+              <td class="text-muted">{{ item.description || '—' }}</td>
+              <td class="text-center">
+                <span class="badge bg-secondary">{{ item.permissions.length }}</span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Role' : 'Create Role' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="mb-3">
+        <label class="form-label" for="roleName">Name</label>
+        <input id="roleName" class="form-control" formControlName="name" maxlength="80" />
+        <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+          Name is required (max 80 characters).
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="roleDescription">Description</label>
+        <textarea id="roleDescription" class="form-control" formControlName="description" maxlength="255" rows="3"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Role details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as r">
+    <dl class="row mb-3">
+      <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ r.name }}</dd>
+      <dt class="col-sm-4">Description</dt><dd class="col-sm-8">{{ r.description || '—' }}</dd>
+      <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ r.updatedAt | date:'medium' }}</dd>
+    </dl>
+
+    <hr />
+
+    <h6>Permissions</h6>
+    <ul class="list-group mb-3" *ngIf="r.permissions.length; else noPermissions">
+      <li
+        class="list-group-item d-flex justify-content-between align-items-center"
+        *ngFor="let permission of r.permissions">
+        <div>
+          <code>{{ permission.key }}</code>
+          <div class="text-muted small" *ngIf="permission.description">{{ permission.description }}</div>
+        </div>
+        <button
+          *ngIf="canManagePermissions"
+          type="button"
+          class="btn btn-sm btn-outline-danger"
+          [disabled]="permissionActionBusy"
+          (click)="removePermission(permission)">
+          Remove
+        </button>
+      </li>
+    </ul>
+    <ng-template #noPermissions>
+      <p class="text-muted small fst-italic">No permissions assigned.</p>
+    </ng-template>
+
+    <div class="d-flex gap-2" *ngIf="canManagePermissions">
+      <select class="form-select form-select-sm" [(ngModel)]="assignPermissionId">
+        <option value="">Select permission to assign…</option>
+        <option *ngFor="let p of assignablePermissions" [value]="p.id">{{ p.key }}</option>
+      </select>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary text-nowrap"
+        [disabled]="!assignPermissionId || permissionActionBusy"
+        (click)="assignPermission()">
+        Assign
+      </button>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
