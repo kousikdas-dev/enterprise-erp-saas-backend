@@ -1,0 +1,155 @@
+<app-page-title
+  heading="Customers"
+  subheading="Sales customers"
+  icon="pe-7s-users"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Customers</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by code, name, email, phone…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Customer
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No customers yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.code }}</code></td>
+              <td>{{ item.name }}</td>
+              <td class="text-muted">{{ item.email || '—' }}</td>
+              <td class="text-muted">{{ item.phone || '—' }}</td>
+              <td class="text-center">
+                <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
+                  {{ item.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Customer' : 'Create Customer' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custCode">Code</label>
+          <input id="custCode" class="form-control" formControlName="code" maxlength="32" />
+          <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+            Code is required (max 32 characters).
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custName">Name</label>
+          <input id="custName" class="form-control" formControlName="name" maxlength="160" />
+          <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+            Name is required (max 160 characters).
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custEmail">Email</label>
+          <input id="custEmail" type="email" class="form-control" formControlName="email" maxlength="255" />
+          <div class="text-danger small" *ngIf="form.controls.email.touched && form.controls.email.invalid">
+            Enter a valid email.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custPhone">Phone</label>
+          <input id="custPhone" class="form-control" formControlName="phone" maxlength="64" />
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="custBilling">Billing address</label>
+        <textarea id="custBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="custShipping">Shipping address</label>
+        <textarea id="custShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
+      </div>
+      <div class="form-check" *ngIf="editing">
+        <input class="form-check-input" type="checkbox" id="custActive" formControlName="isActive" />
+        <label class="form-check-label" for="custActive">Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Customer details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as c">
+    <dl class="row mb-0">
+      <dt class="col-sm-4">Code</dt><dd class="col-sm-8"><code>{{ c.code }}</code></dd>
+      <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ c.name }}</dd>
+      <dt class="col-sm-4">Email</dt><dd class="col-sm-8">{{ c.email || '—' }}</dd>
+      <dt class="col-sm-4">Phone</dt><dd class="col-sm-8">{{ c.phone || '—' }}</dd>
+      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ c.billingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ c.shippingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Status</dt><dd class="col-sm-8">{{ c.isActive ? 'Active' : 'Inactive' }}</dd>
+      <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ c.updatedAt | date:'medium' }}</dd>
+    </dl>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

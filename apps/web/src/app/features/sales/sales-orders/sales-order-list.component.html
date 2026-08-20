@@ -1,0 +1,270 @@
+<app-page-title
+  heading="Sales Orders"
+  subheading="Confirmed sales orders"
+  icon="pe-7s-cart"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Sales Orders</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by status, customer…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Sales Order
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No sales orders yet."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Customer</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Total</th>
+              <th>Notes</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td>{{ item.customerName }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-end"><code>{{ item.total }}</code></td>
+              <td class="text-muted">{{ item.notes || '—' }}</td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canEditOrder(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canConfirmOrder(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  (click)="askConfirm(item)">
+                  Confirm
+                </button>
+                <button
+                  *ngIf="canCancelOrder(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-danger me-1"
+                  (click)="askCancel(item)">
+                  Cancel
+                </button>
+                <button
+                  *ngIf="canCreateProformaFor(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-info"
+                  (click)="askProforma(item)">
+                  Proforma
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Sales Order' : 'Create Sales Order' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="soCustomer">Customer</label>
+          <select id="soCustomer" class="form-select" formControlName="customerId">
+            <option value="">Select customer…</option>
+            <option *ngFor="let c of customers" [value]="c.id">{{ c.code }} — {{ c.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="soNotes">Notes</label>
+          <input id="soNotes" class="form-control" formControlName="notes" maxlength="500" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="soBilling">Billing address</label>
+          <textarea id="soBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="soShipping">Shipping address</label>
+          <textarea id="soShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Order lines</h6>
+        <button type="button" class="btn btn-sm btn-outline-primary" (click)="addLine()">Add line</button>
+      </div>
+
+      <div class="table-responsive" formArrayName="items">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="min-width: 220px;">Product</th>
+              <th style="min-width: 120px;">Quantity</th>
+              <th style="min-width: 120px;">Unit price</th>
+              <th class="text-end">Line total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+              <td>
+                <select class="form-select form-select-sm" formControlName="productId">
+                  <option value="">Select product…</option>
+                  <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+                </select>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="quantity" placeholder="10.000000" />
+                <div class="text-danger small" *ngIf="line.get('quantity')?.touched && line.get('quantity')?.invalid">
+                  Max 6 decimal places.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="unitPrice" placeholder="25.0000" />
+                <div class="text-danger small" *ngIf="line.get('unitPrice')?.touched && line.get('unitPrice')?.invalid">
+                  Max 4 decimal places.
+                </div>
+              </td>
+              <td class="text-end">
+                <code>{{ lineTotal(line.value.quantity, line.value.unitPrice) }}</code>
+              </td>
+              <td class="text-end">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  (click)="removeLine(i)"
+                  [disabled]="lines.length <= 1">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">Line totals are display-only. Backend validates quantities and prices.</div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Sales order details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as o">
+    <dl class="row">
+      <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>{{ o.id }}</code></dd>
+      <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ o.customerName }}</dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="statusBadgeClass(o.status)">{{ o.status }}</span>
+      </dd>
+      <dt class="col-sm-4" *ngIf="o.quotationId">From quotation</dt>
+      <dd class="col-sm-8" *ngIf="o.quotationId"><code>{{ o.quotationId | slice:0:8 }}…</code></dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ o.notes || '—' }}</dd>
+      <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ o.subtotal }}</code></dd>
+      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ o.total }}</code></dd>
+    </dl>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th class="text-end">Ordered</th>
+            <th class="text-end">Shipped</th>
+            <th class="text-end">Remaining</th>
+            <th class="text-end">Unit price</th>
+            <th class="text-end">Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of o.items">
+            <td>{{ line.productSku }} — {{ line.productName }}</td>
+            <td class="text-end"><code>{{ line.orderedQuantity }}</code></td>
+            <td class="text-end"><code>{{ line.shippedQuantity }}</code></td>
+            <td class="text-end"><code>{{ line.remainingQuantity }}</code></td>
+            <td class="text-end"><code>{{ line.unitPrice }}</code></td>
+            <td class="text-end"><code>{{ line.lineTotal }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
+
+<ng-template #confirmModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      {{ pendingAction?.type === 'confirm' ? 'Confirm sales order' : pendingAction?.type === 'cancel' ? 'Cancel sales order' : 'Create proforma invoice' }}
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="pendingAction as action">
+    <p class="mb-0" *ngIf="action.type === 'confirm'">
+      Confirm order <code>{{ action.order.id | slice:0:8 }}…</code>? It will move from DRAFT to CONFIRMED.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'cancel'">
+      Cancel order <code>{{ action.order.id | slice:0:8 }}…</code>? Only allowed when the backend permits it.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'proforma'">
+      Create a proforma invoice from order <code>{{ action.order.id | slice:0:8 }}…</code>?
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Back</button>
+    <button
+      type="button"
+      class="btn"
+      [class.btn-success]="pendingAction?.type === 'confirm'"
+      [class.btn-danger]="pendingAction?.type === 'cancel'"
+      [class.btn-info]="pendingAction?.type === 'proforma'"
+      [disabled]="actionBusy"
+      (click)="runPendingAction(modal)">
+      {{ actionBusy ? 'Working…' : 'Confirm' }}
+    </button>
+  </div>
+</ng-template>

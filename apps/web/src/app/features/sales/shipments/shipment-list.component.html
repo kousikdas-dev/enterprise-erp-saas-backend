@@ -1,0 +1,213 @@
+<app-page-title
+  heading="Shipments"
+  subheading="Stock posting shipments"
+  icon="pe-7s-box2"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Shipments</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Shipment
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Flow: Sales Order → Shipment → <code>PENDING_STOCK</code> → Inventory →
+      <code>POSTED</code> (stock decreases with a SALE movement). Retry posting via the backend
+      <code>/post</code> action when inventory was temporarily unavailable.
+    </p>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No shipments yet."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Shipment</th>
+              <th>Sales order</th>
+              <th>Warehouse</th>
+              <th class="text-center">Status</th>
+              <th class="text-center">Lines</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td>{{ orderLabel(item.salesOrderId) }}</td>
+              <td>{{ warehouseLabel(item.warehouseId) }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-center">{{ item.items?.length || 0 }}</td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canPost && item.status === 'PENDING_STOCK'"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning"
+                  [disabled]="postingId === item.id"
+                  (click)="postShipment(item)">
+                  {{ postingId === item.id ? 'Posting…' : 'Retry post' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Create Shipment</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-7 mb-3">
+          <label class="form-label" for="shPo">Sales order</label>
+          <select
+            id="shPo"
+            class="form-select"
+            formControlName="salesOrderId"
+            (change)="onSalesOrderChange(form.controls.salesOrderId.value || '')">
+            <option value="">Select shippable order…</option>
+            <option *ngFor="let o of shippableOrders" [value]="o.id">
+              {{ o.id | slice:0:8 }}… — {{ o.status }} — {{ o.customerName }}
+            </option>
+          </select>
+          <div class="form-text">Only CONFIRMED or PARTIALLY_SHIPPED orders are listed.</div>
+        </div>
+        <div class="col-md-5 mb-3">
+          <label class="form-label" for="shWh">Warehouse</label>
+          <select id="shWh" class="form-select" formControlName="warehouseId">
+            <option value="">Select warehouse…</option>
+            <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+          </select>
+        </div>
+      </div>
+
+      <div *ngIf="selectedOrder as order" class="mb-2">
+        <div class="small text-muted mb-2">
+          Customer: {{ order.customerName }} · Status:
+          <span class="badge bg-primary">{{ order.status }}</span>
+        </div>
+        <div class="table-responsive" formArrayName="items">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Ship</th>
+                <th>Product</th>
+                <th class="text-end">Ordered</th>
+                <th class="text-end">Already shipped</th>
+                <th class="text-end">Remaining</th>
+                <th style="min-width: 130px;">This shipment qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+                <td>
+                  <input class="form-check-input" type="checkbox" formControlName="include" />
+                </td>
+                <td>{{ lineProduct(line.value.salesOrderItemId)?.productSku }} — {{ lineProduct(line.value.salesOrderItemId)?.productName }}</td>
+                <td class="text-end">
+                  <code>{{ lineProduct(line.value.salesOrderItemId)?.orderedQuantity }}</code>
+                </td>
+                <td class="text-end">
+                  <code>{{ lineProduct(line.value.salesOrderItemId)?.shippedQuantity }}</code>
+                </td>
+                <td class="text-end"><code>{{ line.value.maxRemaining }}</code></td>
+                <td>
+                  <input class="form-control form-control-sm" formControlName="quantity" />
+                  <div class="text-danger small" *ngIf="line.get('quantity')?.touched && line.get('quantity')?.invalid">
+                    Max 6 decimal places.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="form-text" *ngIf="lines.length === 0">
+          No remaining quantity on this sales order.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid || lines.length === 0">
+        {{ saving ? 'Creating…' : 'Create shipment' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Shipment details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as s">
+    <div class="alert alert-warning" *ngIf="s.status === 'PENDING_STOCK'">
+      Inventory posting is pending. You can retry posting this shipment.
+    </div>
+    <dl class="row">
+      <dt class="col-sm-4">Shipment ID</dt><dd class="col-sm-8"><code>{{ s.id }}</code></dd>
+      <dt class="col-sm-4">Sales order</dt><dd class="col-sm-8">{{ orderLabel(s.salesOrderId) }}</dd>
+      <dt class="col-sm-4">Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(s.warehouseId) }}</dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="statusBadgeClass(s.status)">{{ s.status }}</span>
+      </dd>
+    </dl>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th class="text-end">Quantity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of s.items">
+            <td>{{ line.productSku }} — {{ line.productName }}</td>
+            <td class="text-end"><code>{{ line.quantity }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button
+      *ngIf="canPost && viewing?.status === 'PENDING_STOCK'"
+      type="button"
+      class="btn btn-warning me-auto"
+      [disabled]="postingId === viewing?.id"
+      (click)="viewing && postShipment(viewing)">
+      {{ postingId === viewing?.id ? 'Posting…' : 'Retry post' }}
+    </button>
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

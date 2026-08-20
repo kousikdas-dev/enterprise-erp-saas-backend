@@ -1,0 +1,280 @@
+<app-page-title
+  heading="Quotations"
+  subheading="Sales quotations"
+  icon="pe-7s-note2"
+  [showActions]="false">
+</app-page-title>
+
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Quotations</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by status, customer…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Quotation
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No quotations yet."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Customer</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Total</th>
+              <th>Notes</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td>{{ item.customerName }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-end"><code>{{ item.total }}</code></td>
+              <td class="text-muted">{{ item.notes || '—' }}</td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canEditQuotation(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canSendQuotation(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="askAction('send', item)">
+                  Send
+                </button>
+                <button
+                  *ngIf="canAcceptQuotation(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  (click)="askAction('accept', item)">
+                  Accept
+                </button>
+                <button
+                  *ngIf="canRejectQuotation(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-danger me-1"
+                  (click)="askAction('reject', item)">
+                  Reject
+                </button>
+                <button
+                  *ngIf="canCancelQuotation(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-dark me-1"
+                  (click)="askAction('cancel', item)">
+                  Cancel
+                </button>
+                <button
+                  *ngIf="canCreateProformaFor(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-info me-1"
+                  (click)="askAction('proforma', item)">
+                  Proforma
+                </button>
+                <button
+                  *ngIf="canConvertQuotation(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success"
+                  (click)="askAction('convert', item)">
+                  Convert to Order
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Quotation' : 'Create Quotation' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="quoCustomer">Customer</label>
+          <select id="quoCustomer" class="form-select" formControlName="customerId">
+            <option value="">Select customer…</option>
+            <option *ngFor="let c of customers" [value]="c.id">{{ c.code }} — {{ c.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="quoValidUntil">Valid until</label>
+          <input id="quoValidUntil" type="date" class="form-control" formControlName="validUntil" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="quoBilling">Billing address</label>
+          <textarea id="quoBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="quoShipping">Shipping address</label>
+          <textarea id="quoShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="quoNotes">Notes</label>
+        <input id="quoNotes" class="form-control" formControlName="notes" maxlength="500" />
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Lines</h6>
+        <button type="button" class="btn btn-sm btn-outline-primary" (click)="addLine()">Add line</button>
+      </div>
+
+      <div class="table-responsive" formArrayName="items">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="min-width: 220px;">Product</th>
+              <th style="min-width: 120px;">Quantity</th>
+              <th style="min-width: 120px;">Unit price</th>
+              <th class="text-end">Line total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+              <td>
+                <select class="form-select form-select-sm" formControlName="productId">
+                  <option value="">Select product…</option>
+                  <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+                </select>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="quantity" placeholder="10.000000" />
+                <div class="text-danger small" *ngIf="line.get('quantity')?.touched && line.get('quantity')?.invalid">
+                  Max 6 decimal places.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="unitPrice" placeholder="25.0000" />
+                <div class="text-danger small" *ngIf="line.get('unitPrice')?.touched && line.get('unitPrice')?.invalid">
+                  Max 4 decimal places.
+                </div>
+              </td>
+              <td class="text-end">
+                <code>{{ lineTotal(line.value.quantity, line.value.unitPrice) }}</code>
+              </td>
+              <td class="text-end">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  (click)="removeLine(i)"
+                  [disabled]="lines.length <= 1">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">Line totals are display-only. Backend validates quantities and prices.</div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Quotation details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as q">
+    <dl class="row">
+      <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>{{ q.id }}</code></dd>
+      <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ q.customerName }}</dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="statusBadgeClass(q.status)">{{ q.status }}</span>
+      </dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ q.notes || '—' }}</dd>
+      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ q.billingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ q.shippingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ q.subtotal }}</code></dd>
+      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ q.total }}</code></dd>
+    </dl>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th class="text-end">Quantity</th>
+            <th class="text-end">Unit price</th>
+            <th class="text-end">Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of q.items">
+            <td>{{ line.productSku }} — {{ line.productName }}</td>
+            <td class="text-end"><code>{{ line.quantity }}</code></td>
+            <td class="text-end"><code>{{ line.unitPrice }}</code></td>
+            <td class="text-end"><code>{{ line.lineTotal }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
+
+<ng-template #actionModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ pendingAction ? actionLabel(pendingAction.type) : '' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="pendingAction as action">
+    <p class="mb-0">
+      {{ actionLabel(action.type) }} for quotation <code>{{ action.quotation.id | slice:0:8 }}…</code>?
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Back</button>
+    <button
+      type="button"
+      class="btn btn-primary"
+      [disabled]="actionBusy"
+      (click)="runPendingAction(modal)">
+      {{ actionBusy ? 'Working…' : 'Confirm' }}
+    </button>
+  </div>
+</ng-template>
