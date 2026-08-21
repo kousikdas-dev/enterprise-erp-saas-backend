@@ -39,6 +39,7 @@ import { MessagesBoxComponent } from './Layout/Components/header/elements/messag
 
 import { SidebarComponent } from './Layout/Components/sidebar/sidebar.component';
 import { LogoComponent } from './Layout/Components/sidebar/elements/logo/logo.component';
+import { TopNavigationComponent } from './Layout/Components/top-navigation/top-navigation.component';
 
 import { FooterComponent } from './Layout/Components/footer/footer.component';
 
@@ -58,6 +59,7 @@ import { ToastContainerComponent } from './shared/toast/toast-container.componen
     MessagesBoxComponent,
     SidebarComponent,
     LogoComponent,
+    TopNavigationComponent,
     FooterComponent,
   ],
   imports: [

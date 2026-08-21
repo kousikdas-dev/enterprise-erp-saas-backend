@@ -1,0 +1,131 @@
+// Sits directly below the fixed app-header (header height is 60px, see
+// $app-header-height in assets/layout/_layout-variables.scss).
+.app-top-navigation {
+  position: relative;
+  z-index: 9;
+  margin-top: 60px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+}
+
+.top-nav-primary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.top-nav-item {
+  position: relative;
+}
+
+.top-nav-link {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .9rem 1.25rem;
+  color: #495057;
+  text-decoration: none;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color .15s ease, background-color .15s ease;
+
+  &:hover {
+    color: var(--bs-primary, #1b55e2);
+    background-color: rgba(27, 85, 226, .06);
+  }
+
+  &.active {
+    color: var(--bs-primary, #1b55e2);
+  }
+}
+
+.top-nav-item.active > .top-nav-link {
+  color: var(--bs-primary, #1b55e2);
+}
+
+.top-nav-item.open > .top-nav-link {
+  background-color: rgba(27, 85, 226, .06);
+}
+
+.top-nav-arrow {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform .2s ease;
+}
+
+.top-nav-item.open .top-nav-arrow {
+  transform: rotate(180deg);
+}
+
+.top-nav-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: .5rem 0;
+  background-color: #f8f9fa;
+  border-top: 1px solid rgba(0, 0, 0, .06);
+}
+
+.top-nav-subitem {
+  margin: 0 .25rem;
+}
+
+.top-nav-sublink {
+  display: block;
+  padding: .4rem .9rem;
+  border-radius: 4px;
+  color: #6c757d;
+  text-decoration: none;
+  font-size: .875rem;
+  white-space: nowrap;
+  transition: color .15s ease, background-color .15s ease;
+
+  &:hover {
+    color: var(--bs-primary, #1b55e2);
+    background-color: rgba(27, 85, 226, .08);
+  }
+
+  &.active {
+    color: var(--bs-primary, #1b55e2);
+    background-color: rgba(27, 85, 226, .12);
+    font-weight: 600;
+  }
+}
+
+// Responsive: below ~992px collapse each row into a horizontally
+// scrollable strip instead of wrapping, so the nav stays usable on
+// tablets/phones without hiding any menu entries behind a toggle.
+@media (max-width: 991px) {
+  .top-nav-primary,
+  .top-nav-secondary {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .top-nav-link {
+    padding: .75rem 1rem;
+  }
+
+  .top-nav-sublink {
+    padding: .35rem .75rem;
+  }
+}
+
+@media (max-width: 575px) {
+  .top-nav-link {
+    padding: .65rem .75rem;
+    font-size: .9rem;
+  }
+}

@@ -1,0 +1,32 @@
+<nav class="app-top-navigation">
+  <ul class="top-nav-primary">
+    @for (item of items; track item.id) {
+      <li class="top-nav-item"
+          [class.active]="activeModule === item.id"
+          [class.open]="openModule === item.id">
+        @if (item.route) {
+          <a [routerLink]="item.route" routerLinkActive="active" class="top-nav-link">
+            {{ item.label }}
+          </a>
+        } @else {
+          <a href="javascript:void(0);" class="top-nav-link" (click)="onItemClick(item)">
+            {{ item.label }}
+            <i class="top-nav-arrow"></i>
+          </a>
+        }
+      </li>
+    }
+  </ul>
+
+  @if (openItem?.children; as children) {
+    <ul class="top-nav-secondary">
+      @for (child of children; track child.route) {
+        <li class="top-nav-subitem">
+          <a [routerLink]="child.route" routerLinkActive="active" class="top-nav-sublink">
+            {{ child.label }}
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</nav>
