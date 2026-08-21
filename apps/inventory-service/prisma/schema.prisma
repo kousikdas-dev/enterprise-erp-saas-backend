@@ -51,7 +51,8 @@ model UnitOfMeasure {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  products Product[]
+  products     Product[]
+  productUnits ProductUnit[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -94,12 +95,35 @@ model Product {
   unitOfMeasure UnitOfMeasure @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
   stocks        Stock[]
   movements     StockMovement[]
+  productUnits  ProductUnit[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
   @@index([categoryId])
   @@index([unitOfMeasureId])
   @@map("products")
+}
+
+model ProductUnit {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  productId        String   @db.Uuid
+  unitOfMeasureId  String   @db.Uuid
+  conversionFactor Decimal  @db.Decimal(19, 6)
+  sellingPrice     Decimal  @db.Decimal(19, 4)
+  costPrice        Decimal  @db.Decimal(19, 4)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitOfMeasure UnitOfMeasure @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, productId, unitOfMeasureId])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([unitOfMeasureId])
+  @@map("product_units")
 }
 
 model Stock {
