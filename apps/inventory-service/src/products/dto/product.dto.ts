@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -7,6 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { ProductType } from '../../../generated/prisma-client';
 
 export class CreateProductDto {
   @IsString()
@@ -37,6 +39,24 @@ export class CreateProductDto {
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   costPrice!: string;
+
+  @IsOptional()
+  @IsEnum(ProductType)
+  productType?: ProductType;
+
+  @IsOptional()
+  @IsBoolean()
+  trackInventory?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }
 
 export class UpdateProductDto {
@@ -82,4 +102,22 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsEnum(ProductType)
+  productType?: ProductType;
+
+  @IsOptional()
+  @IsBoolean()
+  trackInventory?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }

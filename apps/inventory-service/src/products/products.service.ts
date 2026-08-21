@@ -38,6 +38,10 @@ export class ProductsService {
           unitOfMeasureId: dto.unitOfMeasureId,
           sellingPrice: parseMoney(dto.sellingPrice),
           costPrice: parseMoney(dto.costPrice),
+          productType: dto.productType,
+          trackInventory: dto.trackInventory,
+          barcode: dto.barcode?.trim() || null,
+          note: dto.note?.trim() || null,
         },
       });
       await this.audit.record({
@@ -90,6 +94,11 @@ export class ProductsService {
       data.sellingPrice = parseMoney(dto.sellingPrice);
     if (dto.costPrice !== undefined) data.costPrice = parseMoney(dto.costPrice);
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.productType !== undefined) data.productType = dto.productType;
+    if (dto.trackInventory !== undefined)
+      data.trackInventory = dto.trackInventory;
+    if (dto.barcode !== undefined) data.barcode = dto.barcode.trim() || null;
+    if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No fields to update');
     }

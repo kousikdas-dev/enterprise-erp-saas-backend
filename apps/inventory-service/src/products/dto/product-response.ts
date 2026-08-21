@@ -13,6 +13,10 @@ export function toProductResponse(row: Product) {
     sellingPrice: moneyToString(row.sellingPrice),
     costPrice: moneyToString(row.costPrice),
     isActive: row.isActive,
+    productType: row.productType,
+    trackInventory: row.trackInventory,
+    barcode: row.barcode,
+    note: row.note,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
