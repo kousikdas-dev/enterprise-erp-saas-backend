@@ -87,6 +87,18 @@
   }
 }
 
+.app-page-title.app-page-title-compact {
+  padding: ($grid-gutter-width / 2);
+  margin: (-($grid-gutter-width / 2)) (-($grid-gutter-width / 2)) ($grid-gutter-width / 2);
+
+  .page-title-icon {
+    width: 48px;
+    height: 48px;
+    font-size: 1.5rem;
+    margin-right: ($grid-gutter-width / 1.5);
+  }
+}
+
 .page-title-icon-rounded {
   .page-title-icon {
     @include border-radius(50px);

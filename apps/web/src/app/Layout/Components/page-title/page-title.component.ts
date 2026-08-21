@@ -18,4 +18,5 @@ export class PageTitleComponent {
   @Input() subheading: string = '';
   @Input() icon: string = '';
   @Input() showActions = true;
+  @Input() compact = false;
 }
