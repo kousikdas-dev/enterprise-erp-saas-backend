@@ -6,6 +6,7 @@ import { InventoryAuditModule } from './audit/inventory-audit.module';
 import { CategoriesModule } from './categories/categories.module';
 import { InventoryEnvironmentVariables } from './config/inventory-env';
 import { PrismaModule } from './prisma/prisma.module';
+import { ProductUnitsModule } from './product-units/product-units.module';
 import { ProductsModule } from './products/products.module';
 import { StockModule } from './stock/stock.module';
 import { UnitsModule } from './units/units.module';
@@ -26,6 +27,7 @@ import { WarehousesModule } from './warehouses/warehouses.module';
     UnitsModule,
     WarehousesModule,
     ProductsModule,
+    ProductUnitsModule,
     StockModule,
     MessagingModule.register(),
   ],
