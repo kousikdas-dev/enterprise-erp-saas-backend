@@ -3,9 +3,13 @@ import { Observable } from 'rxjs';
 import { ApiClient } from '../../../core/api/api-client.service';
 import {
   CreateProductRequest,
+  CreateProductUnitRequest,
   ItemList,
   Product,
+  ProductUnit,
+  RemoveProductUnitResult,
   UpdateProductRequest,
+  UpdateProductUnitRequest,
 } from '../models/inventory.models';
 
 @Injectable({ providedIn: 'root' })
@@ -26,5 +30,41 @@ export class ProductService {
 
   update(id: string, body: UpdateProductRequest): Observable<Product> {
     return this.api.patch<Product>(`/v1/products/${id}`, body);
+  }
+
+  listUnits(productId: string): Observable<ItemList<ProductUnit>> {
+    return this.api.get<ItemList<ProductUnit>>(
+      `/v1/products/${productId}/units`,
+    );
+  }
+
+  createUnit(
+    productId: string,
+    body: CreateProductUnitRequest,
+  ): Observable<ProductUnit> {
+    return this.api.post<ProductUnit>(
+      `/v1/products/${productId}/units`,
+      body,
+    );
+  }
+
+  updateUnit(
+    productId: string,
+    unitId: string,
+    body: UpdateProductUnitRequest,
+  ): Observable<ProductUnit> {
+    return this.api.patch<ProductUnit>(
+      `/v1/products/${productId}/units/${unitId}`,
+      body,
+    );
+  }
+
+  deleteUnit(
+    productId: string,
+    unitId: string,
+  ): Observable<RemoveProductUnitResult> {
+    return this.api.delete<RemoveProductUnitResult>(
+      `/v1/products/${productId}/units/${unitId}`,
+    );
   }
 }

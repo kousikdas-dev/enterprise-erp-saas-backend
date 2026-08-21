@@ -1,5 +1,13 @@
 /** Matches Gateway inventory DTO shapes — do not invent fields. */
 
+export type ProductType = 'GOODS' | 'SERVICE' | 'COMBO';
+
+export const PRODUCT_TYPES: readonly ProductType[] = [
+  'GOODS',
+  'SERVICE',
+  'COMBO',
+] as const;
+
 export interface Product {
   id: string;
   tenantId: string;
@@ -11,6 +19,10 @@ export interface Product {
   sellingPrice: string;
   costPrice: string;
   isActive: boolean;
+  productType: ProductType;
+  trackInventory: boolean;
+  barcode: string | null;
+  note: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +35,10 @@ export interface CreateProductRequest {
   unitOfMeasureId: string;
   sellingPrice: string;
   costPrice: string;
+  productType?: ProductType;
+  trackInventory?: boolean;
+  barcode?: string;
+  note?: string;
 }
 
 export interface UpdateProductRequest {
@@ -34,6 +50,45 @@ export interface UpdateProductRequest {
   sellingPrice?: string;
   costPrice?: string;
   isActive?: boolean;
+  productType?: ProductType;
+  trackInventory?: boolean;
+  barcode?: string;
+  note?: string;
+}
+
+export interface ProductUnit {
+  id: string;
+  tenantId: string;
+  productId: string;
+  unitOfMeasureId: string;
+  conversionFactor: string;
+  sellingPrice: string;
+  costPrice: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProductUnitRequest {
+  unitOfMeasureId: string;
+  conversionFactor: string;
+  sellingPrice: string;
+  costPrice: string;
+  isActive?: boolean;
+}
+
+export interface UpdateProductUnitRequest {
+  unitOfMeasureId?: string;
+  conversionFactor?: string;
+  sellingPrice?: string;
+  costPrice?: string;
+  isActive?: boolean;
+}
+
+export interface RemoveProductUnitResult {
+  productId: string;
+  id: string;
+  removed: boolean;
 }
 
 export interface Category {

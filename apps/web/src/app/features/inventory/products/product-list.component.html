@@ -1,10 +1,3 @@
-<app-page-title
-  heading="Products"
-  subheading="Inventory product catalog"
-  icon="pe-7s-box1"
-  [showActions]="false">
-</app-page-title>
-
 <div class="main-card mb-3 card">
   <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
     <div class="card-header-title">Products</div>
@@ -13,7 +6,7 @@
         type="search"
         class="form-control form-control-sm"
         style="min-width: 220px;"
-        placeholder="Filter by SKU or name…"
+        placeholder="Filter by SKU, name, description, barcode or note…"
         [(ngModel)]="filter" />
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
@@ -39,8 +32,10 @@
               <th>Name</th>
               <th>Category</th>
               <th>Unit</th>
+              <th>Type</th>
               <th class="text-end">Sell</th>
               <th class="text-end">Cost</th>
+              <th class="text-center">Tracked</th>
               <th class="text-center">Status</th>
               <th class="text-end">Actions</th>
             </tr>
@@ -56,8 +51,15 @@
               </td>
               <td>{{ categoryName(item.categoryId) }}</td>
               <td>{{ unitLabel(item.unitOfMeasureId) }}</td>
+              <td>
+                <span class="badge bg-light text-dark border">{{ productTypeLabel(item.productType) }}</span>
+              </td>
               <td class="text-end"><code>{{ item.sellingPrice | decimalText }}</code></td>
               <td class="text-end"><code>{{ item.costPrice | decimalText }}</code></td>
+              <td class="text-center">
+                <i class="pe-7s-check text-success" *ngIf="item.trackInventory" title="Inventory tracked"></i>
+                <i class="pe-7s-close text-muted" *ngIf="!item.trackInventory" title="Inventory not tracked"></i>
+              </td>
               <td class="text-center">
                 <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
                   {{ item.isActive ? 'Active' : 'Inactive' }}
@@ -90,6 +92,7 @@
   </div>
   <form [formGroup]="form" (ngSubmit)="save()">
     <div class="modal-body">
+      <h6 class="mb-2">Basic Information</h6>
       <div class="row">
         <div class="col-md-4 mb-3">
           <label class="form-label" for="prodSku">SKU</label>
@@ -106,10 +109,26 @@
           </div>
         </div>
       </div>
-      <div class="mb-3">
-        <label class="form-label" for="prodDesc">Description</label>
-        <textarea id="prodDesc" class="form-control" rows="2" formControlName="description" maxlength="500"></textarea>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="prodType">Product Type</label>
+          <select id="prodType" class="form-select" formControlName="productType">
+            <option *ngFor="let t of productTypes" [value]="t">{{ productTypeLabels[t] }}</option>
+          </select>
+          <div class="text-danger small" *ngIf="form.controls.productType.touched && form.controls.productType.invalid">
+            Product type is required.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="prodBarcode">Barcode</label>
+          <input id="prodBarcode" class="form-control" formControlName="barcode" maxlength="128" />
+          <div class="text-danger small" *ngIf="form.controls.barcode.touched && form.controls.barcode.invalid">
+            Barcode must be 128 characters or fewer.
+          </div>
+        </div>
       </div>
+
+      <h6 class="mb-2 mt-3">Classification</h6>
       <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="prodCat">Category</label>
@@ -119,13 +138,82 @@
           </select>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="prodUnit">Unit of measure</label>
+          <label class="form-label" for="prodUnit">Base Unit</label>
           <select id="prodUnit" class="form-select" formControlName="unitOfMeasureId">
             <option value="">Select unit…</option>
             <option *ngFor="let u of units" [value]="u.id">{{ u.code }} — {{ u.name }}</option>
           </select>
+          <div class="form-text">The primary unit this product is stocked and priced in.</div>
         </div>
       </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-2 mt-3">
+        <div>
+          <h6 class="mb-0">Additional Units</h6>
+          <div class="form-text mb-0">
+            Optional unit variants (e.g. Box, Pallet) with their own conversion factor and prices — distinct from the Base Unit above.
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-primary" (click)="addUnitRow()">
+          + Add Unit
+        </button>
+      </div>
+      <div class="text-muted small mb-2" *ngIf="loadingUnits">Loading additional units…</div>
+      <div class="table-responsive mb-3" *ngIf="additionalUnits.length" formArrayName="additionalUnits">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="min-width: 180px;">Unit</th>
+              <th style="min-width: 110px;">Conversion Factor</th>
+              <th style="min-width: 110px;">Selling Price</th>
+              <th style="min-width: 110px;">Cost Price</th>
+              <th class="text-center">Active</th>
+              <th class="text-end">Remove</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of additionalUnits.controls; let i = index" [formGroupName]="i">
+              <td>
+                <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                  <option value="">Select unit…</option>
+                  <option *ngFor="let u of availableUnitsForRow(i)" [value]="u.id">{{ u.code }} — {{ u.name }}</option>
+                </select>
+                <div class="text-danger small" *ngIf="row.get('unitOfMeasureId')?.touched && row.get('unitOfMeasureId')?.invalid">
+                  Required.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="conversionFactor" placeholder="10" />
+                <div class="text-danger small" *ngIf="row.get('conversionFactor')?.touched && row.get('conversionFactor')?.invalid">
+                  Required, &gt; 0.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="sellingPrice" placeholder="500.0000" />
+                <div class="text-danger small" *ngIf="row.get('sellingPrice')?.touched && row.get('sellingPrice')?.invalid">
+                  Required.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="costPrice" placeholder="400.0000" />
+                <div class="text-danger small" *ngIf="row.get('costPrice')?.touched && row.get('costPrice')?.invalid">
+                  Required.
+                </div>
+              </td>
+              <td class="text-center">
+                <input class="form-check-input" type="checkbox" formControlName="isActive" />
+              </td>
+              <td class="text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeUnitRow(i)">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h6 class="mb-2 mt-3">Pricing</h6>
       <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="prodSell">Selling price</label>
@@ -137,9 +225,30 @@
           <input id="prodCost" class="form-control" formControlName="costPrice" placeholder="10.0000" />
         </div>
       </div>
-      <div class="form-check" *ngIf="editing">
-        <input class="form-check-input" type="checkbox" id="prodActive" formControlName="isActive" />
-        <label class="form-check-label" for="prodActive">Active</label>
+
+      <h6 class="mb-2 mt-3">Inventory</h6>
+      <div class="mb-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="prodTrackInventory" formControlName="trackInventory" />
+          <label class="form-check-label" for="prodTrackInventory">Track Inventory</label>
+        </div>
+        <div class="form-check" *ngIf="editing">
+          <input class="form-check-input" type="checkbox" id="prodActive" formControlName="isActive" />
+          <label class="form-check-label" for="prodActive">Active</label>
+        </div>
+      </div>
+
+      <h6 class="mb-2 mt-3">Additional Information</h6>
+      <div class="mb-3">
+        <label class="form-label" for="prodDesc">Description</label>
+        <textarea id="prodDesc" class="form-control" rows="2" formControlName="description" maxlength="500"></textarea>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="prodNote">Note</label>
+        <textarea id="prodNote" class="form-control" rows="2" formControlName="note" maxlength="1000"></textarea>
+        <div class="text-danger small" *ngIf="form.controls.note.touched && form.controls.note.invalid">
+          Note must be 1000 characters or fewer.
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -160,15 +269,51 @@
     <dl class="row mb-0">
       <dt class="col-sm-4">SKU</dt><dd class="col-sm-8"><code>{{ p.sku }}</code></dd>
       <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ p.name }}</dd>
+      <dt class="col-sm-4">Product Type</dt><dd class="col-sm-8">{{ productTypeLabel(p.productType) }}</dd>
+      <dt class="col-sm-4">Barcode</dt><dd class="col-sm-8">{{ p.barcode || '—' }}</dd>
       <dt class="col-sm-4">Description</dt><dd class="col-sm-8">{{ p.description || '—' }}</dd>
       <dt class="col-sm-4">Category</dt><dd class="col-sm-8">{{ categoryName(p.categoryId) }}</dd>
-      <dt class="col-sm-4">Unit</dt><dd class="col-sm-8">{{ unitLabel(p.unitOfMeasureId) }}</dd>
+      <dt class="col-sm-4">Base Unit</dt><dd class="col-sm-8">{{ unitLabel(p.unitOfMeasureId) }}</dd>
       <dt class="col-sm-4">Selling price</dt><dd class="col-sm-8"><code>{{ p.sellingPrice | decimalText }}</code></dd>
       <dt class="col-sm-4">Cost price</dt><dd class="col-sm-8"><code>{{ p.costPrice | decimalText }}</code></dd>
+      <dt class="col-sm-4">Track Inventory</dt><dd class="col-sm-8">{{ p.trackInventory ? 'Yes' : 'No' }}</dd>
       <dt class="col-sm-4">Status</dt>
       <dd class="col-sm-8">{{ p.isActive ? 'Active' : 'Inactive' }}</dd>
+      <dt class="col-sm-4">Note</dt><dd class="col-sm-8">{{ p.note || '—' }}</dd>
       <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ p.updatedAt | date:'medium' }}</dd>
     </dl>
+
+    <h6 class="mb-2 mt-3">Additional Units</h6>
+    <div class="text-muted small" *ngIf="viewingUnitsLoading">Loading additional units…</div>
+    <div class="text-muted small" *ngIf="!viewingUnitsLoading && !viewingUnits.length">
+      No additional units configured.
+    </div>
+    <div class="table-responsive" *ngIf="!viewingUnitsLoading && viewingUnits.length">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Unit</th>
+            <th class="text-end">Conversion</th>
+            <th class="text-end">Sell</th>
+            <th class="text-end">Cost</th>
+            <th class="text-center">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let u of viewingUnits">
+            <td>{{ unitLabel(u.unitOfMeasureId) }}</td>
+            <td class="text-end"><code>{{ u.conversionFactor | decimalText }}</code></td>
+            <td class="text-end"><code>{{ u.sellingPrice | decimalText }}</code></td>
+            <td class="text-end"><code>{{ u.costPrice | decimalText }}</code></td>
+            <td class="text-center">
+              <span class="badge" [class.bg-success]="u.isActive" [class.bg-secondary]="!u.isActive">
+                {{ u.isActive ? 'Active' : 'Inactive' }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
   <div class="modal-footer">
     <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
