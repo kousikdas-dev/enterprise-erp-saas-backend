@@ -120,10 +120,10 @@ $search-box-size: 42px;
   }
 
   &.active {
-    width: 330px;
+    width: 230px;
 
     .input-holder {
-      width: 290px;
+      width: 200px;
       border-radius: 50px;
       background: rgba(0, 0, 0, 0.05);
       transition: all .5s cubic-bezier(0.000, 0.105, 0.035, 1.570);
@@ -146,7 +146,7 @@ $search-box-size: 42px;
     }
 
     .btn-close {
-      left: 300px;
+      left: 210px;
       opacity: .6 !important;
       // transform: rotate(45deg);
       transition: all .6s cubic-bezier(0.000, 0.105, 0.035, 1.570);
