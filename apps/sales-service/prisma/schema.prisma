@@ -8,13 +8,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Infrastructure-only marker. Not a business entity. Do not expose via API.
-model SchemaMeta {
-  id        String   @id @default("foundation")
-  appliedAt DateTime @default(now())
-
-  @@map("_schema_meta")
-}
 
 enum QuotationStatus {
   DRAFT
@@ -131,17 +124,17 @@ model Quotation {
 }
 
 model QuotationItem {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String   @db.Uuid
-  quotationId  String   @db.Uuid
-  productId    String   @db.Uuid
-  productSku   String
-  productName  String
-  quantity     Decimal  @db.Decimal(19, 6)
-  unitPrice    Decimal  @db.Decimal(19, 4)
-  lineTotal    Decimal  @db.Decimal(19, 4)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  quotationId String   @db.Uuid
+  productId   String   @db.Uuid
+  productSku  String
+  productName String
+  quantity    Decimal  @db.Decimal(19, 6)
+  unitPrice   Decimal  @db.Decimal(19, 4)
+  lineTotal   Decimal  @db.Decimal(19, 4)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
 
