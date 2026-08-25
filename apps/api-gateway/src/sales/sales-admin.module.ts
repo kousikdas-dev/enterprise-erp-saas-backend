@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
+import { CustomerAddressesController } from './customer-addresses.controller';
 import { CustomersController } from './customers.controller';
 import { ProformaInvoicesController } from './proforma-invoices.controller';
 import { QuotationsController } from './quotations.controller';
@@ -20,6 +21,7 @@ import { ShipmentsController } from './shipments.controller';
   ],
   controllers: [
     CustomersController,
+    CustomerAddressesController,
     QuotationsController,
     ProformaInvoicesController,
     SalesOrdersController,

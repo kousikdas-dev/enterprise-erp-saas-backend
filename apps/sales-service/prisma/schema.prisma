@@ -49,6 +49,11 @@ enum ShipmentStatus {
   POSTED
 }
 
+enum CustomerAddressType {
+  BILLING
+  SHIPPING
+}
+
 model Customer {
   id              String   @id @default(uuid()) @db.Uuid
   tenantId        String   @db.Uuid
@@ -64,10 +69,37 @@ model Customer {
 
   quotations  Quotation[]
   salesOrders SalesOrder[]
+  addresses   CustomerAddress[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@map("customers")
+}
+
+model CustomerAddress {
+  id           String              @id @default(uuid()) @db.Uuid
+  tenantId     String              @db.Uuid
+  customerId   String              @db.Uuid
+  type         CustomerAddressType
+  name         String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String?
+  postalCode   String?
+  country      String
+  phone        String?
+  isDefault    Boolean             @default(false)
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, customerId, type])
+  @@map("customer_addresses")
 }
 
 model Quotation {
