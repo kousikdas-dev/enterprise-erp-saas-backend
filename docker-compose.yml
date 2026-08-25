@@ -183,6 +183,30 @@ services:
       inventory-service:
         condition: service_started
 
+  master-data-service:
+    build:
+      context: .
+      dockerfile: apps/master-data-service/Dockerfile
+    container_name: erp-master-data
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: master-data-service
+      NODE_ENV: production
+      PORT: 3006
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp}:${POSTGRES_PASSWORD:-erp_local_only}@postgres:5432/master_data_db?schema=public
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
+      RABBITMQ_QUEUE: master-data.events
+      LOG_LEVEL: info
+    # Internal only. Gateway reaches this at http://master-data-service:3006.
+    # Do not publish 3006 on the host.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   api-gateway:
     build:
       context: .
@@ -200,6 +224,7 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:3003
       ACCOUNTING_SERVICE_URL: http://accounting-service:3004
       PURCHASE_SERVICE_URL: http://purchase-service:3005
+      MASTER_DATA_SERVICE_URL: http://master-data-service:3006
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
       LOG_LEVEL: info
     ports:
@@ -210,6 +235,7 @@ services:
       - inventory-service
       - accounting-service
       - purchase-service
+      - master-data-service
 
 volumes:
   postgres_data:
