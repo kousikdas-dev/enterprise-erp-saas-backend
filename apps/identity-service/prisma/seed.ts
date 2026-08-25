@@ -114,6 +114,69 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'read',
     description: 'Read stock movement history',
   },
+  {
+  resource: 'payment-terms',
+  action: 'create',
+  description: 'Create payment terms',
+  },
+  {
+    resource: 'payment-terms',
+    action: 'read',
+    description: 'Read payment terms',
+  },
+  {
+    resource: 'payment-terms',
+    action: 'update',
+    description: 'Update payment terms',
+  },
+
+  {
+    resource: 'payment-methods',
+    action: 'create',
+    description: 'Create payment methods',
+  },
+  {
+    resource: 'payment-methods',
+    action: 'read',
+    description: 'Read payment methods',
+  },
+  {
+    resource: 'payment-methods',
+    action: 'update',
+    description: 'Update payment methods',
+  },
+
+  {
+    resource: 'fiscal-positions',
+    action: 'create',
+    description: 'Create fiscal positions',
+  },
+  {
+    resource: 'fiscal-positions',
+    action: 'read',
+    description: 'Read fiscal positions',
+  },
+  {
+    resource: 'fiscal-positions',
+    action: 'update',
+    description: 'Update fiscal positions',
+  },
+
+  {
+    resource: 'industries',
+    action: 'create',
+    description: 'Create industries',
+  },
+  {
+    resource: 'industries',
+    action: 'read',
+    description: 'Read industries',
+  },
+  {
+    resource: 'industries',
+    action: 'update',
+    description: 'Update industries',
+  },
   { resource: 'suppliers', action: 'create', description: 'Create suppliers' },
   { resource: 'suppliers', action: 'read', description: 'Read suppliers' },
   { resource: 'suppliers', action: 'update', description: 'Update suppliers' },

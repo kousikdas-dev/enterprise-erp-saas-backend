@@ -8,4 +8,5 @@ export const SERVICE_PORTS = {
   inventory: 3003,
   accounting: 3004,
   purchase: 3005,
+  masterData: 3006,
 } as const;
