@@ -30,6 +30,7 @@ import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import {
   CreateCustomerAddressDto,
+  CustomerAddressDeleteDto,
   CustomerAddressDto,
   CustomerAddressListDto,
   UpdateCustomerAddressDto,
@@ -127,15 +128,15 @@ export class CustomerAddressesController {
     description:
       'Removes an address from a JWT-tenant customer. Permission: customers.update.',
   })
-  @ApiOkResponse({ type: CustomerAddressDto })
+  @ApiOkResponse({ type: CustomerAddressDeleteDto })
   @ApiManagementErrors()
   remove(
     @CurrentUser() user: AuthenticatedUser,
     @Param('customerId', ParseUUIDPipe) customerId: string,
     @Param('addressId', ParseUUIDPipe) addressId: string,
     @Req() request: Request,
-  ): Promise<CustomerAddressDto> {
-    return this.sales.forward<CustomerAddressDto>({
+  ): Promise<CustomerAddressDeleteDto> {
+    return this.sales.forward<CustomerAddressDeleteDto>({
       method: 'DELETE',
       path: `/api/v1/customers/${customerId}/addresses/${addressId}`,
       user,

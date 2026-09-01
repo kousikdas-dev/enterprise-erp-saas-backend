@@ -13,10 +13,24 @@ describe('CustomersService', () => {
       tenantId: actor.tenantId,
       code: 'ACME',
       name: 'Acme',
+      company: null,
       email: null,
       phone: null,
-      billingAddress: null,
-      shippingAddress: null,
+      jobPosition: null,
+      website: null,
+      tags: [],
+      gstin: null,
+      salespersonId: null,
+      paymentTermId: null,
+      paymentMethodId: null,
+      fiscalPositionId: null,
+      industryId: null,
+      street: null,
+      street2: null,
+      city: null,
+      zip: null,
+      state: null,
+      country: null,
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -64,8 +78,11 @@ describe('CustomersService', () => {
     await expect(service.getById(actor, 'c1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    expect(prisma.customer.findFirst).toHaveBeenCalledWith({
-      where: { id: 'c1', tenantId: actor.tenantId },
-    });
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'c1', tenantId: actor.tenantId },
+        include: expect.objectContaining({ addresses: expect.any(Object) }),
+      }),
+    );
   });
 });

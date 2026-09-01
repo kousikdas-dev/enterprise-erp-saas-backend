@@ -15,8 +15,8 @@ import {
 export class UserService {
   constructor(private readonly api: ApiClient) {}
 
-  list(): Observable<ItemList<User>> {
-    return this.api.get<ItemList<User>>('/v1/users');
+  list(params?: { role?: string }): Observable<ItemList<User>> {
+    return this.api.get<ItemList<User>>('/v1/users', params);
   }
 
   getById(id: string): Observable<User> {

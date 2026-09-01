@@ -157,6 +157,35 @@ describe('UsersService', () => {
     expect(result.items[0]).not.toHaveProperty('passwordHash');
   });
 
+  it('filters the tenant user list by role name, case-insensitively', async () => {
+    const { service, prisma } = createService();
+    prisma.user.findMany.mockResolvedValue([userRecord()]);
+
+    await service.list(actor, { role: 'SALESPERSON' });
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: actor.tenantId,
+        userRoles: {
+          some: { role: { name: { equals: 'SALESPERSON', mode: 'insensitive' } } },
+        },
+      },
+      orderBy: { email: 'asc' },
+    });
+  });
+
+  it('ignores a blank role filter and lists the full tenant', async () => {
+    const { service, prisma } = createService();
+    prisma.user.findMany.mockResolvedValue([userRecord()]);
+
+    await service.list(actor, { role: '   ' });
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { tenantId: actor.tenantId },
+      orderBy: { email: 'asc' },
+    });
+  });
+
   it('assigns a same-tenant role and rejects duplicates', async () => {
     const { service, prisma, audit } = createService();
     const role = {

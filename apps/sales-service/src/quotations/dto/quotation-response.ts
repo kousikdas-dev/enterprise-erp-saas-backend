@@ -10,6 +10,9 @@ type QuotationWithItems = {
   billingAddress: string | null;
   shippingAddress: string | null;
   notes: string | null;
+  paymentTermId: string | null;
+  salespersonId: string | null;
+  deliveryDate: Date | null;
   subtotal: Prisma.Decimal;
   total: Prisma.Decimal;
   validUntil: Date | null;
@@ -43,6 +46,9 @@ export function toQuotationResponse(row: QuotationWithItems) {
     billingAddress: row.billingAddress,
     shippingAddress: row.shippingAddress,
     notes: row.notes,
+    paymentTermId: row.paymentTermId,
+    salespersonId: row.salespersonId,
+    deliveryDate: row.deliveryDate,
     subtotal: moneyToString(row.subtotal),
     total: moneyToString(row.total),
     validUntil: row.validUntil,

@@ -1,5 +1,8 @@
 /** Matches Gateway identity DTO shapes — do not invent fields. */
 
+/** Role name used to filter GET /v1/users?role=... for the Customer Salesperson picker. */
+export const SALESPERSON_ROLE = 'Salesperson';
+
 export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'INVITED' | 'LOCKED';
 
 export interface User {

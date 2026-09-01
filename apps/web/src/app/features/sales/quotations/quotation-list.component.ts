@@ -25,9 +25,21 @@ import {
   multiplyDecimals,
 } from '../../../shared/utils/decimal.util';
 import { apiErrorMessage } from '../../../shared/utils/api-error.util';
-import { Customer, Quotation } from '../models/sales.models';
+import {
+  Customer,
+  CustomerAddress,
+  CustomerAddressType,
+  Quotation,
+} from '../models/sales.models';
 import { CustomerService } from '../customers/customer.service';
 import { QuotationService } from './quotation.service';
+import { MasterDataOption } from '../../../shared/master-data/master-data.models';
+import { MasterDataService } from '../../../shared/master-data/master-data.service';
+import {
+  SALESPERSON_ROLE,
+  User,
+} from '../../administration/models/administration.models';
+import { UserService } from '../../administration/users/user.service';
 
 type QuotationAction =
   | 'send'
@@ -51,6 +63,8 @@ export class QuotationListComponent implements OnInit {
   private readonly quotations = inject(QuotationService);
   private readonly customerService = inject(CustomerService);
   private readonly productService = inject(ProductService);
+  private readonly masterData = inject(MasterDataService);
+  private readonly users = inject(UserService);
   private readonly fb = inject(FormBuilder);
   private readonly modal = inject(NgbModal);
   private readonly toast = inject(ToastService);
@@ -69,6 +83,10 @@ export class QuotationListComponent implements OnInit {
   items: Quotation[] = [];
   customers: Customer[] = [];
   products: Product[] = [];
+  paymentTerms: MasterDataOption[] = [];
+  salespeople: User[] = [];
+  billingAddresses: CustomerAddress[] = [];
+  shippingAddresses: CustomerAddress[] = [];
   loading = false;
   error: string | null = null;
   filter = '';
@@ -78,6 +96,7 @@ export class QuotationListComponent implements OnInit {
   viewing: Quotation | null = null;
   pendingAction: { type: QuotationAction; quotation: Quotation } | null = null;
   private modalRef?: NgbModalRef;
+  private formResetting = false;
 
   form = this.fb.group({
     customerId: ['', Validators.required],
@@ -85,12 +104,89 @@ export class QuotationListComponent implements OnInit {
     validUntil: [''],
     billingAddress: ['', Validators.maxLength(500)],
     shippingAddress: ['', Validators.maxLength(500)],
+    billingAddressId: [''],
+    shippingAddressId: [''],
+    paymentTermId: [''],
+    salespersonId: [''],
+    deliveryDate: [''],
     items: this.fb.array([this.createLineGroup()]),
   });
 
   ngOnInit(): void {
     this.loadLookups();
     this.load();
+
+    this.form.get('customerId')!.valueChanges.subscribe((customerId) => {
+      if (this.formResetting) {
+        return;
+      }
+      this.applyCustomerAddresses(customerId ?? '');
+      this.cdr.detectChanges();
+    });
+
+    this.form.get('billingAddressId')!.valueChanges.subscribe((addressId) => {
+      if (this.formResetting || !addressId) {
+        return;
+      }
+      const address = this.billingAddresses.find((a) => a.id === addressId);
+      if (address) {
+        this.form.get('billingAddress')!.setValue(this.addressLabel(address));
+        this.cdr.detectChanges();
+      }
+    });
+
+    this.form.get('shippingAddressId')!.valueChanges.subscribe((addressId) => {
+      if (this.formResetting || !addressId) {
+        return;
+      }
+      const address = this.shippingAddresses.find((a) => a.id === addressId);
+      if (address) {
+        this.form.get('shippingAddress')!.setValue(this.addressLabel(address));
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  /**
+   * Recomputes billing/shipping dropdown options for a customer and, since
+   * this only runs on an explicit customer change (not on form.reset), also
+   * overwrites the address snapshot and the payment-term/salesperson
+   * selection with the new customer's defaults.
+   */
+  private applyCustomerAddresses(customerId: string): void {
+    const customer = this.customers.find((c) => c.id === customerId);
+    this.billingAddresses = this.activeAddressesOf(customer, 'BILLING');
+    this.shippingAddresses = this.activeAddressesOf(customer, 'SHIPPING');
+    const defaultBilling = this.billingAddresses[0] ?? null;
+    const defaultShipping = this.shippingAddresses[0] ?? null;
+    this.form.patchValue({
+      billingAddressId: defaultBilling?.id ?? '',
+      shippingAddressId: defaultShipping?.id ?? '',
+      billingAddress: defaultBilling ? this.addressLabel(defaultBilling) : '',
+      shippingAddress: defaultShipping ? this.addressLabel(defaultShipping) : '',
+      paymentTermId: customer?.paymentTermId ?? '',
+      salespersonId: customer?.salespersonId ?? '',
+    });
+  }
+
+  private activeAddressesOf(
+    customer: Customer | undefined,
+    type: CustomerAddressType,
+  ): CustomerAddress[] {
+    if (!customer?.addresses?.length) {
+      return [];
+    }
+    return customer.addresses
+      .filter((a) => a.type === type && a.isActive)
+      .slice()
+      .sort((a, b) => (a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1));
+  }
+
+  addressLabel(a: CustomerAddress): string {
+    const parts = [a.addressLine1, a.addressLine2, a.city, a.state, a.postalCode, a.country].filter(
+      (p): p is string => !!p,
+    );
+    return `${a.name} — ${parts.join(', ')}`;
   }
 
   get lines(): FormArray {
@@ -191,10 +287,16 @@ export class QuotationListComponent implements OnInit {
     forkJoin({
       customers: this.customerService.list(),
       products: this.productService.list(),
+      paymentTerms: this.masterData.paymentTerms(),
+      salespeople: this.users.list({ role: SALESPERSON_ROLE }),
     }).subscribe({
-      next: ({ customers, products }) => {
+      next: ({ customers, products, paymentTerms, salespeople }) => {
         this.customers = customers.items ?? [];
         this.products = products.items ?? [];
+        this.paymentTerms = (paymentTerms.items ?? []).filter((p) => p.isActive);
+        this.salespeople = (salespeople.items ?? []).filter(
+          (u) => u.status === 'ACTIVE',
+        );
         this.cdr.detectChanges();
       },
       error: (err) => {
@@ -202,6 +304,22 @@ export class QuotationListComponent implements OnInit {
         this.cdr.detectChanges();
       },
     });
+  }
+
+  salespersonLabel(id: string | null): string {
+    if (!id) {
+      return '—';
+    }
+    const u = this.salespeople.find((x) => x.id === id);
+    return u ? `${u.firstName} ${u.lastName}`.trim() || u.email : id.slice(0, 8);
+  }
+
+  paymentTermLabel(id: string | null): string {
+    if (!id) {
+      return '—';
+    }
+    const p = this.paymentTerms.find((x) => x.id === id);
+    return p ? p.name : id.slice(0, 8);
   }
 
   load(): void {
@@ -238,15 +356,25 @@ export class QuotationListComponent implements OnInit {
       return;
     }
     this.editing = null;
+    this.billingAddresses = [];
+    this.shippingAddresses = [];
+    this.formResetting = true;
     this.form.reset({
       customerId: '',
       notes: '',
       validUntil: '',
       billingAddress: '',
       shippingAddress: '',
+      billingAddressId: '',
+      shippingAddressId: '',
+      paymentTermId: '',
+      salespersonId: '',
+      deliveryDate: '',
     });
+    this.formResetting = false;
     this.lines.clear();
     this.lines.push(this.createLineGroup());
+    this.cdr.detectChanges();
     this.modalRef = this.modal.open(this.formModal, { centered: true, size: 'xl' });
   }
 
@@ -255,13 +383,25 @@ export class QuotationListComponent implements OnInit {
       return;
     }
     this.editing = item;
+    // Preserve the saved address snapshot on open — only an explicit customer
+    // or address-dropdown change (via applyCustomerAddresses) should overwrite it.
+    this.formResetting = true;
     this.form.reset({
       customerId: item.customerId,
       notes: item.notes ?? '',
-      validUntil: '',
+      validUntil: item.validUntil ? item.validUntil.slice(0, 10) : '',
       billingAddress: item.billingAddress ?? '',
       shippingAddress: item.shippingAddress ?? '',
+      billingAddressId: '',
+      shippingAddressId: '',
+      paymentTermId: item.paymentTermId ?? '',
+      salespersonId: item.salespersonId ?? '',
+      deliveryDate: item.deliveryDate ? item.deliveryDate.slice(0, 10) : '',
     });
+    this.formResetting = false;
+    const customer = this.customers.find((c) => c.id === item.customerId);
+    this.billingAddresses = this.activeAddressesOf(customer, 'BILLING');
+    this.shippingAddresses = this.activeAddressesOf(customer, 'SHIPPING');
     this.lines.clear();
     for (const line of item.items ?? []) {
       this.lines.push(
@@ -271,6 +411,7 @@ export class QuotationListComponent implements OnInit {
     if (this.lines.length === 0) {
       this.lines.push(this.createLineGroup());
     }
+    this.cdr.detectChanges();
     this.modalRef = this.modal.open(this.formModal, { centered: true, size: 'xl' });
   }
 
@@ -380,6 +521,9 @@ export class QuotationListComponent implements OnInit {
     const validUntil = value.validUntil?.trim() || undefined;
     const billingAddress = value.billingAddress?.trim() || undefined;
     const shippingAddress = value.shippingAddress?.trim() || undefined;
+    const paymentTermId = value.paymentTermId?.trim() || undefined;
+    const salespersonId = value.salespersonId?.trim() || undefined;
+    const deliveryDate = value.deliveryDate?.trim() || undefined;
     const items = rawLines.map((line) => {
       const product = this.products.find((p) => p.id === line.productId)!;
       return {
@@ -401,6 +545,9 @@ export class QuotationListComponent implements OnInit {
           validUntil: validUntil ?? null,
           billingAddress: billingAddress ?? null,
           shippingAddress: shippingAddress ?? null,
+          paymentTermId: paymentTermId ?? null,
+          salespersonId: salespersonId ?? null,
+          deliveryDate: deliveryDate ?? null,
           items,
         })
       : this.quotations.create({
@@ -409,6 +556,9 @@ export class QuotationListComponent implements OnInit {
           validUntil,
           billingAddress,
           shippingAddress,
+          paymentTermId,
+          salespersonId,
+          deliveryDate,
           items,
         });
 

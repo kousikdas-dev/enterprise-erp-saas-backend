@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { PERMISSIONS } from '@app/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -19,6 +20,7 @@ import { AuthenticatedUser } from '../auth/authenticated-user';
 import { headerString } from '../identity/header-string';
 import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
+import { SWAGGER_BEARER_AUTH_NAME } from '../swagger/setup-swagger';
 import { MasterDataForwardService } from './master-data-forward.service';
 import {
   CreatePaymentTermDto,
@@ -27,6 +29,7 @@ import {
   UpdatePaymentTermDto,
 } from './dto/payment-term.dto';
 
+@ApiBearerAuth(SWAGGER_BEARER_AUTH_NAME)
 @Controller({ path: 'payment-terms', version: '1' })
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class PaymentTermsController {

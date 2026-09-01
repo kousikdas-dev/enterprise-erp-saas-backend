@@ -5,31 +5,121 @@ export interface Customer {
   tenantId: string;
   code: string;
   name: string;
+  company: string | null;
   email: string | null;
   phone: string | null;
-  billingAddress: string | null;
-  shippingAddress: string | null;
+  jobPosition: string | null;
+  website: string | null;
+  tags: string[];
+  gstin: string | null;
+  salespersonId: string | null;
+  paymentTermId: string | null;
+  paymentMethodId: string | null;
+  fiscalPositionId: string | null;
+  industryId: string | null;
+  street: string | null;
+  street2: string | null;
+  city: string | null;
+  zip: string | null;
+  state: string | null;
+  country: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  addresses?: CustomerAddress[];
 }
 
 export interface CreateCustomerRequest {
   code: string;
   name: string;
+  company?: string;
   email?: string;
   phone?: string;
-  billingAddress?: string;
-  shippingAddress?: string;
+  jobPosition?: string;
+  website?: string;
+  tags?: string[];
+  gstin?: string;
+  salespersonId?: string;
+  paymentTermId?: string;
+  paymentMethodId?: string;
+  fiscalPositionId?: string;
+  industryId?: string;
+  street?: string;
+  street2?: string;
+  city?: string;
+  zip?: string;
+  state?: string;
+  country?: string;
 }
 
 export interface UpdateCustomerRequest {
   code?: string;
   name?: string;
+  company?: string | null;
   email?: string | null;
   phone?: string | null;
-  billingAddress?: string | null;
-  shippingAddress?: string | null;
+  jobPosition?: string | null;
+  website?: string | null;
+  tags?: string[];
+  gstin?: string | null;
+  salespersonId?: string | null;
+  paymentTermId?: string | null;
+  paymentMethodId?: string | null;
+  fiscalPositionId?: string | null;
+  industryId?: string | null;
+  street?: string | null;
+  street2?: string | null;
+  city?: string | null;
+  zip?: string | null;
+  state?: string | null;
+  country?: string | null;
+  isActive?: boolean;
+}
+
+export type CustomerAddressType = 'BILLING' | 'SHIPPING';
+
+export interface CustomerAddress {
+  id: string;
+  customerId: string;
+  type: CustomerAddressType;
+  name: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  state: string | null;
+  postalCode: string | null;
+  country: string;
+  phone: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCustomerAddressRequest {
+  type: CustomerAddressType;
+  name: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state?: string;
+  postalCode?: string;
+  country: string;
+  phone?: string;
+  isDefault?: boolean;
+}
+
+export interface UpdateCustomerAddressRequest {
+  type?: CustomerAddressType;
+  name?: string;
+  addressLine1?: string;
+  addressLine2?: string | null;
+  city?: string;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string;
+  phone?: string | null;
+  isDefault?: boolean;
   isActive?: boolean;
 }
 
@@ -59,6 +149,10 @@ export interface Quotation {
   billingAddress: string | null;
   shippingAddress: string | null;
   notes: string | null;
+  paymentTermId: string | null;
+  salespersonId: string | null;
+  deliveryDate: string | null;
+  validUntil: string | null;
   subtotal: string;
   total: string;
   items: QuotationItem[];
@@ -78,6 +172,9 @@ export interface CreateQuotationRequest {
   validUntil?: string;
   billingAddress?: string;
   shippingAddress?: string;
+  paymentTermId?: string;
+  salespersonId?: string;
+  deliveryDate?: string;
   items: QuotationLineInput[];
 }
 
@@ -87,6 +184,9 @@ export interface UpdateQuotationRequest {
   validUntil?: string | null;
   billingAddress?: string | null;
   shippingAddress?: string | null;
+  paymentTermId?: string | null;
+  salespersonId?: string | null;
+  deliveryDate?: string | null;
   items?: QuotationLineInput[];
 }
 

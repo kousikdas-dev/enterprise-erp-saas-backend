@@ -6,7 +6,7 @@
         type="search"
         class="form-control form-control-sm"
         style="min-width: 200px;"
-        placeholder="Filter by code, name, email, phone…"
+        placeholder="Filter by code, name, company, email, phone…"
         [(ngModel)]="filter" />
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
@@ -30,6 +30,7 @@
             <tr>
               <th>Code</th>
               <th>Name</th>
+              <th>Company</th>
               <th>Email</th>
               <th>Phone</th>
               <th class="text-center">Status</th>
@@ -40,6 +41,7 @@
             <tr *ngFor="let item of filtered">
               <td><code>{{ item.code }}</code></td>
               <td>{{ item.name }}</td>
+              <td class="text-muted">{{ item.company || '—' }}</td>
               <td class="text-muted">{{ item.email || '—' }}</td>
               <td class="text-muted">{{ item.phone || '—' }}</td>
               <td class="text-center">
@@ -72,25 +74,33 @@
     <h5 class="modal-title">{{ editing ? 'Edit Customer' : 'Create Customer' }}</h5>
     <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
   </div>
-  <form [formGroup]="form" (ngSubmit)="save()">
+  <form
+    [formGroup]="form"
+    (ngSubmit)="save()"
+    style="display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;">
     <div class="modal-body">
+      <h6 class="text-uppercase text-muted small fw-bold mb-3">Basic Information</h6>
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="custCode">Code</label>
-          <input id="custCode" class="form-control" formControlName="code" maxlength="32" />
-          <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
-            Code is required (max 32 characters).
-          </div>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label" for="custName">Name</label>
+          <label class="form-label" for="custName">Name *</label>
           <input id="custName" class="form-control" formControlName="name" maxlength="160" />
           <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
             Name is required (max 160 characters).
           </div>
         </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custCode">Code *</label>
+          <input id="custCode" class="form-control" formControlName="code" maxlength="32" />
+          <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+            Code is required (max 32 characters).
+          </div>
+        </div>
       </div>
       <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custCompany">Company</label>
+          <input id="custCompany" class="form-control" formControlName="company" maxlength="160" />
+        </div>
         <div class="col-md-6 mb-3">
           <label class="form-label" for="custEmail">Email</label>
           <input id="custEmail" type="email" class="form-control" formControlName="email" maxlength="255" />
@@ -98,19 +108,290 @@
             Enter a valid email.
           </div>
         </div>
+      </div>
+      <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="custPhone">Phone</label>
-          <input id="custPhone" class="form-control" formControlName="phone" maxlength="64" />
+          <input id="custPhone" class="form-control" formControlName="phone" maxlength="64" placeholder="+91 98765 43210" />
+          <div class="text-danger small" *ngIf="form.controls.phone.touched && form.controls.phone.invalid">
+            Enter a valid phone number.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custJobPosition">Job Position</label>
+          <input id="custJobPosition" class="form-control" formControlName="jobPosition" maxlength="160" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custWebsite">Website</label>
+          <input id="custWebsite" class="form-control" formControlName="website" maxlength="255" placeholder="https://example.com" />
+          <div class="text-danger small" *ngIf="form.controls.website.touched && form.controls.website.invalid">
+            Enter a valid URL (must start with http:// or https://).
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custGstin">GSTIN</label>
+          <input id="custGstin" class="form-control" formControlName="gstin" placeholder="19ABCDE1234F1Z5" style="text-transform: uppercase;" />
+          <div class="text-danger small" *ngIf="form.controls.gstin.touched && form.controls.gstin.invalid">
+            Enter a valid GSTIN.
+          </div>
         </div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="custBilling">Billing address</label>
-        <textarea id="custBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
+        <label class="form-label" for="custTagInput">Tags</label>
+        <div class="d-flex flex-wrap gap-1 mb-2" *ngIf="tags.length">
+          <span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1" *ngFor="let tag of tags; let i = index">
+            {{ tag }}
+            <button type="button" class="btn-close btn-close-sm" style="font-size: 0.55rem;" aria-label="Remove tag" (click)="removeTag(i)"></button>
+          </span>
+        </div>
+        <div class="input-group">
+          <input
+            id="custTagInput"
+            class="form-control"
+            placeholder="Type a tag and press Enter"
+            [(ngModel)]="tagInput"
+            [ngModelOptions]="{ standalone: true }"
+            (keydown.enter)="$event.preventDefault(); addTag()" />
+          <button type="button" class="btn btn-outline-secondary" (click)="addTag()">Add</button>
+        </div>
       </div>
-      <div class="mb-3">
-        <label class="form-label" for="custShipping">Shipping address</label>
-        <textarea id="custShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
+
+      <hr />
+      <h6 class="text-uppercase text-muted small fw-bold mb-3">Main Address</h6>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custStreet">Street</label>
+          <input id="custStreet" class="form-control" formControlName="street" maxlength="255" />
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="custStreet2">Street 2</label>
+          <input id="custStreet2" class="form-control" formControlName="street2" maxlength="255" />
+        </div>
       </div>
+      <div class="row">
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="custCity">City</label>
+          <input id="custCity" class="form-control" formControlName="city" maxlength="120" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="custZip">ZIP</label>
+          <input id="custZip" class="form-control" formControlName="zip" maxlength="32" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="custState">State</label>
+          <input id="custState" class="form-control" formControlName="state" maxlength="120" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="custCountry">Country</label>
+          <input id="custCountry" class="form-control" formControlName="country" maxlength="120" />
+        </div>
+      </div>
+
+      <hr />
+      <h6 class="text-uppercase text-muted small fw-bold mb-3">Sales</h6>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="custSalesperson">Salesperson</label>
+          <select id="custSalesperson" class="form-select" formControlName="salespersonId">
+            <option value="">—</option>
+            <option *ngFor="let u of salespeople" [value]="u.id">{{ u.firstName }} {{ u.lastName }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="custPaymentTerm">Payment Terms</label>
+          <select id="custPaymentTerm" class="form-select" formControlName="paymentTermId">
+            <option value="">—</option>
+            <option *ngFor="let o of paymentTerms" [value]="o.id">{{ o.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="custPaymentMethod">Payment Method</label>
+          <select id="custPaymentMethod" class="form-select" formControlName="paymentMethodId">
+            <option value="">—</option>
+            <option *ngFor="let o of paymentMethods" [value]="o.id">{{ o.name }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="custFiscalPosition">Fiscal Position</label>
+          <select id="custFiscalPosition" class="form-select" formControlName="fiscalPositionId">
+            <option value="">—</option>
+            <option *ngFor="let o of fiscalPositions" [value]="o.id">{{ o.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="custIndustry">Industry</label>
+          <select id="custIndustry" class="form-select" formControlName="industryId">
+            <option value="">—</option>
+            <option *ngFor="let o of industries" [value]="o.id">{{ o.name }}</option>
+          </select>
+        </div>
+      </div>
+
+      <hr />
+      <h6 class="text-uppercase text-muted small fw-bold mb-3">Addresses</h6>
+
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-semibold">Billing Addresses</div>
+        <button type="button" class="btn btn-sm btn-outline-primary" (click)="addBillingAddress()">
+          + Add Billing Address
+        </button>
+      </div>
+      <div class="card mb-3" *ngFor="let group of billingAddresses.controls; let i = index" [formGroup]="group">
+        <div class="card-body position-relative">
+          <button
+            type="button"
+            class="btn-close position-absolute"
+            style="top: 0.75rem; right: 0.75rem;"
+            aria-label="Remove address"
+            (click)="removeBillingAddress(i)"></button>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Name</label>
+              <input class="form-control" formControlName="name" maxlength="160" />
+              <div class="text-danger small" *ngIf="group.controls.name.touched && group.controls.name.invalid">
+                Name is required.
+              </div>
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Address Line 1</label>
+              <input class="form-control" formControlName="addressLine1" maxlength="255" />
+              <div class="text-danger small" *ngIf="group.controls.addressLine1.touched && group.controls.addressLine1.invalid">
+                Address line 1 is required.
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Address Line 2</label>
+              <input class="form-control" formControlName="addressLine2" maxlength="255" />
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">City</label>
+              <input class="form-control" formControlName="city" maxlength="100" />
+              <div class="text-danger small" *ngIf="group.controls.city.touched && group.controls.city.invalid">
+                City is required.
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-2">
+              <label class="form-label">State</label>
+              <input class="form-control" formControlName="state" maxlength="100" />
+            </div>
+            <div class="col-md-4 mb-2">
+              <label class="form-label">ZIP / Postal Code</label>
+              <input class="form-control" formControlName="postalCode" maxlength="20" />
+            </div>
+            <div class="col-md-4 mb-2">
+              <label class="form-label">Country</label>
+              <input class="form-control" formControlName="country" maxlength="100" />
+              <div class="text-danger small" *ngIf="group.controls.country.touched && group.controls.country.invalid">
+                Country is required.
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Phone</label>
+              <input class="form-control" formControlName="phone" maxlength="64" />
+              <div class="text-danger small" *ngIf="group.controls.phone.touched && group.controls.phone.invalid">
+                Enter a valid phone number.
+              </div>
+            </div>
+            <div class="col-md-6 mb-2 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" formControlName="isDefault" [id]="'billingDefault' + i" />
+                <label class="form-check-label" [for]="'billingDefault' + i">Default</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="text-muted small mb-3" *ngIf="!billingAddresses.length">No billing addresses added.</div>
+
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-semibold">Shipping Addresses</div>
+        <button type="button" class="btn btn-sm btn-outline-primary" (click)="addShippingAddress()">
+          + Add Shipping Address
+        </button>
+      </div>
+      <div class="card mb-3" *ngFor="let group of shippingAddresses.controls; let i = index" [formGroup]="group">
+        <div class="card-body position-relative">
+          <button
+            type="button"
+            class="btn-close position-absolute"
+            style="top: 0.75rem; right: 0.75rem;"
+            aria-label="Remove address"
+            (click)="removeShippingAddress(i)"></button>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Name</label>
+              <input class="form-control" formControlName="name" maxlength="160" />
+              <div class="text-danger small" *ngIf="group.controls.name.touched && group.controls.name.invalid">
+                Name is required.
+              </div>
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Address Line 1</label>
+              <input class="form-control" formControlName="addressLine1" maxlength="255" />
+              <div class="text-danger small" *ngIf="group.controls.addressLine1.touched && group.controls.addressLine1.invalid">
+                Address line 1 is required.
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Address Line 2</label>
+              <input class="form-control" formControlName="addressLine2" maxlength="255" />
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">City</label>
+              <input class="form-control" formControlName="city" maxlength="100" />
+              <div class="text-danger small" *ngIf="group.controls.city.touched && group.controls.city.invalid">
+                City is required.
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-2">
+              <label class="form-label">State</label>
+              <input class="form-control" formControlName="state" maxlength="100" />
+            </div>
+            <div class="col-md-4 mb-2">
+              <label class="form-label">ZIP / Postal Code</label>
+              <input class="form-control" formControlName="postalCode" maxlength="20" />
+            </div>
+            <div class="col-md-4 mb-2">
+              <label class="form-label">Country</label>
+              <input class="form-control" formControlName="country" maxlength="100" />
+              <div class="text-danger small" *ngIf="group.controls.country.touched && group.controls.country.invalid">
+                Country is required.
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">Phone</label>
+              <input class="form-control" formControlName="phone" maxlength="64" />
+              <div class="text-danger small" *ngIf="group.controls.phone.touched && group.controls.phone.invalid">
+                Enter a valid phone number.
+              </div>
+            </div>
+            <div class="col-md-6 mb-2 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" formControlName="isDefault" [id]="'shippingDefault' + i" />
+                <label class="form-check-label" [for]="'shippingDefault' + i">Default</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="text-muted small mb-3" *ngIf="!shippingAddresses.length">No shipping addresses added.</div>
+
       <div class="form-check" *ngIf="editing">
         <input class="form-check-input" type="checkbox" id="custActive" formControlName="isActive" />
         <label class="form-check-label" for="custActive">Active</label>
@@ -131,16 +412,77 @@
     <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
   </div>
   <div class="modal-body" *ngIf="viewing as c">
-    <dl class="row mb-0">
+    <h6 class="text-uppercase text-muted small fw-bold mb-2">Basic Information</h6>
+    <dl class="row mb-3">
       <dt class="col-sm-4">Code</dt><dd class="col-sm-8"><code>{{ c.code }}</code></dd>
       <dt class="col-sm-4">Name</dt><dd class="col-sm-8">{{ c.name }}</dd>
+      <dt class="col-sm-4">Company</dt><dd class="col-sm-8">{{ c.company || '—' }}</dd>
       <dt class="col-sm-4">Email</dt><dd class="col-sm-8">{{ c.email || '—' }}</dd>
       <dt class="col-sm-4">Phone</dt><dd class="col-sm-8">{{ c.phone || '—' }}</dd>
-      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ c.billingAddress || '—' }}</dd>
-      <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ c.shippingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Job Position</dt><dd class="col-sm-8">{{ c.jobPosition || '—' }}</dd>
+      <dt class="col-sm-4">Website</dt><dd class="col-sm-8">{{ c.website || '—' }}</dd>
+      <dt class="col-sm-4">Tags</dt>
+      <dd class="col-sm-8">
+        <span *ngIf="!c.tags?.length">—</span>
+        <span class="badge bg-light text-dark border me-1" *ngFor="let tag of c.tags">{{ tag }}</span>
+      </dd>
+      <dt class="col-sm-4">GSTIN</dt><dd class="col-sm-8">{{ c.gstin || '—' }}</dd>
       <dt class="col-sm-4">Status</dt><dd class="col-sm-8">{{ c.isActive ? 'Active' : 'Inactive' }}</dd>
       <dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ c.updatedAt | date:'medium' }}</dd>
     </dl>
+
+    <h6 class="text-uppercase text-muted small fw-bold mb-2">Main Address</h6>
+    <dl class="row mb-3">
+      <dt class="col-sm-4">Street</dt><dd class="col-sm-8">{{ c.street || '—' }}</dd>
+      <dt class="col-sm-4">Street 2</dt><dd class="col-sm-8">{{ c.street2 || '—' }}</dd>
+      <dt class="col-sm-4">City</dt><dd class="col-sm-8">{{ c.city || '—' }}</dd>
+      <dt class="col-sm-4">ZIP</dt><dd class="col-sm-8">{{ c.zip || '—' }}</dd>
+      <dt class="col-sm-4">State</dt><dd class="col-sm-8">{{ c.state || '—' }}</dd>
+      <dt class="col-sm-4">Country</dt><dd class="col-sm-8">{{ c.country || '—' }}</dd>
+    </dl>
+
+    <h6 class="text-uppercase text-muted small fw-bold mb-2">Sales</h6>
+    <dl class="row mb-3">
+      <dt class="col-sm-4">Salesperson</dt><dd class="col-sm-8">{{ salespersonLabel(c.salespersonId) }}</dd>
+      <dt class="col-sm-4">Payment Terms</dt><dd class="col-sm-8">{{ masterDataLabel(paymentTerms, c.paymentTermId) }}</dd>
+      <dt class="col-sm-4">Payment Method</dt><dd class="col-sm-8">{{ masterDataLabel(paymentMethods, c.paymentMethodId) }}</dd>
+      <dt class="col-sm-4">Fiscal Position</dt><dd class="col-sm-8">{{ masterDataLabel(fiscalPositions, c.fiscalPositionId) }}</dd>
+      <dt class="col-sm-4">Industry</dt><dd class="col-sm-8">{{ masterDataLabel(industries, c.industryId) }}</dd>
+    </dl>
+
+    <h6 class="text-uppercase text-muted small fw-bold mb-2">Billing Addresses</h6>
+    <div class="text-muted small mb-3" *ngIf="!billingAddressesOf(c).length">No billing addresses.</div>
+    <div class="card mb-2" *ngFor="let a of billingAddressesOf(c)">
+      <div class="card-body py-2">
+        <div class="d-flex justify-content-between">
+          <span class="fw-semibold">{{ a.name }}</span>
+          <span class="badge bg-primary" *ngIf="a.isDefault">Default</span>
+        </div>
+        <div class="text-muted small">
+          {{ a.addressLine1 }}<span *ngIf="a.addressLine2">, {{ a.addressLine2 }}</span>,
+          {{ a.city }}<span *ngIf="a.state">, {{ a.state }}</span><span *ngIf="a.postalCode"> {{ a.postalCode }}</span>,
+          {{ a.country }}
+          <span *ngIf="a.phone"> · {{ a.phone }}</span>
+        </div>
+      </div>
+    </div>
+
+    <h6 class="text-uppercase text-muted small fw-bold mb-2 mt-3">Shipping Addresses</h6>
+    <div class="text-muted small mb-3" *ngIf="!shippingAddressesOf(c).length">No shipping addresses.</div>
+    <div class="card mb-2" *ngFor="let a of shippingAddressesOf(c)">
+      <div class="card-body py-2">
+        <div class="d-flex justify-content-between">
+          <span class="fw-semibold">{{ a.name }}</span>
+          <span class="badge bg-primary" *ngIf="a.isDefault">Default</span>
+        </div>
+        <div class="text-muted small">
+          {{ a.addressLine1 }}<span *ngIf="a.addressLine2">, {{ a.addressLine2 }}</span>,
+          {{ a.city }}<span *ngIf="a.state">, {{ a.state }}</span><span *ngIf="a.postalCode"> {{ a.postalCode }}</span>,
+          {{ a.country }}
+          <span *ngIf="a.phone"> · {{ a.phone }}</span>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="modal-footer">
     <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>

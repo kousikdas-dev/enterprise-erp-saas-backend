@@ -27,6 +27,7 @@ export interface IdentityForwardOptions {
   path: string;
   user: AuthenticatedUser;
   body?: Record<string, unknown>;
+  query?: Record<string, unknown>;
   ip?: string;
   userAgent?: string;
 }
@@ -42,13 +43,15 @@ export class IdentityForwardService {
 
   async forward<T>(options: IdentityForwardOptions): Promise<T> {
     const url = `${this.identityBaseUrl()}${options.path}`;
-    const body = this.trustedBody(options.body);
+    const body = this.stripTenant(options.body);
+    const params = this.stripTenant(options.query);
     try {
       const response = await firstValueFrom(
         this.http.request<IdentityEnvelope<T>>({
           method: options.method,
           url,
           data: body,
+          params,
           headers: {
             [ACTOR_USER_ID_HEADER]: options.user.userId,
             [ACTOR_TENANT_ID_HEADER]: options.user.tenantId,
@@ -66,7 +69,7 @@ export class IdentityForwardService {
     }
   }
 
-  private trustedBody(
+  private stripTenant(
     body: Record<string, unknown> | undefined,
   ): Record<string, unknown> | undefined {
     if (!body) {

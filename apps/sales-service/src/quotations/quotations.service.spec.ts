@@ -15,10 +15,16 @@ describe('QuotationsService', () => {
       tenantId: tenantA,
       code: 'CUST1',
       name: 'Acme',
+      street: 'Bill St',
+      street2: null,
+      city: 'Springfield',
+      zip: '10001',
+      state: 'IL',
+      country: 'US',
       email: null,
       phone: null,
-      billingAddress: 'Bill St',
-      shippingAddress: 'Ship St',
+      salespersonId: '55555555-5555-4555-8555-555555555555',
+      paymentTermId: '66666666-6666-4666-8666-666666666666',
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -99,8 +105,8 @@ describe('QuotationsService', () => {
       customerId: customer.id,
       status: QuotationStatus.DRAFT,
       customerName: customer.name,
-      billingAddress: customer.billingAddress,
-      shippingAddress: customer.shippingAddress,
+      billingAddress: 'Bill St, Springfield, IL, 10001, US',
+      shippingAddress: 'Bill St, Springfield, IL, 10001, US',
       notes: null,
       subtotal: { toFixed: () => '50.0000' },
       total: { toFixed: () => '50.0000' },
@@ -161,6 +167,122 @@ describe('QuotationsService', () => {
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'quotation.created' }),
     );
+  });
+
+  it('defaults paymentTermId/salespersonId from the customer and stores deliveryDate', async () => {
+    const customer = mockCustomer();
+    const prisma = {
+      quotation: {
+        create: jest.fn().mockResolvedValue({
+          id: 'q1',
+          tenantId: tenantA,
+          customerId: customer.id,
+          status: QuotationStatus.DRAFT,
+          customerName: customer.name,
+          billingAddress: null,
+          shippingAddress: null,
+          notes: null,
+          paymentTermId: customer.paymentTermId,
+          salespersonId: customer.salespersonId,
+          deliveryDate: new Date('2026-09-15'),
+          subtotal: { toFixed: () => '50.0000' },
+          total: { toFixed: () => '50.0000' },
+          validUntil: null,
+          sentAt: null,
+          acceptedAt: null,
+          rejectedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          items: [],
+        }),
+      },
+    };
+    const customers = {
+      require: jest.fn().mockResolvedValue(customer),
+    } as unknown as CustomersService;
+    const service = new QuotationsService(
+      prisma as never,
+      customers,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+    );
+
+    await service.create(actorA, {
+      customerId: customer.id,
+      deliveryDate: '2026-09-15',
+      items: [
+        {
+          productId,
+          productSku: 'SKU-1',
+          productName: 'Widget',
+          quantity: '10',
+          unitPrice: '5.0000',
+        },
+      ],
+    });
+
+    const data = (prisma.quotation.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.paymentTermId).toBe(customer.paymentTermId);
+    expect(data.salespersonId).toBe(customer.salespersonId);
+    expect(data.deliveryDate).toEqual(new Date('2026-09-15'));
+  });
+
+  it('lets an explicit paymentTermId/salespersonId override the customer default', async () => {
+    const customer = mockCustomer();
+    const overridePaymentTermId = '77777777-7777-4777-8777-777777777777';
+    const overrideSalespersonId = '88888888-8888-4888-8888-888888888888';
+    const prisma = {
+      quotation: {
+        create: jest.fn().mockResolvedValue({
+          id: 'q1',
+          tenantId: tenantA,
+          customerId: customer.id,
+          status: QuotationStatus.DRAFT,
+          customerName: customer.name,
+          billingAddress: null,
+          shippingAddress: null,
+          notes: null,
+          paymentTermId: overridePaymentTermId,
+          salespersonId: overrideSalespersonId,
+          deliveryDate: null,
+          subtotal: { toFixed: () => '50.0000' },
+          total: { toFixed: () => '50.0000' },
+          validUntil: null,
+          sentAt: null,
+          acceptedAt: null,
+          rejectedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          items: [],
+        }),
+      },
+    };
+    const customers = {
+      require: jest.fn().mockResolvedValue(customer),
+    } as unknown as CustomersService;
+    const service = new QuotationsService(
+      prisma as never,
+      customers,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+    );
+
+    await service.create(actorA, {
+      customerId: customer.id,
+      paymentTermId: overridePaymentTermId,
+      salespersonId: overrideSalespersonId,
+      items: [
+        {
+          productId,
+          productSku: 'SKU-1',
+          productName: 'Widget',
+          quantity: '10',
+          unitPrice: '5.0000',
+        },
+      ],
+    });
+
+    const data = (prisma.quotation.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.paymentTermId).toBe(overridePaymentTermId);
+    expect(data.salespersonId).toBe(overrideSalespersonId);
   });
 
   it('scopes getById to actor tenant', async () => {

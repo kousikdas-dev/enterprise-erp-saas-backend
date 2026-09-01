@@ -190,3 +190,11 @@ export class CustomerAddressListDto {
   @ApiProperty({ type: [CustomerAddressDto] })
   items!: CustomerAddressDto[];
 }
+
+export class CustomerAddressDeleteDto {
+  @ApiProperty({ example: true })
+  success!: boolean;
+
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+}

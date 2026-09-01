@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -29,6 +30,7 @@ import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import { ApiManagementErrors } from './api-management-errors';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserDto, UserListDto } from './dto/user.dto';
@@ -42,6 +44,12 @@ function headerString(
     return value[0];
   }
   return value;
+}
+
+function definedQuery(query: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(query).filter(([, value]) => value !== undefined),
+  );
 }
 
 @ApiTags('Users')
@@ -80,15 +88,20 @@ export class UsersController {
   @RequirePermissions(PERMISSIONS.USERS_READ)
   @ApiOperation({
     summary: 'List users',
-    description: 'Lists users in the JWT tenant only. Permission: users.read.',
+    description:
+      'Lists users in the JWT tenant only. Optional role filter (case-insensitive role name, e.g. Salesperson). Permission: users.read.',
   })
   @ApiOkResponse({ type: UserListDto })
   @ApiManagementErrors()
-  list(@CurrentUser() user: AuthenticatedUser): Promise<UserListDto> {
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListUsersQueryDto,
+  ): Promise<UserListDto> {
     return this.identity.forward<UserListDto>({
       method: 'GET',
       path: '/api/v1/users',
       user,
+      query: definedQuery({ ...query }),
     });
   }
 

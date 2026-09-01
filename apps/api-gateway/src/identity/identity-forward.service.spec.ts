@@ -51,4 +51,31 @@ describe('IdentityForwardService', () => {
     expect(requestArg.headers[ACTOR_USER_ID_HEADER]).toBe(user.userId);
     expect(requestArg.headers[ACTOR_TENANT_ID_HEADER]).toBe(user.tenantId);
   });
+
+  it('forwards query params and strips tenantId from them', async () => {
+    const request = jest.fn().mockReturnValue(
+      of({
+        data: {
+          success: true,
+          data: { items: [] },
+        },
+      }),
+    );
+    const service = new IdentityForwardService(
+      { request } as unknown as HttpService,
+      {
+        getUrl: () => 'http://localhost:3001',
+      } as unknown as DownstreamRegistry,
+    );
+
+    await service.forward({
+      method: 'GET',
+      path: '/api/v1/users',
+      user,
+      query: { role: 'Salesperson', tenantId: 'spoof' },
+    });
+
+    const requestArg = firstArg<{ params: Record<string, unknown> }>(request);
+    expect(requestArg.params).toEqual({ role: 'Salesperson' });
+  });
 });

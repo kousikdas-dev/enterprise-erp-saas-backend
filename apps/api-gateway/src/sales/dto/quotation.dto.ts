@@ -65,6 +65,21 @@ export class CreateQuotationDto {
   @MaxLength(500)
   shippingAddress?: string;
 
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string;
+
   @ApiProperty({ type: [CreateQuotationItemDto] })
   @IsArray()
   @ArrayMinSize(1)
@@ -101,6 +116,21 @@ export class UpdateQuotationDto {
   @IsString()
   @MaxLength(500)
   shippingAddress?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string | null;
 
   @ApiPropertyOptional({ type: [CreateQuotationItemDto] })
   @IsOptional()
@@ -158,6 +188,18 @@ export class QuotationDto {
 
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  paymentTermId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  salespersonId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  deliveryDate!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  validUntil!: string | null;
 
   @ApiProperty()
   subtotal!: string;

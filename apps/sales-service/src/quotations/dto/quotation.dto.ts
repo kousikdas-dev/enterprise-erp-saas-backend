@@ -54,6 +54,18 @@ export class CreateQuotationDto {
   @MaxLength(500)
   shippingAddress?: string;
 
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -84,6 +96,18 @@ export class UpdateQuotationDto {
   @IsString()
   @MaxLength(500)
   shippingAddress?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string | null;
 
   @IsOptional()
   @IsArray()

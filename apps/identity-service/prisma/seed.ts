@@ -21,6 +21,7 @@ const ADMIN_EMAIL = 'admin@demo.local';
 const ADMIN_FIRST_NAME = 'System';
 const ADMIN_LAST_NAME = 'Administrator';
 const LOCAL_DEV_PASSWORD_DEFAULT = 'DevPassword123!';
+const SALESPERSON_ROLE_NAME = 'Salesperson';
 
 const MANAGEMENT_PERMISSIONS: Array<{
   resource: string;
@@ -331,6 +332,30 @@ async function seedSuperAdminPermissions(
   });
 }
 
+/**
+ * Ensures the tenant-facing 'Salesperson' role exists. This role carries no
+ * permissions of its own — it is a pure tag used by the Sales Customer UI to
+ * find users eligible for the Customer.salespersonId dropdown (GET
+ * /v1/users?role=Salesperson). Assign it to individual users via the
+ * existing User Roles screen/API.
+ */
+async function seedSalespersonRole(
+  prisma: PrismaClient,
+  tenantId: string,
+): Promise<void> {
+  await prisma.role.upsert({
+    where: { tenantId_name: { tenantId, name: SALESPERSON_ROLE_NAME } },
+    create: {
+      tenantId,
+      name: SALESPERSON_ROLE_NAME,
+      description: 'Users selectable as a Customer salesperson',
+    },
+    update: {
+      description: 'Users selectable as a Customer salesperson',
+    },
+  });
+}
+
 async function main(): Promise<void> {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   if (nodeEnv === 'production') {
@@ -394,6 +419,7 @@ async function main(): Promise<void> {
     });
 
     await seedSuperAdminPermissions(prisma, tenant.id, user.id);
+    await seedSalespersonRole(prisma, tenant.id);
 
     await prisma.user.upsert({
       where: {
@@ -453,6 +479,9 @@ async function main(): Promise<void> {
     );
     console.log(
       'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, Inventory V1, Purchase V1, and Sales V1 permissions; viewer and OTHER remain unprivileged',
+    );
+    console.log(
+      `Identity RBAC seed: '${SALESPERSON_ROLE_NAME}' role ensured (no permissions attached; assign to users via User Roles)`,
     );
   } finally {
     await prisma.$disconnect();

@@ -31,6 +31,7 @@ import {
   CreateCustomerDto,
   CustomerDto,
   CustomerListDto,
+  CustomerWithAddressesDto,
   UpdateCustomerDto,
 } from './dto/customer.dto';
 import { SalesForwardService } from './sales-forward.service';
@@ -71,7 +72,8 @@ export class CustomersController {
   @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @ApiOperation({
     summary: 'List customers',
-    description: 'Lists customers in the JWT tenant. Permission: customers.read.',
+    description:
+      'Lists customers in the JWT tenant. Permission: customers.read.',
   })
   @ApiOkResponse({ type: CustomerListDto })
   @ApiManagementErrors()
@@ -89,13 +91,13 @@ export class CustomersController {
     summary: 'Get customer',
     description: 'Returns a JWT-tenant customer. Permission: customers.read.',
   })
-  @ApiOkResponse({ type: CustomerDto })
+  @ApiOkResponse({ type: CustomerWithAddressesDto })
   @ApiManagementErrors()
   getById(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<CustomerDto> {
-    return this.sales.forward<CustomerDto>({
+  ): Promise<CustomerWithAddressesDto> {
+    return this.sales.forward<CustomerWithAddressesDto>({
       method: 'GET',
       path: `/api/v1/customers/${id}`,
       user,

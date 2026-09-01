@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
@@ -36,8 +38,11 @@ export class UsersController {
   }
 
   @Get()
-  list(@CurrentActor() actor: ActorContext) {
-    return this.users.list(actor);
+  list(
+    @CurrentActor() actor: ActorContext,
+    @Query() query: ListUsersQueryDto,
+  ) {
+    return this.users.list(actor, query);
   }
 
   @Post(':id/roles')

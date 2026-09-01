@@ -47,10 +47,13 @@ export class QuotationsService {
         customerId: customer.id,
         customerName: customer.name,
         billingAddress:
-          dto.billingAddress?.trim() || customer.billingAddress || null,
+        dto.billingAddress?.trim() || this.formatCustomerAddress(customer),
         shippingAddress:
-          dto.shippingAddress?.trim() || customer.shippingAddress || null,
+        dto.shippingAddress?.trim() || this.formatCustomerAddress(customer),
         notes: dto.notes?.trim() || null,
+        paymentTermId: dto.paymentTermId ?? customer.paymentTermId,
+        salespersonId: dto.salespersonId ?? customer.salespersonId,
+        deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
         subtotal: totals.subtotal,
         total: totals.total,
@@ -108,6 +111,9 @@ export class QuotationsService {
       dto.validUntil === undefined &&
       dto.billingAddress === undefined &&
       dto.shippingAddress === undefined &&
+      dto.paymentTermId === undefined &&
+      dto.salespersonId === undefined &&
+      dto.deliveryDate === undefined &&
       dto.items === undefined
     ) {
       throw new BadRequestException('No fields to update');
@@ -147,17 +153,35 @@ export class QuotationsService {
             billingAddress:
               dto.billingAddress === undefined
                 ? customer
-                  ? customer.billingAddress
+                  ? this.formatCustomerAddress(customer)
                   : undefined
                 : dto.billingAddress?.trim() || null,
             shippingAddress:
               dto.shippingAddress === undefined
                 ? customer
-                  ? customer.shippingAddress
+                  ? this.formatCustomerAddress(customer)
                   : undefined
                 : dto.shippingAddress?.trim() || null,
             notes:
               dto.notes === undefined ? undefined : dto.notes.trim() || null,
+            paymentTermId:
+              dto.paymentTermId === undefined
+                ? customer
+                  ? customer.paymentTermId
+                  : undefined
+                : dto.paymentTermId,
+            salespersonId:
+              dto.salespersonId === undefined
+                ? customer
+                  ? customer.salespersonId
+                  : undefined
+                : dto.salespersonId,
+            deliveryDate:
+              dto.deliveryDate === undefined
+                ? undefined
+                : dto.deliveryDate
+                  ? new Date(dto.deliveryDate)
+                  : null,
             validUntil:
               dto.validUntil === undefined
                 ? undefined
@@ -179,16 +203,34 @@ export class QuotationsService {
           billingAddress:
             dto.billingAddress === undefined
               ? customer
-                ? customer.billingAddress
+                ? this.formatCustomerAddress(customer)
                 : undefined
               : dto.billingAddress?.trim() || null,
           shippingAddress:
             dto.shippingAddress === undefined
               ? customer
-                ? customer.shippingAddress
+                ? this.formatCustomerAddress(customer)
                 : undefined
               : dto.shippingAddress?.trim() || null,
           notes: dto.notes === undefined ? undefined : dto.notes.trim() || null,
+          paymentTermId:
+            dto.paymentTermId === undefined
+              ? customer
+                ? customer.paymentTermId
+                : undefined
+              : dto.paymentTermId,
+          salespersonId:
+            dto.salespersonId === undefined
+              ? customer
+                ? customer.salespersonId
+                : undefined
+              : dto.salespersonId,
+          deliveryDate:
+            dto.deliveryDate === undefined
+              ? undefined
+              : dto.deliveryDate
+                ? new Date(dto.deliveryDate)
+                : null,
           validUntil:
             dto.validUntil === undefined
               ? undefined
@@ -314,6 +356,26 @@ export class QuotationsService {
     });
     if (!row) throw new NotFoundException('Quotation not found');
     return row;
+  }
+
+  private formatCustomerAddress(customer: {
+    street: string | null;
+    street2: string | null;
+    city: string | null;
+    zip: string | null;
+    state: string | null;
+    country: string | null;
+  }) {
+    return [
+      customer.street,
+      customer.street2,
+      customer.city,
+      customer.state,
+      customer.zip,
+      customer.country,
+    ]
+      .filter(Boolean)
+      .join(', ') || null;
   }
 
   private mapLines(tenantId: string, items: CreateQuotationItemDto[]) {

@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { DEFAULT_API_VERSION } from '@app/common';
+import { resolveGatewayPath } from '../bootstrap/global-prefix';
 
 export const GATEWAY_SWAGGER_PATH = 'api/docs';
 export const GATEWAY_SWAGGER_JSON_PATH = 'api/docs-json';
@@ -55,6 +56,19 @@ export function setupGatewaySwagger(app: INestApplication): void {
   const document = SwaggerModule.createDocument(app, config, {
     ignoreGlobalPrefix: true,
   });
+
+  // SwaggerModule can only ever include or fully strip the global prefix for
+  // every route (ignoreGlobalPrefix is all-or-nothing) — it has no notion of
+  // app.setGlobalPrefix's per-route `exclude` list. Since most Gateway
+  // resources are excluded from the 'api' prefix but a few are not, restore
+  // the prefix here, route by route, using the same exclude list main.ts
+  // passes to setGlobalPrefix, so "Try it out" always hits the real URL.
+  document.paths = Object.fromEntries(
+    Object.entries(document.paths).map(([path, item]) => [
+      resolveGatewayPath(path),
+      item,
+    ]),
+  );
 
   SwaggerModule.setup(GATEWAY_SWAGGER_PATH, app, document, {
     jsonDocumentUrl: GATEWAY_SWAGGER_JSON_PATH,

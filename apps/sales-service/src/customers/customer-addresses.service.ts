@@ -147,6 +147,7 @@ export class CustomerAddressesService {
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
     const newType = dto.type ?? existing.type;
+    const willBeDefault = data.isDefault ?? existing.isDefault;
 
     if (dto.isDefault === true) {
       data.isDefault = true;
@@ -159,7 +160,10 @@ export class CustomerAddressesService {
     }
 
     const address = await this.prisma.$transaction(async (tx) => {
-      if (data.isDefault === true) {
+      if (
+        willBeDefault &&
+        (data.isDefault === true || newType !== existing.type)
+      ) {
         await tx.customerAddress.updateMany({
           where: {
             tenantId: actor.tenantId,

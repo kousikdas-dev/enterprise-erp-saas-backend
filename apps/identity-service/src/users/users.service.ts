@@ -11,6 +11,7 @@ import { PasswordService } from '../auth/password.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { toUserResponse } from './dto/user-response.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -69,9 +70,15 @@ export class UsersService {
     }
   }
 
-  async list(actor: ActorContext) {
+  async list(actor: ActorContext, query?: ListUsersQueryDto) {
+    const role = query?.role?.trim();
     const users = await this.prisma.user.findMany({
-      where: { tenantId: actor.tenantId },
+      where: {
+        tenantId: actor.tenantId,
+        ...(role
+          ? { userRoles: { some: { role: { name: { equals: role, mode: 'insensitive' } } } } }
+          : {}),
+      },
       orderBy: { email: 'asc' },
     });
     return { items: users.map(toUserResponse) };

@@ -61,8 +61,12 @@ describe('SalesOrdersService', () => {
       id: 'c1',
       tenantId,
       name: 'Acme',
-      billingAddress: 'Bill',
-      shippingAddress: 'Ship',
+      street: 'Bill',
+      street2: null,
+      city: 'Springfield',
+      zip: '10001',
+      state: 'IL',
+      country: 'US',
     };
     const created = orderRow();
     const prisma = {

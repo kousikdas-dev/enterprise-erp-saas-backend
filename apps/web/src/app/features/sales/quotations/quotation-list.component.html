@@ -31,6 +31,7 @@
               <th>ID</th>
               <th>Customer</th>
               <th class="text-center">Status</th>
+              <th>Valid until</th>
               <th class="text-end">Total</th>
               <th>Notes</th>
               <th class="text-end">Actions</th>
@@ -43,6 +44,7 @@
               <td class="text-center">
                 <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
               </td>
+              <td>{{ item.validUntil ? (item.validUntil | date:'yyyy-MM-dd') : '—' }}</td>
               <td class="text-end"><code>{{ item.total }}</code></td>
               <td class="text-muted">{{ item.notes || '—' }}</td>
               <td class="text-end text-nowrap">
@@ -128,12 +130,52 @@
         </div>
       </div>
       <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="quoPaymentTerm">Payment terms</label>
+          <select id="quoPaymentTerm" class="form-select" formControlName="paymentTermId">
+            <option value="">None</option>
+            <option *ngFor="let p of paymentTerms" [value]="p.id">{{ p.code }} — {{ p.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="quoSalesperson">Salesperson</label>
+          <select id="quoSalesperson" class="form-select" formControlName="salespersonId">
+            <option value="">None</option>
+            <option *ngFor="let u of salespeople" [value]="u.id">{{ u.firstName }} {{ u.lastName }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="quoDeliveryDate">Delivery date</label>
+          <input id="quoDeliveryDate" type="date" class="form-control" formControlName="deliveryDate" />
+        </div>
+      </div>
+      <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="quoBilling">Billing address</label>
+          <select
+            *ngIf="billingAddresses.length"
+            id="quoBillingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="billingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of billingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
           <textarea id="quoBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label" for="quoShipping">Shipping address</label>
+          <select
+            *ngIf="shippingAddresses.length"
+            id="quoShippingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="shippingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of shippingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
           <textarea id="quoShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
         </div>
       </div>
@@ -219,6 +261,14 @@
         <span class="badge" [ngClass]="statusBadgeClass(q.status)">{{ q.status }}</span>
       </dd>
       <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ q.notes || '—' }}</dd>
+      <dt class="col-sm-4">Valid until</dt>
+      <dd class="col-sm-8">{{ q.validUntil ? (q.validUntil | date:'yyyy-MM-dd') : '—' }}</dd>
+      <dt class="col-sm-4">Payment terms</dt>
+      <dd class="col-sm-8">{{ paymentTermLabel(q.paymentTermId) }}</dd>
+      <dt class="col-sm-4">Salesperson</dt>
+      <dd class="col-sm-8">{{ salespersonLabel(q.salespersonId) }}</dd>
+      <dt class="col-sm-4">Delivery date</dt>
+      <dd class="col-sm-8">{{ q.deliveryDate ? (q.deliveryDate | date:'yyyy-MM-dd') : '—' }}</dd>
       <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ q.billingAddress || '—' }}</dd>
       <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ q.shippingAddress || '—' }}</dd>
       <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ q.subtotal }}</code></dd>
@@ -246,6 +296,13 @@
     </div>
   </div>
   <div class="modal-footer">
+    <button
+      type="button"
+      class="btn btn-outline-secondary"
+      disabled
+      title="Preview will be implemented in a future phase">
+      Preview
+    </button>
     <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
   </div>
 </ng-template>

@@ -64,6 +64,15 @@
         "tsConfigPath": "apps/purchase-service/tsconfig.app.json"
       }
     },
+    "master-data-service": {
+      "type": "application",
+      "root": "apps/master-data-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/master-data-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/master-data-service/tsconfig.app.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",
