@@ -2,9 +2,11 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiClient } from '../../../core/api/api-client.service';
 import {
+  CreateInvoiceFromSourceRequest,
   CreateSalesOrderRequest,
   ItemList,
   ProformaInvoice,
+  SalesInvoice,
   SalesOrder,
   UpdateSalesOrderRequest,
 } from '../models/sales.models';
@@ -39,5 +41,12 @@ export class SalesOrderService {
 
   createProforma(id: string): Observable<ProformaInvoice> {
     return this.api.post<ProformaInvoice>(`/v1/sales-orders/${id}/proforma`);
+  }
+
+  createInvoice(
+    id: string,
+    body?: CreateInvoiceFromSourceRequest,
+  ): Observable<SalesInvoice> {
+    return this.api.post<SalesInvoice>(`/v1/sales-orders/${id}/invoice`, body);
   }
 }

@@ -7,6 +7,7 @@ import { CustomersController } from './customers.controller';
 import { ProformaInvoicesController } from './proforma-invoices.controller';
 import { QuotationsController } from './quotations.controller';
 import { SalesForwardService } from './sales-forward.service';
+import { SalesInvoicesController } from './sales-invoices.controller';
 import { SalesOrdersController } from './sales-orders.controller';
 import { ShipmentsController } from './shipments.controller';
 
@@ -25,6 +26,7 @@ import { ShipmentsController } from './shipments.controller';
     QuotationsController,
     ProformaInvoicesController,
     SalesOrdersController,
+    SalesInvoicesController,
     ShipmentsController,
   ],
   providers: [SalesForwardService],

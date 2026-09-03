@@ -1,82 +1,83 @@
 <div class="main-card mb-3 card">
   <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Proforma Invoices</div>
+    <div class="card-header-title">Sales Invoices</div>
     <div class="d-flex flex-wrap gap-2">
       <input
         type="search"
         class="form-control form-control-sm"
         style="min-width: 200px;"
-        placeholder="Filter by document #, customer, status…"
+        placeholder="Filter by invoice #, customer, status…"
         [(ngModel)]="filter" />
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Sales Invoice
       </button>
     </div>
   </div>
 
   <div class="card-body">
     <p class="text-muted small mb-3">
-      Proforma invoices are created from an accepted Quotation or a Sales Order. They can be edited while
-      DRAFT, then sent (DRAFT → ISSUED) or cancelled.
+      Sales invoices may be created directly, or from a Sales Order / Proforma Invoice. Sending an invoice
+      publishes the accounting integration event; posting the actual journal entry requires the Accounting
+      service, which does not yet implement a ledger.
     </p>
     <app-list-state
       [loading]="loading"
       [error]="error"
       [empty]="!filtered.length"
-      emptyMessage="No proforma invoices yet."
+      emptyMessage="No sales invoices yet."
       (retry)="load()">
       <div class="table-responsive">
         <table class="align-middle mb-0 table table-borderless table-striped table-hover">
           <thead>
             <tr>
-              <th>Document #</th>
+              <th>Invoice #</th>
               <th>Customer</th>
               <th>Source</th>
               <th class="text-center">Status</th>
+              <th>Due date</th>
               <th class="text-end">Total</th>
               <th class="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let item of filtered">
-              <td><code>{{ item.documentNumber }}</code></td>
+              <td><code>{{ item.invoiceNumber }}</code></td>
               <td>{{ item.customerName }}</td>
-              <td class="text-muted">{{ item.sourceType }} — {{ item.sourceId | slice:0:8 }}…</td>
-              <td class="text-center">
-                <span class="badge bg-info text-dark">{{ item.status }}</span>
+              <td class="text-muted">
+                {{ item.sourceType ? (item.sourceType + ' — ' + (item.sourceId | slice:0:8) + '…') : 'Manual' }}
               </td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td>{{ item.dueDate ? (item.dueDate | date:'yyyy-MM-dd') : '—' }}</td>
               <td class="text-end"><code>{{ item.total }}</code></td>
               <td class="text-end text-nowrap">
                 <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
                   View
                 </button>
                 <button
-                  *ngIf="canEditProforma(item)"
+                  *ngIf="canEditInvoice(item)"
                   type="button"
                   class="btn btn-sm btn-outline-primary me-1"
                   (click)="openEdit(item)">
                   Edit
                 </button>
                 <button
-                  *ngIf="canSendProforma(item)"
+                  *ngIf="canSendInvoice(item)"
                   type="button"
                   class="btn btn-sm btn-outline-success me-1"
                   (click)="askAction('send', item)">
                   Send
                 </button>
                 <button
-                  *ngIf="canCancelProforma(item)"
+                  *ngIf="canCancelInvoice(item)"
                   type="button"
-                  class="btn btn-sm btn-outline-dark me-1"
+                  class="btn btn-sm btn-outline-dark"
                   (click)="askAction('cancel', item)">
                   Cancel
-                </button>
-                <button
-                  *ngIf="canCreateInvoiceFor(item)"
-                  type="button"
-                  class="btn btn-sm btn-outline-info"
-                  (click)="askAction('invoice', item)">
-                  Create Invoice
                 </button>
               </td>
             </tr>
@@ -89,24 +90,77 @@
 
 <ng-template #formModal let-modal>
   <div class="modal-header">
-    <h5 class="modal-title">Edit Proforma Invoice</h5>
+    <h5 class="modal-title">{{ editing ? 'Edit Sales Invoice' : 'Create Sales Invoice' }}</h5>
     <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
   </div>
   <form [formGroup]="form" (ngSubmit)="save()">
     <div class="modal-body">
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="pfBilling">Billing address</label>
-          <textarea id="pfBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
+          <label class="form-label" for="invCustomer">Customer</label>
+          <select id="invCustomer" class="form-select" formControlName="customerId">
+            <option value="">Select customer…</option>
+            <option *ngFor="let c of customers" [value]="c.id">{{ c.code }} — {{ c.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="invDate">Invoice date</label>
+          <input id="invDate" type="date" class="form-control" formControlName="invoiceDate" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="invDueDate">Due date</label>
+          <input id="invDueDate" type="date" class="form-control" formControlName="dueDate" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="invPaymentTerm">Payment terms</label>
+          <select id="invPaymentTerm" class="form-select" formControlName="paymentTermId">
+            <option value="">None</option>
+            <option *ngFor="let p of paymentTerms" [value]="p.id">{{ p.code }} — {{ p.name }}</option>
+          </select>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="pfShipping">Shipping address</label>
-          <textarea id="pfShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
+          <label class="form-label" for="invSalesperson">Salesperson</label>
+          <select id="invSalesperson" class="form-select" formControlName="salespersonId">
+            <option value="">None</option>
+            <option *ngFor="let u of salespeople" [value]="u.id">{{ u.firstName }} {{ u.lastName }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="invBilling">Billing address</label>
+          <select
+            *ngIf="billingAddresses.length"
+            id="invBillingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="billingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of billingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
+          <textarea id="invBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="invShipping">Shipping address</label>
+          <select
+            *ngIf="shippingAddresses.length"
+            id="invShippingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="shippingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of shippingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
+          <textarea id="invShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
         </div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="pfNotes">Notes</label>
-        <input id="pfNotes" class="form-control" formControlName="notes" maxlength="500" />
+        <label class="form-label" for="invNotes">Notes</label>
+        <input id="invNotes" class="form-control" formControlName="notes" maxlength="500" />
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -174,20 +228,34 @@
 
 <ng-template #detailModal let-modal>
   <div class="modal-header">
-    <h5 class="modal-title">Proforma invoice details</h5>
+    <h5 class="modal-title">Sales invoice details</h5>
     <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
   </div>
-  <div class="modal-body" *ngIf="viewing as p">
+  <div class="modal-body" *ngIf="viewing as inv">
     <dl class="row">
-      <dt class="col-sm-4">Document #</dt><dd class="col-sm-8"><code>{{ p.documentNumber }}</code></dd>
-      <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ p.customerName }}</dd>
-      <dt class="col-sm-4">Source</dt><dd class="col-sm-8">{{ p.sourceType }} — <code>{{ p.sourceId }}</code></dd>
-      <dt class="col-sm-4">Status</dt><dd class="col-sm-8"><span class="badge bg-info text-dark">{{ p.status }}</span></dd>
-      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ p.notes || '—' }}</dd>
-      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ p.billingAddress || '—' }}</dd>
-      <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ p.shippingAddress || '—' }}</dd>
-      <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ p.subtotal }}</code></dd>
-      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ p.total }}</code></dd>
+      <dt class="col-sm-4">Invoice #</dt><dd class="col-sm-8"><code>{{ inv.invoiceNumber }}</code></dd>
+      <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ inv.customerName }}</dd>
+      <dt class="col-sm-4">Source</dt>
+      <dd class="col-sm-8">
+        {{ inv.sourceType ? (inv.sourceType + ' — ') : 'Manual' }}<code *ngIf="inv.sourceId">{{ inv.sourceId }}</code>
+      </dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="statusBadgeClass(inv.status)">{{ inv.status }}</span>
+      </dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ inv.notes || '—' }}</dd>
+      <dt class="col-sm-4">Invoice date</dt>
+      <dd class="col-sm-8">{{ inv.invoiceDate | date:'yyyy-MM-dd' }}</dd>
+      <dt class="col-sm-4">Due date</dt>
+      <dd class="col-sm-8">{{ inv.dueDate ? (inv.dueDate | date:'yyyy-MM-dd') : '—' }}</dd>
+      <dt class="col-sm-4">Payment terms</dt>
+      <dd class="col-sm-8">{{ paymentTermLabel(inv.paymentTermId) }}</dd>
+      <dt class="col-sm-4">Salesperson</dt>
+      <dd class="col-sm-8">{{ salespersonLabel(inv.salespersonId) }}</dd>
+      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ inv.billingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ inv.shippingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ inv.subtotal }}</code></dd>
+      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ inv.total }}</code></dd>
     </dl>
     <div class="table-responsive">
       <table class="table table-sm">
@@ -200,7 +268,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let line of p.items">
+          <tr *ngFor="let line of inv.items">
             <td>{{ line.productSku }} — {{ line.productName }}</td>
             <td class="text-end"><code>{{ line.quantity }}</code></td>
             <td class="text-end"><code>{{ line.unitPrice }}</code></td>
@@ -229,7 +297,10 @@
   </div>
   <div class="modal-body" *ngIf="pendingAction as action">
     <p class="mb-0">
-      {{ actionLabel(action.type) }} for proforma <code>{{ action.proforma.documentNumber }}</code>?
+      {{ actionLabel(action.type) }} for invoice <code>{{ action.invoice.invoiceNumber }}</code>?
+    </p>
+    <p class="text-muted small mb-0" *ngIf="action.type === 'send'">
+      This publishes the sales.invoice.posted integration event for Accounting.
     </p>
   </div>
   <div class="modal-footer">

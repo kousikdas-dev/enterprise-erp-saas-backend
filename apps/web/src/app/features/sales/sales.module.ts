@@ -5,6 +5,7 @@ import { ListStateComponent } from '../../shared/list-state/list-state.component
 import { CustomerListComponent } from './customers/customer-list.component';
 import { ProformaInvoiceListComponent } from './proforma-invoices/proforma-invoice-list.component';
 import { QuotationListComponent } from './quotations/quotation-list.component';
+import { SalesInvoiceListComponent } from './sales-invoices/sales-invoice-list.component';
 import { SalesOrderListComponent } from './sales-orders/sales-order-list.component';
 import { ShipmentListComponent } from './shipments/shipment-list.component';
 
@@ -31,6 +32,11 @@ const routes: Routes = [
     data: { extraParameter: 'salesMenu' },
   },
   {
+    path: 'sales-invoices',
+    component: SalesInvoiceListComponent,
+    data: { extraParameter: 'salesMenu' },
+  },
+  {
     path: 'shipments',
     component: ShipmentListComponent,
     data: { extraParameter: 'salesMenu' },
@@ -43,6 +49,7 @@ const routes: Routes = [
     QuotationListComponent,
     ProformaInvoiceListComponent,
     SalesOrderListComponent,
+    SalesInvoiceListComponent,
     ShipmentListComponent,
   ],
   imports: [SharedModule, ListStateComponent, RouterModule.forChild(routes)],

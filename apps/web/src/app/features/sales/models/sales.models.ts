@@ -190,6 +190,8 @@ export interface UpdateQuotationRequest {
   items?: QuotationLineInput[];
 }
 
+export type ProformaInvoiceStatus = 'DRAFT' | 'ISSUED' | 'CANCELLED';
+
 export interface ProformaInvoiceItem {
   id: string;
   productId: string;
@@ -206,7 +208,7 @@ export interface ProformaInvoice {
   documentNumber: string;
   sourceType: string;
   sourceId: string;
-  status: string;
+  status: ProformaInvoiceStatus | string;
   customerId: string;
   customerName: string;
   billingAddress: string | null;
@@ -215,6 +217,20 @@ export interface ProformaInvoice {
   subtotal: string;
   total: string;
   items: ProformaInvoiceItem[];
+}
+
+export interface UpdateProformaInvoiceRequest {
+  notes?: string | null;
+  billingAddress?: string | null;
+  shippingAddress?: string | null;
+  items?: QuotationLineInput[];
+}
+
+/** Optional overrides for the /sales-orders/:id/invoice and /proforma-invoices/:id/invoice conversion routes. */
+export interface CreateInvoiceFromSourceRequest {
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string;
 }
 
 export type SalesOrderStatus =
@@ -262,6 +278,64 @@ export interface UpdateSalesOrderRequest {
   notes?: string;
   billingAddress?: string | null;
   shippingAddress?: string | null;
+  items?: QuotationLineInput[];
+}
+
+export type SalesInvoiceStatus = 'DRAFT' | 'SENT' | 'CANCELLED';
+
+export interface SalesInvoiceItem {
+  id: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: string;
+  unitPrice: string;
+  lineTotal: string;
+}
+
+export interface SalesInvoice {
+  id: string;
+  tenantId: string;
+  invoiceNumber: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  status: SalesInvoiceStatus | string;
+  customerId: string;
+  customerName: string;
+  billingAddress: string | null;
+  shippingAddress: string | null;
+  paymentTermId: string | null;
+  salespersonId: string | null;
+  invoiceDate: string;
+  dueDate: string | null;
+  notes: string | null;
+  subtotal: string;
+  total: string;
+  sentAt: string | null;
+  items: SalesInvoiceItem[];
+}
+
+export interface CreateSalesInvoiceRequest {
+  customerId: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string;
+  billingAddress?: string;
+  shippingAddress?: string;
+  paymentTermId?: string;
+  salespersonId?: string;
+  items: QuotationLineInput[];
+}
+
+export interface UpdateSalesInvoiceRequest {
+  customerId?: string;
+  invoiceDate?: string;
+  dueDate?: string | null;
+  notes?: string | null;
+  billingAddress?: string | null;
+  shippingAddress?: string | null;
+  paymentTermId?: string | null;
+  salespersonId?: string | null;
   items?: QuotationLineInput[];
 }
 

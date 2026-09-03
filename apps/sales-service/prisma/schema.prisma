@@ -47,6 +47,17 @@ enum CustomerAddressType {
   SHIPPING
 }
 
+enum SalesInvoiceSourceType {
+  SALES_ORDER
+  PROFORMA_INVOICE
+}
+
+enum SalesInvoiceStatus {
+  DRAFT
+  SENT
+  CANCELLED
+}
+
 model Customer {
   id       String @id @default(uuid()) @db.Uuid
   tenantId String @db.Uuid
@@ -81,9 +92,10 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  quotations  Quotation[]
-  salesOrders SalesOrder[]
-  addresses   CustomerAddress[]
+  quotations    Quotation[]
+  salesOrders   SalesOrder[]
+  salesInvoices SalesInvoice[]
+  addresses     CustomerAddress[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -312,4 +324,63 @@ model ShipmentItem {
   @@index([salesOrderItemId])
   @@index([productId])
   @@map("shipment_items")
+}
+
+model SalesInvoice {
+  id              String                  @id @default(uuid()) @db.Uuid
+  tenantId        String                  @db.Uuid
+  invoiceNumber   String
+  sourceType      SalesInvoiceSourceType?
+  sourceId        String?                 @db.Uuid
+  status          SalesInvoiceStatus      @default(DRAFT)
+  customerId      String                  @db.Uuid
+  customerName    String
+  billingAddress  String?
+  shippingAddress String?
+  // Master-data/identity UUIDs intentionally have no foreign keys: that data
+  // belongs to separate services/databases (mirrors Customer.paymentTermId /
+  // Customer.salespersonId).
+  paymentTermId   String?                 @db.Uuid
+  salespersonId   String?                 @db.Uuid
+  invoiceDate     DateTime
+  dueDate         DateTime?
+  notes           String?
+  subtotal        Decimal                 @db.Decimal(19, 4)
+  total           Decimal                 @db.Decimal(19, 4)
+  sentAt          DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items    SalesInvoiceItem[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, status])
+  @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, paymentTermId])
+  @@index([tenantId, salespersonId])
+  @@map("sales_invoices")
+}
+
+model SalesInvoiceItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  salesInvoiceId String   @db.Uuid
+  productId      String   @db.Uuid
+  productSku     String
+  productName    String
+  quantity       Decimal  @db.Decimal(19, 6)
+  unitPrice      Decimal  @db.Decimal(19, 4)
+  lineTotal      Decimal  @db.Decimal(19, 4)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  salesInvoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([salesInvoiceId])
+  @@index([productId])
+  @@map("sales_invoice_items")
 }

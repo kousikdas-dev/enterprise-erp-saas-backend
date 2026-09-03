@@ -257,6 +257,21 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Read proforma invoices',
   },
   {
+    resource: 'proforma-invoices',
+    action: 'update',
+    description: 'Update proforma invoices',
+  },
+  {
+    resource: 'proforma-invoices',
+    action: 'send',
+    description: 'Send proforma invoices',
+  },
+  {
+    resource: 'proforma-invoices',
+    action: 'cancel',
+    description: 'Cancel proforma invoices',
+  },
+  {
     resource: 'sales-orders',
     action: 'create',
     description: 'Create sales orders',
@@ -280,6 +295,31 @@ const MANAGEMENT_PERMISSIONS: Array<{
     resource: 'sales-orders',
     action: 'cancel',
     description: 'Cancel sales orders',
+  },
+  {
+    resource: 'sales-invoices',
+    action: 'create',
+    description: 'Create sales invoices',
+  },
+  {
+    resource: 'sales-invoices',
+    action: 'read',
+    description: 'Read sales invoices',
+  },
+  {
+    resource: 'sales-invoices',
+    action: 'update',
+    description: 'Update sales invoices',
+  },
+  {
+    resource: 'sales-invoices',
+    action: 'send',
+    description: 'Send sales invoices',
+  },
+  {
+    resource: 'sales-invoices',
+    action: 'cancel',
+    description: 'Cancel sales invoices',
   },
   { resource: 'shipments', action: 'create', description: 'Create shipments' },
   { resource: 'shipments', action: 'read', description: 'Read shipments' },

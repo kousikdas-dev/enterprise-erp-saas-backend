@@ -15,6 +15,8 @@ import { ActorGuard } from '../auth/actor.guard';
 import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
 import { ProformaInvoicesService } from '../proforma-invoices/proforma-invoices.service';
+import { CreateInvoiceFromSourceDto } from '../sales-invoices/dto/sales-invoice.dto';
+import { SalesInvoicesService } from '../sales-invoices/sales-invoices.service';
 import {
   CreateSalesOrderDto,
   UpdateSalesOrderDto,
@@ -27,6 +29,7 @@ export class SalesOrdersController {
   constructor(
     private readonly orders: SalesOrdersService,
     private readonly proformas: ProformaInvoicesService,
+    private readonly salesInvoices: SalesInvoicesService,
   ) {}
 
   @Post()
@@ -88,6 +91,21 @@ export class SalesOrdersController {
     return this.proformas.createFromSalesOrder(
       actor,
       id,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/invoice')
+  createInvoice(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateInvoiceFromSourceDto,
+    @Req() request: Request,
+  ) {
+    return this.salesInvoices.createFromSalesOrder(
+      actor,
+      id,
+      dto,
       requestAuditMeta(request),
     );
   }

@@ -33,6 +33,7 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
         { label: 'Customers', route: '/sales/customers' },
         { label: 'Quotations', route: '/sales/quotations' },
         { label: 'Proforma Invoices', route: '/sales/proforma-invoices' },
+        { label: 'Sales Invoices', route: '/sales/sales-invoices' },
         { label: 'Sales Orders', route: '/sales/sales-orders' },
         { label: 'Shipments', route: '/sales/shipments' },
       ]

@@ -29,6 +29,10 @@ import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import { ProformaInvoiceDto } from './dto/proforma-invoice.dto';
 import {
+  CreateInvoiceFromSourceDto,
+  SalesInvoiceDto,
+} from './dto/sales-invoice.dto';
+import {
   CreateSalesOrderDto,
   SalesOrderDto,
   SalesOrderListDto,
@@ -198,6 +202,35 @@ export class SalesOrdersController {
       method: 'POST',
       path: `/api/v1/sales-orders/${id}/proforma`,
       user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/invoice')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_CREATE)
+  @ApiOperation({
+    summary: 'Create sales invoice from sales order',
+    description:
+      'Creates a DRAFT sales invoice from a non-CANCELLED sales order. Permission: sales-invoices.create.',
+  })
+  @ApiCreatedResponse({ type: SalesInvoiceDto })
+  @ApiConflictResponse({
+    description: 'Sales order cannot create a sales invoice',
+  })
+  @ApiManagementErrors()
+  createInvoice(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateInvoiceFromSourceDto,
+    @Req() request: Request,
+  ): Promise<SalesInvoiceDto> {
+    return this.sales.forward<SalesInvoiceDto>({
+      method: 'POST',
+      path: `/api/v1/sales-orders/${id}/invoice`,
+      user,
+      body: { ...dto },
       ip: request.ip,
       userAgent: headerString(request.headers['user-agent']),
     });

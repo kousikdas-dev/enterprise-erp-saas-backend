@@ -54,6 +54,7 @@ export class SalesOrderListComponent implements OnInit {
   readonly canConfirm = this.permissions.has(AppPermissions.SALES_ORDERS_CONFIRM);
   readonly canCancel = this.permissions.has(AppPermissions.SALES_ORDERS_CANCEL);
   readonly canCreateProforma = this.permissions.has(AppPermissions.PROFORMA_INVOICES_CREATE);
+  readonly canCreateInvoice = this.permissions.has(AppPermissions.SALES_INVOICES_CREATE);
 
   items: SalesOrder[] = [];
   customers: Customer[] = [];
@@ -65,7 +66,10 @@ export class SalesOrderListComponent implements OnInit {
   actionBusy = false;
   editing: SalesOrder | null = null;
   viewing: SalesOrder | null = null;
-  pendingAction: { type: 'confirm' | 'cancel' | 'proforma'; order: SalesOrder } | null = null;
+  pendingAction: {
+    type: 'confirm' | 'cancel' | 'proforma' | 'invoice';
+    order: SalesOrder;
+  } | null = null;
   private modalRef?: NgbModalRef;
 
   form = this.fb.group({
@@ -157,6 +161,10 @@ export class SalesOrderListComponent implements OnInit {
 
   canCreateProformaFor(order: SalesOrder): boolean {
     return this.canCreateProforma && order.status === 'CONFIRMED';
+  }
+
+  canCreateInvoiceFor(order: SalesOrder): boolean {
+    return this.canCreateInvoice && order.status !== 'CANCELLED';
   }
 
   lineTotal(quantity: string, unitPrice: string): string {
@@ -276,6 +284,24 @@ export class SalesOrderListComponent implements OnInit {
     this.modal.open(this.confirmModal, { centered: true });
   }
 
+  askInvoice(order: SalesOrder): void {
+    this.pendingAction = { type: 'invoice', order };
+    this.modal.open(this.confirmModal, { centered: true });
+  }
+
+  confirmTitle(type: 'confirm' | 'cancel' | 'proforma' | 'invoice'): string {
+    switch (type) {
+      case 'confirm':
+        return 'Confirm sales order';
+      case 'cancel':
+        return 'Cancel sales order';
+      case 'proforma':
+        return 'Create proforma invoice';
+      case 'invoice':
+        return 'Create sales invoice';
+    }
+  }
+
   runPendingAction(modal: { close: () => void }): void {
     if (!this.pendingAction || this.actionBusy) {
       return;
@@ -288,7 +314,9 @@ export class SalesOrderListComponent implements OnInit {
         ? this.orders.confirm(order.id)
         : type === 'cancel'
           ? this.orders.cancel(order.id)
-          : this.orders.createProforma(order.id);
+          : type === 'proforma'
+            ? this.orders.createProforma(order.id)
+            : this.orders.createInvoice(order.id);
 
     request$.subscribe({
       next: () => {
@@ -300,7 +328,9 @@ export class SalesOrderListComponent implements OnInit {
             ? 'Sales order confirmed'
             : type === 'cancel'
               ? 'Sales order cancelled'
-              : 'Proforma invoice created',
+              : type === 'proforma'
+                ? 'Proforma invoice created'
+                : 'Sales invoice created',
         );
         this.load();
         this.cdr.detectChanges();

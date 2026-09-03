@@ -8,6 +8,7 @@ import { CustomersModule } from './customers/customers.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProformaInvoicesModule } from './proforma-invoices/proforma-invoices.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { SalesInvoicesModule } from './sales-invoices/sales-invoices.module';
 import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 
@@ -25,6 +26,7 @@ import { ShipmentsModule } from './shipments/shipments.module';
     CustomersModule,
     QuotationsModule,
     ProformaInvoicesModule,
+    SalesInvoicesModule,
     SalesOrdersModule,
     ShipmentsModule,
     MessagingModule.register(),

@@ -73,9 +73,16 @@
                 <button
                   *ngIf="canCreateProformaFor(item)"
                   type="button"
-                  class="btn btn-sm btn-outline-info"
+                  class="btn btn-sm btn-outline-info me-1"
                   (click)="askProforma(item)">
                   Proforma
+                </button>
+                <button
+                  *ngIf="canCreateInvoiceFor(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success"
+                  (click)="askInvoice(item)">
+                  Create Invoice
                 </button>
               </td>
             </tr>
@@ -231,9 +238,7 @@
 
 <ng-template #confirmModal let-modal>
   <div class="modal-header">
-    <h5 class="modal-title">
-      {{ pendingAction?.type === 'confirm' ? 'Confirm sales order' : pendingAction?.type === 'cancel' ? 'Cancel sales order' : 'Create proforma invoice' }}
-    </h5>
+    <h5 class="modal-title">{{ pendingAction ? confirmTitle(pendingAction.type) : '' }}</h5>
     <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
   </div>
   <div class="modal-body" *ngIf="pendingAction as action">
@@ -246,13 +251,16 @@
     <p class="mb-0" *ngIf="action.type === 'proforma'">
       Create a proforma invoice from order <code>{{ action.order.id | slice:0:8 }}…</code>?
     </p>
+    <p class="mb-0" *ngIf="action.type === 'invoice'">
+      Create a sales invoice from order <code>{{ action.order.id | slice:0:8 }}…</code>?
+    </p>
   </div>
   <div class="modal-footer">
     <button type="button" class="btn btn-link" (click)="modal.dismiss()">Back</button>
     <button
       type="button"
       class="btn"
-      [class.btn-success]="pendingAction?.type === 'confirm'"
+      [class.btn-success]="pendingAction?.type === 'confirm' || pendingAction?.type === 'invoice'"
       [class.btn-danger]="pendingAction?.type === 'cancel'"
       [class.btn-info]="pendingAction?.type === 'proforma'"
       [disabled]="actionBusy"

@@ -16,7 +16,13 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.CUSTOMERS_CREATE).toBe('customers.create');
     expect(PERMISSIONS.QUOTATIONS_ACCEPT).toBe('quotations.accept');
     expect(PERMISSIONS.PROFORMA_INVOICES_CREATE).toBe('proforma-invoices.create');
+    expect(PERMISSIONS.PROFORMA_INVOICES_UPDATE).toBe('proforma-invoices.update');
+    expect(PERMISSIONS.PROFORMA_INVOICES_SEND).toBe('proforma-invoices.send');
+    expect(PERMISSIONS.PROFORMA_INVOICES_CANCEL).toBe('proforma-invoices.cancel');
     expect(PERMISSIONS.SALES_ORDERS_CONFIRM).toBe('sales-orders.confirm');
+    expect(PERMISSIONS.SALES_INVOICES_CREATE).toBe('sales-invoices.create');
+    expect(PERMISSIONS.SALES_INVOICES_SEND).toBe('sales-invoices.send');
+    expect(PERMISSIONS.SALES_INVOICES_CANCEL).toBe('sales-invoices.cancel');
     expect(PERMISSIONS.SHIPMENTS_POST).toBe('shipments.post');
   });
 

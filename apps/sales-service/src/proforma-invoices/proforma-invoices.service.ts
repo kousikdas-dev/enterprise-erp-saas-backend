@@ -13,9 +13,18 @@ import {
 } from '../../generated/prisma-client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
+import {
+  moneyToString,
+  parseMoney,
+  parsePositiveDecimal,
+} from '../common/decimal';
 import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toProformaResponse } from './dto/proforma-invoice-response';
+import {
+  UpdateProformaInvoiceDto,
+  UpdateProformaInvoiceItemDto,
+} from './dto/proforma-invoice.dto';
 
 const PROFORMA_INCLUDE = {
   items: { orderBy: { createdAt: 'asc' as const } },
@@ -156,8 +165,7 @@ export class ProformaInvoicesService {
             documentNumber,
             sourceType: input.sourceType,
             sourceId: input.sourceId,
-            status: ProformaInvoiceStatus.ISSUED,
-            issuedAt: new Date(),
+            status: ProformaInvoiceStatus.DRAFT,
             customerId: input.customerId,
             customerName: input.customerName,
             billingAddress: input.billingAddress,
@@ -213,12 +221,182 @@ export class ProformaInvoicesService {
   }
 
   async getById(actor: ActorContext, id: string) {
+    return toProformaResponse(await this.require(actor, id));
+  }
+
+  async update(
+    actor: ActorContext,
+    id: string,
+    dto: UpdateProformaInvoiceDto,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+    if (existing.status !== ProformaInvoiceStatus.DRAFT) {
+      throw new ConflictException('Only DRAFT proforma invoices can be updated');
+    }
+    if (
+      dto.notes === undefined &&
+      dto.billingAddress === undefined &&
+      dto.shippingAddress === undefined &&
+      dto.items === undefined
+    ) {
+      throw new BadRequestException('No fields to update');
+    }
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (dto.items) {
+        const lines = this.mapLines(actor.tenantId, dto.items);
+        const totals = this.sumTotals(lines);
+        await tx.proformaInvoiceItem.deleteMany({
+          where: { proformaInvoiceId: id, tenantId: actor.tenantId },
+        });
+        await tx.proformaInvoiceItem.createMany({
+          data: lines.map((line) => ({
+            tenantId: line.tenantId,
+            proformaInvoiceId: id,
+            productId: line.productId,
+            productSku: line.productSku,
+            productName: line.productName,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            lineTotal: line.lineTotal,
+          })),
+        });
+        return tx.proformaInvoice.update({
+          where: { id },
+          data: {
+            billingAddress:
+              dto.billingAddress === undefined
+                ? undefined
+                : dto.billingAddress?.trim() || null,
+            shippingAddress:
+              dto.shippingAddress === undefined
+                ? undefined
+                : dto.shippingAddress?.trim() || null,
+            notes:
+              dto.notes === undefined ? undefined : dto.notes?.trim() || null,
+            subtotal: totals.subtotal,
+            total: totals.total,
+          },
+          include: PROFORMA_INCLUDE,
+        });
+      }
+
+      return tx.proformaInvoice.update({
+        where: { id },
+        data: {
+          billingAddress:
+            dto.billingAddress === undefined
+              ? undefined
+              : dto.billingAddress?.trim() || null,
+          shippingAddress:
+            dto.shippingAddress === undefined
+              ? undefined
+              : dto.shippingAddress?.trim() || null,
+          notes: dto.notes === undefined ? undefined : dto.notes?.trim() || null,
+        },
+        include: PROFORMA_INCLUDE,
+      });
+    });
+
+    await this.audit.record({
+      actor,
+      action: 'proforma-invoice.updated',
+      resource: 'proforma-invoice',
+      resourceId: row.id,
+      metadata: {
+        itemCount: row.items.length,
+        total: moneyToString(row.total),
+      },
+      request,
+    });
+    return toProformaResponse(row);
+  }
+
+  async send(actor: ActorContext, id: string, request?: RequestAuditMeta) {
+    const existing = await this.require(actor, id);
+    if (existing.status !== ProformaInvoiceStatus.DRAFT) {
+      throw new ConflictException('Only DRAFT proforma invoices can be sent');
+    }
+    if (existing.items.length === 0) {
+      throw new BadRequestException('Proforma invoice has no items');
+    }
+    const row = await this.prisma.proformaInvoice.update({
+      where: { id },
+      data: { status: ProformaInvoiceStatus.ISSUED, issuedAt: new Date() },
+      include: PROFORMA_INCLUDE,
+    });
+    await this.audit.record({
+      actor,
+      action: 'proforma-invoice.sent',
+      resource: 'proforma-invoice',
+      resourceId: row.id,
+      metadata: { status: row.status },
+      request,
+    });
+    return toProformaResponse(row);
+  }
+
+  async cancel(actor: ActorContext, id: string, request?: RequestAuditMeta) {
+    const existing = await this.require(actor, id);
+    if (
+      existing.status !== ProformaInvoiceStatus.DRAFT &&
+      existing.status !== ProformaInvoiceStatus.ISSUED
+    ) {
+      throw new ConflictException(
+        'Only DRAFT or ISSUED proforma invoices can be cancelled',
+      );
+    }
+    const row = await this.prisma.proformaInvoice.update({
+      where: { id },
+      data: { status: ProformaInvoiceStatus.CANCELLED },
+      include: PROFORMA_INCLUDE,
+    });
+    await this.audit.record({
+      actor,
+      action: 'proforma-invoice.cancelled',
+      resource: 'proforma-invoice',
+      resourceId: row.id,
+      metadata: { status: row.status },
+      request,
+    });
+    return toProformaResponse(row);
+  }
+
+  async require(actor: ActorContext, id: string) {
     const row = await this.prisma.proformaInvoice.findFirst({
       where: { id, tenantId: actor.tenantId },
       include: PROFORMA_INCLUDE,
     });
     if (!row) throw new NotFoundException('Proforma invoice not found');
-    return toProformaResponse(row);
+    return row;
+  }
+
+  private mapLines(tenantId: string, items: UpdateProformaInvoiceItemDto[]) {
+    return items.map((item) => {
+      const quantity = parsePositiveDecimal(item.quantity);
+      const unitPrice = parseMoney(item.unitPrice);
+      const lineTotal = quantity.mul(unitPrice);
+      return {
+        tenantId,
+        productId: item.productId,
+        productSku: item.productSku.trim(),
+        productName: item.productName.trim(),
+        quantity,
+        unitPrice,
+        lineTotal,
+      };
+    });
+  }
+
+  private sumTotals(
+    lines: Array<{ lineTotal: Prisma.Decimal }>,
+  ): { subtotal: Prisma.Decimal; total: Prisma.Decimal } {
+    const subtotal = lines.reduce(
+      (sum, line) => sum.plus(line.lineTotal),
+      new Prisma.Decimal(0),
+    );
+    return { subtotal, total: subtotal };
   }
 
   private async nextDocumentNumber(tenantId: string): Promise<string> {
