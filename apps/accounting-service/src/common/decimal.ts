@@ -31,3 +31,28 @@ export function parseMoney(value: unknown): Prisma.Decimal {
 export function moneyToString(value: Prisma.Decimal): string {
   return value.toFixed(4);
 }
+
+const RATE_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/;
+
+/**
+ * Tax component rates are percentages: 0–100 inclusive, up to 4 decimal
+ * places. The regex alone (shared shape with parseMoney) has no upper bound
+ * and no minus sign, so the 100 ceiling is checked separately after parsing.
+ */
+export function parseRate(value: unknown): Prisma.Decimal {
+  const text = toAmountText(value).trim();
+  if (!RATE_DECIMAL.test(text)) {
+    throw new BadRequestException(
+      'Rate must be a non-negative decimal with up to 4 decimal places',
+    );
+  }
+  const rate = new Prisma.Decimal(text);
+  if (rate.greaterThan(100)) {
+    throw new BadRequestException('Rate must not exceed 100');
+  }
+  return rate;
+}
+
+export function rateToString(value: Prisma.Decimal): string {
+  return value.toFixed(4);
+}

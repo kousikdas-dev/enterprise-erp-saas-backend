@@ -28,6 +28,9 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.ACCOUNTS_UPDATE).toBe('accounts.update');
     expect(PERMISSIONS.JOURNAL_ENTRIES_CREATE).toBe('journal-entries.create');
     expect(PERMISSIONS.JOURNAL_ENTRIES_POST).toBe('journal-entries.post');
+    expect(PERMISSIONS.TAX_CODES_CREATE).toBe('tax-codes.create');
+    expect(PERMISSIONS.TAX_CODES_READ).toBe('tax-codes.read');
+    expect(PERMISSIONS.TAX_CODES_UPDATE).toBe('tax-codes.update');
   });
 
   it('allows when all required permissions are owned', () => {

@@ -87,6 +87,9 @@ export const PERMISSIONS = {
   JOURNAL_ENTRIES_READ: 'journal-entries.read',
   JOURNAL_ENTRIES_UPDATE: 'journal-entries.update',
   JOURNAL_ENTRIES_POST: 'journal-entries.post',
+  TAX_CODES_CREATE: 'tax-codes.create',
+  TAX_CODES_READ: 'tax-codes.read',
+  TAX_CODES_UPDATE: 'tax-codes.update',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

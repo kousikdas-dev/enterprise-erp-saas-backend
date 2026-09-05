@@ -9,7 +9,7 @@ datasource db {
 }
 
 // Domain models are added incrementally. This service owns accounting_db only.
-// Planned next: FiscalPeriod, TrialBalance snapshots, Tax Master.
+// Planned next: FiscalPeriod, TrialBalance snapshots.
 // This service never reads sales_db, purchase_db or inventory_db directly.
 
 enum AccountType {
@@ -24,6 +24,14 @@ enum JournalEntryStatus {
   DRAFT
   POSTED
   VOID
+}
+
+enum TaxComponentType {
+  CGST
+  SGST
+  IGST
+  CESS
+  OTHER
 }
 
 model Account {
@@ -41,6 +49,7 @@ model Account {
   parent   Account? @relation("AccountHierarchy", fields: [parentId], references: [id])
   children Account[] @relation("AccountHierarchy")
   lines    JournalLine[]
+  taxComponents TaxComponent[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -87,4 +96,42 @@ model JournalLine {
   @@index([journalEntryId])
   @@index([accountId])
   @@map("journal_lines")
+}
+
+model TaxCode {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  code        String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  components TaxComponent[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("tax_codes")
+}
+
+model TaxComponent {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @db.Uuid
+  taxCodeId String           @db.Uuid
+  sequence  Int
+  type      TaxComponentType
+  name      String?
+  rate      Decimal          @db.Decimal(7, 4)
+  accountId String?          @db.Uuid
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  taxCode TaxCode  @relation(fields: [taxCodeId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([taxCodeId, sequence])
+  @@index([tenantId])
+  @@index([taxCodeId])
+  @@map("tax_components")
 }
