@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
 import { AccountingForwardService } from './accounting-forward.service';
 import { AccountsController } from './accounts.controller';
+import { JournalEntriesController } from './journal-entries.controller';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { AccountsController } from './accounts.controller';
     AuthModule,
     RbacModule,
   ],
-  controllers: [AccountsController],
+  controllers: [AccountsController, JournalEntriesController],
   providers: [AccountingForwardService],
 })
 export class AccountingAdminModule {}

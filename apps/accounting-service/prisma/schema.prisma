@@ -9,8 +9,7 @@ datasource db {
 }
 
 // Domain models are added incrementally. This service owns accounting_db only.
-// Planned next: JournalEntry, JournalLine (balanced double-entry),
-// FiscalPeriod, TrialBalance snapshots, Tax Master.
+// Planned next: FiscalPeriod, TrialBalance snapshots, Tax Master.
 // This service never reads sales_db, purchase_db or inventory_db directly.
 
 enum AccountType {
@@ -19,6 +18,12 @@ enum AccountType {
   EQUITY
   REVENUE
   EXPENSE
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  VOID
 }
 
 model Account {
@@ -35,9 +40,51 @@ model Account {
   parentId String?  @db.Uuid
   parent   Account? @relation("AccountHierarchy", fields: [parentId], references: [id])
   children Account[] @relation("AccountHierarchy")
+  lines    JournalLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([tenantId, parentId])
   @@map("accounts")
+}
+
+model JournalEntry {
+  id          String             @id @default(uuid()) @db.Uuid
+  tenantId    String             @db.Uuid
+  entryNumber String
+  entryDate   DateTime
+  description String?
+  status      JournalEntryStatus @default(DRAFT)
+  postedAt    DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  lines JournalLine[]
+
+  @@unique([tenantId, entryNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, entryDate])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  journalEntryId String   @db.Uuid
+  lineNumber     Int
+  accountId      String   @db.Uuid
+  debitAmount    Decimal  @default(0) @db.Decimal(19, 4)
+  creditAmount   Decimal  @default(0) @db.Decimal(19, 4)
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_lines")
 }

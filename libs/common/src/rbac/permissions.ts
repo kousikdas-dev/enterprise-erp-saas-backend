@@ -83,6 +83,10 @@ export const PERMISSIONS = {
   ACCOUNTS_CREATE: 'accounts.create',
   ACCOUNTS_READ: 'accounts.read',
   ACCOUNTS_UPDATE: 'accounts.update',
+  JOURNAL_ENTRIES_CREATE: 'journal-entries.create',
+  JOURNAL_ENTRIES_READ: 'journal-entries.read',
+  JOURNAL_ENTRIES_UPDATE: 'journal-entries.update',
+  JOURNAL_ENTRIES_POST: 'journal-entries.post',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

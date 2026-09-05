@@ -344,6 +344,26 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description:
       'Update chart of accounts entries, including activation/deactivation',
   },
+  {
+    resource: 'journal-entries',
+    action: 'create',
+    description: 'Create journal entries',
+  },
+  {
+    resource: 'journal-entries',
+    action: 'read',
+    description: 'Read journal entries',
+  },
+  {
+    resource: 'journal-entries',
+    action: 'update',
+    description: 'Update draft journal entries',
+  },
+  {
+    resource: 'journal-entries',
+    action: 'post',
+    description: 'Post journal entries',
+  },
 ];
 
 async function seedSuperAdminPermissions(
@@ -534,7 +554,7 @@ async function main(): Promise<void> {
       `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
     );
     console.log(
-      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, Inventory V1, Purchase V1, Sales V1, and Accounting Chart of Accounts permissions; viewer and OTHER remain unprivileged',
+      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, Inventory V1, Purchase V1, Sales V1, and Accounting (Chart of Accounts + Journal Entries) permissions; viewer and OTHER remain unprivileged',
     );
     console.log(
       `Identity RBAC seed: '${SALESPERSON_ROLE_NAME}' role ensured (no permissions attached; assign to users via User Roles)`,
