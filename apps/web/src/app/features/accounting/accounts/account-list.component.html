@@ -1,0 +1,130 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Chart of Accounts</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by code, name, type…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Account
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No accounts yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Parent</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ item.code }}</td>
+              <td>{{ item.name }}</td>
+              <td class="text-muted">{{ item.type }}</td>
+              <td class="text-muted">{{ item.parent ? parentLabel(item.parent) : '—' }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="item.isActive ? 'bg-success' : 'bg-secondary'">
+                  {{ item.isActive ? 'ACTIVE' : 'INACTIVE' }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm"
+                  [class.btn-outline-danger]="item.isActive"
+                  [class.btn-outline-success]="!item.isActive"
+                  [disabled]="statusBusyId === item.id"
+                  (click)="toggleStatus(item)">
+                  {{ statusBusyId === item.id ? 'Working…' : (item.isActive ? 'Deactivate' : 'Activate') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Account' : 'Create Account' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="accountCode">Code</label>
+          <input id="accountCode" class="form-control" formControlName="code" maxlength="32" />
+          <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+            Code is required.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="accountType">Type</label>
+          <select id="accountType" class="form-select" formControlName="type">
+            <option *ngFor="let t of accountTypes" [value]="t">{{ t }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="accountName">Name</label>
+        <input id="accountName" class="form-control" formControlName="name" maxlength="160" />
+        <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+          Name is required.
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="accountParent">Parent Account</label>
+        <select id="accountParent" class="form-select" formControlName="parentId">
+          <option value="">No parent</option>
+          <option *ngFor="let p of parentOptions" [value]="p.id">{{ parentLabel(p) }}</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="accountDescription">Description</label>
+        <textarea
+          id="accountDescription"
+          class="form-control"
+          rows="2"
+          maxlength="500"
+          formControlName="description"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>

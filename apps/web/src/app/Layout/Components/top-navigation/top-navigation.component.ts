@@ -33,9 +33,9 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
         { label: 'Customers', route: '/sales/customers' },
         { label: 'Quotations', route: '/sales/quotations' },
         { label: 'Proforma Invoices', route: '/sales/proforma-invoices' },
-        { label: 'Sales Invoices', route: '/sales/sales-invoices' },
         { label: 'Sales Orders', route: '/sales/sales-orders' },
         { label: 'Shipments', route: '/sales/shipments' },
+        { label: 'Sales Invoices', route: '/sales/sales-invoices' },
       ]
     },
     {
@@ -53,6 +53,11 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
         { label: 'Warehouses', route: '/inventory/warehouses' },
         { label: 'Stock', route: '/inventory/stock' },
         { label: 'Stock Movements', route: '/inventory/stock-movements' },
+      ]
+    },
+    {
+      id: 'accountingMenu', label: 'Accounting', children: [
+        { label: 'Chart of Accounts', route: '/accounting/accounts' },
       ]
     },
     {

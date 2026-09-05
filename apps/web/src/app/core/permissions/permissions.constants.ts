@@ -75,6 +75,9 @@ export const AppPermissions = {
   ROLES_UPDATE: 'roles.update',
   ROLES_PERMISSIONS: 'roles.permissions',
   PERMISSIONS_READ: 'permissions.read',
+  ACCOUNTS_CREATE: 'accounts.create',
+  ACCOUNTS_READ: 'accounts.read',
+  ACCOUNTS_UPDATE: 'accounts.update',
 } as const;
 
 export type AppPermission =

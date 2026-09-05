@@ -56,6 +56,8 @@ export const GLOBAL_PREFIX_EXCLUDES: Array<{
   { path: 'sales-orders/{*path}', method: RequestMethod.ALL },
   { path: 'shipments', method: RequestMethod.ALL },
   { path: 'shipments/{*path}', method: RequestMethod.ALL },
+  { path: 'accounts', method: RequestMethod.ALL },
+  { path: 'accounts/{*path}', method: RequestMethod.ALL },
 ];
 
 const EXCLUDED_SEGMENTS = new Set(
