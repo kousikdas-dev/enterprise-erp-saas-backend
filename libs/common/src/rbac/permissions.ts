@@ -80,6 +80,9 @@ export const PERMISSIONS = {
   SHIPMENTS_CREATE: 'shipments.create',
   SHIPMENTS_READ: 'shipments.read',
   SHIPMENTS_POST: 'shipments.post',
+  ACCOUNTS_CREATE: 'accounts.create',
+  ACCOUNTS_READ: 'accounts.read',
+  ACCOUNTS_UPDATE: 'accounts.update',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

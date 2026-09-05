@@ -12,6 +12,7 @@ import {
 import { MessagingModule } from '@app/messaging';
 import { DownstreamModule } from './downstream/downstream.module';
 import { AuthModule } from './auth/auth.module';
+import { AccountingAdminModule } from './accounting/accounting-admin.module';
 import { IdentityAdminModule } from './identity/identity-admin.module';
 import { InventoryAdminModule } from './inventory/inventory-admin.module';
 import { PurchaseAdminModule } from './purchase/purchase-admin.module';
@@ -36,6 +37,7 @@ import { RbacModule } from './rbac/rbac.module';
     PurchaseAdminModule,
     SalesAdminModule,
     MasterDataAdminModule,
+    AccountingAdminModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,

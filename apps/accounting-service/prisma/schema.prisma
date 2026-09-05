@@ -9,15 +9,35 @@ datasource db {
 }
 
 // Domain models are added incrementally. This service owns accounting_db only.
-// Planned: Account, JournalEntry, JournalLine (balanced double-entry),
-// FiscalPeriod, TrialBalance snapshots.
-// This service never reads sales_db or inventory_db directly.
+// Planned next: JournalEntry, JournalLine (balanced double-entry),
+// FiscalPeriod, TrialBalance snapshots, Tax Master.
+// This service never reads sales_db, purchase_db or inventory_db directly.
 
-/// Infrastructure-only marker so Prisma Client can be generated before domain models exist.
-/// Not a business entity. Do not expose via API.
-model SchemaMeta {
-  id        String   @id @default("foundation")
-  appliedAt DateTime @default(now())
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
 
-  @@map("_schema_meta")
+model Account {
+  id          String      @id @default(uuid()) @db.Uuid
+  tenantId    String      @db.Uuid
+  code        String
+  name        String
+  type        AccountType
+  description String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  parentId String?  @db.Uuid
+  parent   Account? @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children Account[] @relation("AccountHierarchy")
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([tenantId, parentId])
+  @@map("accounts")
 }

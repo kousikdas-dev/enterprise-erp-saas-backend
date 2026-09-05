@@ -143,6 +143,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp}:${POSTGRES_PASSWORD:-erp_local_only}@postgres:5432/accounting_db?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
       RABBITMQ_QUEUE: accounting.events
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
       LOG_LEVEL: info
     ports:
       - "3004:3004"

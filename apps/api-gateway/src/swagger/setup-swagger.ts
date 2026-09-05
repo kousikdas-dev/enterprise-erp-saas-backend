@@ -52,6 +52,7 @@ export function setupGatewaySwagger(app: INestApplication): void {
     .addTag('Sales Invoices', 'Sales invoices')
     .addTag('Shipments', 'Sales shipments and stock posting')
     .addTag('Accounting', 'General ledger and financial postings')
+    .addTag('Chart of Accounts', 'Accounting chart of accounts')
     .build();
 
   const document = SwaggerModule.createDocument(app, config, {

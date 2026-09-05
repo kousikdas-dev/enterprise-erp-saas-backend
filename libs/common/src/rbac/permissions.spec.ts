@@ -24,6 +24,8 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.SALES_INVOICES_SEND).toBe('sales-invoices.send');
     expect(PERMISSIONS.SALES_INVOICES_CANCEL).toBe('sales-invoices.cancel');
     expect(PERMISSIONS.SHIPMENTS_POST).toBe('shipments.post');
+    expect(PERMISSIONS.ACCOUNTS_CREATE).toBe('accounts.create');
+    expect(PERMISSIONS.ACCOUNTS_UPDATE).toBe('accounts.update');
   });
 
   it('allows when all required permissions are owned', () => {
