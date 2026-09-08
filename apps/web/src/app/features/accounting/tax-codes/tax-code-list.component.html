@@ -1,0 +1,172 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Tax Master</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by code, name, description…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Tax Code
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No tax codes yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Components</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ item.code }}</td>
+              <td>{{ item.name }}</td>
+              <td class="text-muted">{{ item.description || '—' }}</td>
+              <td class="text-muted">
+                {{ item.components?.length ? (item.components.length + ' component' + (item.components.length === 1 ? '' : 's')) : '—' }}
+              </td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="item.isActive ? 'bg-success' : 'bg-secondary'">
+                  {{ item.isActive ? 'ACTIVE' : 'INACTIVE' }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canUpdate"
+                  type="button"
+                  class="btn btn-sm"
+                  [class.btn-outline-danger]="item.isActive"
+                  [class.btn-outline-success]="!item.isActive"
+                  [disabled]="statusBusyId === item.id"
+                  (click)="toggleStatus(item)">
+                  {{ statusBusyId === item.id ? 'Working…' : (item.isActive ? 'Deactivate' : 'Activate') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Tax Code' : 'Create Tax Code' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="taxCodeCode">Code</label>
+          <input id="taxCodeCode" class="form-control" formControlName="code" maxlength="32" />
+          <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+            Code is required.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="taxCodeName">Name</label>
+          <input id="taxCodeName" class="form-control" formControlName="name" maxlength="160" />
+          <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+            Name is required.
+          </div>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="taxCodeDescription">Description</label>
+        <textarea
+          id="taxCodeDescription"
+          class="form-control"
+          rows="2"
+          maxlength="500"
+          formControlName="description"></textarea>
+      </div>
+
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <label class="form-label mb-0">Components</label>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="addComponent()">
+          Add Component
+        </button>
+      </div>
+
+      <div class="table-responsive" formArrayName="components">
+        <table class="table table-sm table-borderless align-middle mb-2">
+          <thead>
+            <tr>
+              <th style="width: 60px;">#</th>
+              <th>Type</th>
+              <th>Name</th>
+              <th style="width: 120px;">Rate</th>
+              <th>Account</th>
+              <th style="width: 40px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let component of components.controls; let i = index" [formGroupName]="i">
+              <td>{{ i + 1 }}</td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="type">
+                  <option *ngFor="let t of componentTypes" [value]="t">{{ t }}</option>
+                </select>
+              </td>
+              <td>
+                <input type="text" class="form-control form-control-sm" maxlength="160" formControlName="name" />
+              </td>
+              <td>
+                <input type="text" class="form-control form-control-sm" formControlName="rate" />
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="accountId">
+                  <option value="">No account</option>
+                  <option *ngFor="let a of accounts" [value]="a.id">{{ accountLabel(a.id) }}</option>
+                </select>
+              </td>
+              <td class="text-end">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  [disabled]="components.length <= 1"
+                  (click)="removeComponent(i)">
+                  &times;
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>

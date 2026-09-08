@@ -1,0 +1,200 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Journal Entries</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter by entry number, description…"
+        [(ngModel)]="filter" />
+      <select class="form-select form-select-sm" style="min-width: 140px;" [(ngModel)]="statusFilter">
+        <option value="">All statuses</option>
+        <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Journal Entry
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No journal entries yet. Create one to get started."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Entry Number</th>
+              <th>Entry Date</th>
+              <th>Description</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Total Debit</th>
+              <th class="text-end">Total Credit</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ item.entryNumber }}</td>
+              <td>{{ item.entryDate | slice:0:10 }}</td>
+              <td class="text-muted">{{ item.description || '—' }}</td>
+              <td class="text-center">
+                <span
+                  class="badge"
+                  [ngClass]="{
+                    'bg-secondary': item.status === 'DRAFT',
+                    'bg-success': item.status === 'POSTED',
+                    'bg-dark': item.status === 'VOID'
+                  }">
+                  {{ item.status }}
+                </span>
+              </td>
+              <td class="text-end">{{ totalDebit(item) }}</td>
+              <td class="text-end">{{ totalCredit(item) }}</td>
+              <td class="text-end text-nowrap">
+                <button
+                  *ngIf="canUpdate && isEditable(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canPost && item.status === 'DRAFT'"
+                  type="button"
+                  class="btn btn-sm btn-outline-success"
+                  (click)="askPost(item)">
+                  Post
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Journal Entry' : 'Create Journal Entry' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="entryDate">Entry Date</label>
+          <input
+            id="entryDate"
+            type="date"
+            class="form-control"
+            formControlName="entryDate" />
+          <div class="text-danger small" *ngIf="form.controls.entryDate.touched && form.controls.entryDate.invalid">
+            Entry date is required.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="entryDescription">Description</label>
+          <input
+            id="entryDescription"
+            class="form-control"
+            maxlength="500"
+            formControlName="description" />
+        </div>
+      </div>
+
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <label class="form-label mb-0">Lines</label>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="addLine()">
+          Add Line
+        </button>
+      </div>
+
+      <div class="table-responsive" formArrayName="lines">
+        <table class="table table-sm table-borderless align-middle mb-2">
+          <thead>
+            <tr>
+              <th style="width: 60px;">#</th>
+              <th>Account</th>
+              <th style="width: 140px;">Debit</th>
+              <th style="width: 140px;">Credit</th>
+              <th>Description</th>
+              <th style="width: 40px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+              <td>{{ i + 1 }}</td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="accountId">
+                  <option value="" disabled>Select account…</option>
+                  <option *ngFor="let a of accounts" [value]="a.id">{{ accountLabel(a.id) }}</option>
+                </select>
+              </td>
+              <td>
+                <input type="text" class="form-control form-control-sm" formControlName="debitAmount" />
+              </td>
+              <td>
+                <input type="text" class="form-control form-control-sm" formControlName="creditAmount" />
+              </td>
+              <td>
+                <input type="text" class="form-control form-control-sm" maxlength="500" formControlName="description" />
+              </td>
+              <td class="text-end">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  [disabled]="lines.length <= 1"
+                  (click)="removeLine(i)">
+                  &times;
+                </button>
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2" class="text-end fw-bold">Totals</td>
+              <td class="fw-bold">{{ formDebitTotal }}</td>
+              <td class="fw-bold">{{ formCreditTotal }}</td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #postModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Post Journal Entry</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body">
+    <p>
+      Are you sure you want to post journal entry <strong>{{ postTarget?.entryNumber }}</strong>?
+      This action cannot be undone.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+    <button type="button" class="btn btn-success" [disabled]="posting" (click)="confirmPost(modal)">
+      {{ posting ? 'Posting…' : 'Post' }}
+    </button>
+  </div>
+</ng-template>

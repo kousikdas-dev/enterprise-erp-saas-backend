@@ -45,3 +45,126 @@ export interface UpdateAccountStatusRequest {
 export interface ItemList<T> {
   items: T[];
 }
+
+export type JournalEntryStatus = 'DRAFT' | 'POSTED' | 'VOID';
+
+export interface JournalLineAccount {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface JournalLine {
+  id: string;
+  tenantId: string;
+  journalEntryId: string;
+  lineNumber: number;
+  accountId: string;
+  account: JournalLineAccount;
+  debitAmount: string;
+  creditAmount: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  tenantId: string;
+  entryNumber: string;
+  entryDate: string;
+  description: string | null;
+  status: JournalEntryStatus;
+  postedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: JournalLine[];
+}
+
+export interface JournalEntryList {
+  items: JournalEntry[];
+}
+
+export interface CreateJournalLineRequest {
+  lineNumber: number;
+  accountId: string;
+  debitAmount: string;
+  creditAmount: string;
+  description?: string;
+}
+
+export interface CreateJournalEntryRequest {
+  entryDate?: string;
+  description?: string;
+  lines?: CreateJournalLineRequest[];
+}
+
+export interface UpdateJournalEntryRequest {
+  entryDate?: string;
+  description?: string | null;
+  lines?: CreateJournalLineRequest[];
+}
+
+export type TaxComponentType = 'CGST' | 'SGST' | 'IGST' | 'CESS' | 'OTHER';
+
+export interface TaxComponentAccount {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface TaxComponent {
+  id: string;
+  tenantId: string;
+  taxCodeId: string;
+  sequence: number;
+  type: TaxComponentType;
+  name: string | null;
+  rate: string;
+  accountId: string | null;
+  account: TaxComponentAccount | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaxCode {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  components: TaxComponent[];
+}
+
+export interface TaxCodeList {
+  items: TaxCode[];
+}
+
+export interface CreateTaxComponentRequest {
+  sequence: number;
+  type: TaxComponentType;
+  name?: string;
+  rate: string;
+  accountId?: string;
+}
+
+export interface CreateTaxCodeRequest {
+  code: string;
+  name: string;
+  description?: string;
+  components: CreateTaxComponentRequest[];
+}
+
+export interface UpdateTaxCodeRequest {
+  code?: string;
+  name?: string;
+  description?: string | null;
+  components?: CreateTaxComponentRequest[];
+}
+
+export interface UpdateTaxCodeStatusRequest {
+  isActive: boolean;
+}

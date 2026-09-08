@@ -58,6 +58,8 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
     {
       id: 'accountingMenu', label: 'Accounting', children: [
         { label: 'Chart of Accounts', route: '/accounting/accounts' },
+        { label: 'Journal Entries', route: '/accounting/journal-entries' },
+        { label: 'Tax Master', route: '/accounting/tax-codes' },
       ]
     },
     {
