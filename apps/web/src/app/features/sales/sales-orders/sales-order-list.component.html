@@ -204,6 +204,8 @@
       <dd class="col-sm-8" *ngIf="o.quotationId"><code>{{ o.quotationId | slice:0:8 }}…</code></dd>
       <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ o.notes || '—' }}</dd>
       <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ o.subtotal }}</code></dd>
+      <dt class="col-sm-4">Discount total</dt><dd class="col-sm-8"><code>{{ o.discountTotal }}</code></dd>
+      <dt class="col-sm-4">Tax total</dt><dd class="col-sm-8"><code>{{ o.taxTotal }}</code></dd>
       <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ o.total }}</code></dd>
     </dl>
     <div class="table-responsive">
@@ -214,7 +216,12 @@
             <th class="text-end">Ordered</th>
             <th class="text-end">Shipped</th>
             <th class="text-end">Remaining</th>
+            <th>UOM</th>
             <th class="text-end">Unit price</th>
+            <th class="text-end">Discount %</th>
+            <th>Tax</th>
+            <th class="text-end">Line subtotal</th>
+            <th class="text-end">Tax amount</th>
             <th class="text-end">Line total</th>
           </tr>
         </thead>
@@ -224,7 +231,12 @@
             <td class="text-end"><code>{{ line.orderedQuantity }}</code></td>
             <td class="text-end"><code>{{ line.shippedQuantity }}</code></td>
             <td class="text-end"><code>{{ line.remainingQuantity }}</code></td>
+            <td>{{ line.uomCode || '—' }}</td>
             <td class="text-end"><code>{{ line.unitPrice }}</code></td>
+            <td class="text-end"><code>{{ line.discountPercent }}</code></td>
+            <td>{{ line.taxCode || '—' }}</td>
+            <td class="text-end"><code>{{ line.lineSubtotal }}</code></td>
+            <td class="text-end"><code>{{ line.taxAmount }}</code></td>
             <td class="text-end"><code>{{ line.lineTotal }}</code></td>
           </tr>
         </tbody>

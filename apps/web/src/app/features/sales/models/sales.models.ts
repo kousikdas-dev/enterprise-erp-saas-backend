@@ -223,14 +223,35 @@ export interface UpdateQuotationRequest {
 
 export type ProformaInvoiceStatus = 'DRAFT' | 'ISSUED' | 'CANCELLED';
 
+export interface ProformaInvoiceItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
 export interface ProformaInvoiceItem {
   id: string;
   productId: string;
   productSku: string;
   productName: string;
   quantity: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: string | null;
   unitPrice: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
   lineTotal: string;
+  taxComponents: ProformaInvoiceItemTaxComponent[];
 }
 
 export interface ProformaInvoice {
@@ -246,6 +267,8 @@ export interface ProformaInvoice {
   shippingAddress: string | null;
   notes: string | null;
   subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
   total: string;
   items: ProformaInvoiceItem[];
 }
@@ -271,16 +294,37 @@ export type SalesOrderStatus =
   | 'SHIPPED'
   | 'CANCELLED';
 
+export interface SalesOrderItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
 export interface SalesOrderItem {
   id: string;
   productId: string;
   productSku: string;
   productName: string;
   orderedQuantity: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: string | null;
   shippedQuantity: string;
   remainingQuantity: string;
   unitPrice: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
   lineTotal: string;
+  taxComponents: SalesOrderItemTaxComponent[];
 }
 
 export interface SalesOrder {
@@ -292,6 +336,8 @@ export interface SalesOrder {
   customerName: string;
   notes: string | null;
   subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
   total: string;
   items: SalesOrderItem[];
 }
@@ -314,14 +360,35 @@ export interface UpdateSalesOrderRequest {
 
 export type SalesInvoiceStatus = 'DRAFT' | 'SENT' | 'CANCELLED';
 
+export interface SalesInvoiceItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
 export interface SalesInvoiceItem {
   id: string;
   productId: string;
   productSku: string;
   productName: string;
   quantity: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: string | null;
   unitPrice: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
   lineTotal: string;
+  taxComponents: SalesInvoiceItemTaxComponent[];
 }
 
 export interface SalesInvoice {
@@ -341,6 +408,8 @@ export interface SalesInvoice {
   dueDate: string | null;
   notes: string | null;
   subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
   total: string;
   sentAt: string | null;
   items: SalesInvoiceItem[];
