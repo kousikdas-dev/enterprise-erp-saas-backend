@@ -311,7 +311,18 @@ export class ProformaInvoicesService {
             productSku: line.productSku,
             productName: line.productName,
             quantity: line.quantity,
+            unitOfMeasureId: line.unitOfMeasureId,
+            uomCode: line.uomCode,
+            uomName: line.uomName,
+            conversionFactor: line.conversionFactor,
             unitPrice: line.unitPrice,
+            discountPercent: line.discountPercent,
+            discountAmount: line.discountAmount,
+            taxCodeId: line.taxCodeId,
+            taxCode: line.taxCode,
+            taxCodeName: line.taxCodeName,
+            taxAmount: line.taxAmount,
+            lineSubtotal: line.lineSubtotal,
             lineTotal: line.lineTotal,
           })),
         });
@@ -470,7 +481,21 @@ export class ProformaInvoicesService {
         productSku: item.productSku.trim(),
         productName: item.productName.trim(),
         quantity,
+        // Manually-replaced items via update() do not yet expose UOM/discount/tax
+        // input capability, so every snapshot field is explicitly its neutral
+        // value rather than left undefined.
+        unitOfMeasureId: null as string | null,
+        uomCode: null as string | null,
+        uomName: null as string | null,
+        conversionFactor: null as Prisma.Decimal | null,
         unitPrice,
+        discountPercent: new Prisma.Decimal(0),
+        discountAmount: new Prisma.Decimal(0),
+        taxCodeId: null as string | null,
+        taxCode: null as string | null,
+        taxCodeName: null as string | null,
+        taxAmount: new Prisma.Decimal(0),
+        lineSubtotal: lineTotal,
         lineTotal,
       };
     });

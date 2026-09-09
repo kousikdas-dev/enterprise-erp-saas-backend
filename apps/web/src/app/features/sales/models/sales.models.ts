@@ -130,14 +130,35 @@ export type QuotationStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
+export interface QuotationItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
 export interface QuotationItem {
   id: string;
   productId: string;
   productSku: string;
   productName: string;
   quantity: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: string | null;
   unitPrice: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
   lineTotal: string;
+  taxComponents: QuotationItemTaxComponent[];
 }
 
 export interface Quotation {
@@ -154,16 +175,26 @@ export interface Quotation {
   deliveryDate: string | null;
   validUntil: string | null;
   subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
   total: string;
   items: QuotationItem[];
 }
 
+/** Shared by proforma invoices, sales invoices, and sales orders — do not add fields required only by quotations here. */
 export interface QuotationLineInput {
   productId: string;
   productSku: string;
   productName: string;
   quantity: string;
   unitPrice: string;
+}
+
+/** Quotation-only line input: adds UOM/discount/tax on top of the shared QuotationLineInput shape. */
+export interface QuotationItemInput extends QuotationLineInput {
+  unitOfMeasureId: string;
+  discountPercent?: string;
+  taxCodeId?: string;
 }
 
 export interface CreateQuotationRequest {
@@ -175,7 +206,7 @@ export interface CreateQuotationRequest {
   paymentTermId?: string;
   salespersonId?: string;
   deliveryDate?: string;
-  items: QuotationLineInput[];
+  items: QuotationItemInput[];
 }
 
 export interface UpdateQuotationRequest {
@@ -187,7 +218,7 @@ export interface UpdateQuotationRequest {
   paymentTermId?: string | null;
   salespersonId?: string | null;
   deliveryDate?: string | null;
-  items?: QuotationLineInput[];
+  items?: QuotationItemInput[];
 }
 
 export type ProformaInvoiceStatus = 'DRAFT' | 'ISSUED' | 'CANCELLED';

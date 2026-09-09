@@ -193,9 +193,14 @@
         <table class="table table-sm align-middle">
           <thead>
             <tr>
-              <th style="min-width: 220px;">Product</th>
-              <th style="min-width: 120px;">Quantity</th>
-              <th style="min-width: 120px;">Unit price</th>
+              <th style="min-width: 200px;">Product</th>
+              <th style="min-width: 110px;">Quantity</th>
+              <th style="min-width: 140px;">UOM</th>
+              <th style="min-width: 110px;">Unit price</th>
+              <th style="min-width: 90px;">Discount %</th>
+              <th style="min-width: 160px;">Tax</th>
+              <th class="text-end">Line subtotal</th>
+              <th class="text-end">Tax amount</th>
               <th class="text-end">Line total</th>
               <th></th>
             </tr>
@@ -215,13 +220,37 @@
                 </div>
               </td>
               <td>
+                <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                  <option value="">Select UOM…</option>
+                  <option *ngFor="let u of uomOptionsFor(line.value.productId)" [value]="u.id">{{ u.label }}</option>
+                </select>
+              </td>
+              <td>
                 <input class="form-control form-control-sm" formControlName="unitPrice" placeholder="25.0000" />
                 <div class="text-danger small" *ngIf="line.get('unitPrice')?.touched && line.get('unitPrice')?.invalid">
                   Max 4 decimal places.
                 </div>
               </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="discountPercent" placeholder="0.00" />
+                <div class="text-danger small" *ngIf="line.get('discountPercent')?.touched && line.get('discountPercent')?.invalid">
+                  Max 2 decimal places.
+                </div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="taxCodeId">
+                  <option value="">No tax</option>
+                  <option *ngFor="let t of taxCodes" [value]="t.id">{{ t.code }} — {{ t.name }}</option>
+                </select>
+              </td>
               <td class="text-end">
-                <code>{{ lineTotal(line.value.quantity, line.value.unitPrice) }}</code>
+                <code>{{ linePreview(line.value).lineSubtotal }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).taxAmount }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).lineTotal }}</code>
               </td>
               <td class="text-end">
                 <button
@@ -236,7 +265,29 @@
           </tbody>
         </table>
       </div>
-      <div class="form-text">Line totals are display-only. Backend validates quantities and prices.</div>
+      <div class="d-flex justify-content-end mb-2">
+        <table class="table table-sm table-borderless mb-0" style="max-width: 320px;">
+          <tbody>
+            <tr>
+              <td>Subtotal</td>
+              <td class="text-end"><code>{{ formTotalsPreview.subtotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Discount total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.discountTotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Tax total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.taxTotal }}</code></td>
+            </tr>
+            <tr>
+              <td><strong>Grand total</strong></td>
+              <td class="text-end"><code><strong>{{ formTotalsPreview.grandTotal }}</strong></code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">Line and document totals shown here are display-only previews. The backend computes and returns the authoritative amounts on save.</div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
@@ -272,6 +323,8 @@
       <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ q.billingAddress || '—' }}</dd>
       <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ q.shippingAddress || '—' }}</dd>
       <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ q.subtotal }}</code></dd>
+      <dt class="col-sm-4">Discount total</dt><dd class="col-sm-8"><code>{{ q.discountTotal }}</code></dd>
+      <dt class="col-sm-4">Tax total</dt><dd class="col-sm-8"><code>{{ q.taxTotal }}</code></dd>
       <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ q.total }}</code></dd>
     </dl>
     <div class="table-responsive">
@@ -280,7 +333,12 @@
           <tr>
             <th>Product</th>
             <th class="text-end">Quantity</th>
+            <th>UOM</th>
             <th class="text-end">Unit price</th>
+            <th class="text-end">Discount %</th>
+            <th>Tax</th>
+            <th class="text-end">Line subtotal</th>
+            <th class="text-end">Tax amount</th>
             <th class="text-end">Line total</th>
           </tr>
         </thead>
@@ -288,7 +346,12 @@
           <tr *ngFor="let line of q.items">
             <td>{{ line.productSku }} — {{ line.productName }}</td>
             <td class="text-end"><code>{{ line.quantity }}</code></td>
+            <td>{{ line.uomCode || '—' }}</td>
             <td class="text-end"><code>{{ line.unitPrice }}</code></td>
+            <td class="text-end"><code>{{ line.discountPercent }}</code></td>
+            <td>{{ line.taxCode || '—' }}</td>
+            <td class="text-end"><code>{{ line.lineSubtotal }}</code></td>
+            <td class="text-end"><code>{{ line.taxAmount }}</code></td>
             <td class="text-end"><code>{{ line.lineTotal }}</code></td>
           </tr>
         </tbody>

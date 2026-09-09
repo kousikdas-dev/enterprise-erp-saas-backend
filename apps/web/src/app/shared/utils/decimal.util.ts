@@ -47,7 +47,7 @@ function fromScaledBigInt(value: bigint, scale: number): string {
   return `${sign}${intPart}.${frac}`;
 }
 
-/** Display-only multiply using fixed-scale integer math (no float). */
+/** Display-only multiply using fixed-scale integer math with HALF_UP rounding. */
 export function multiplyDecimals(
   a: string,
   b: string,
@@ -56,24 +56,99 @@ export function multiplyDecimals(
   const left = toScaledBigInt(a, 6);
   const right = toScaledBigInt(b, 6);
   if (!left || !right) {
-    return '—';
+    return String.fromCharCode(0x2014);
   }
+
   const product = left.sign * right.sign * left.abs * right.abs;
-  // product scale = 12; shift to outScale
+
+  // product scale = 12; shift to requested output scale
   const shift = 12 - outScale;
-  const rounded = product / 10n ** BigInt(shift);
-  return fromScaledBigInt(rounded, outScale);
+
+  if (shift <= 0) {
+    return fromScaledBigInt(
+      product * 10n ** BigInt(-shift),
+      outScale,
+    );
+  }
+
+  const divisor = 10n ** BigInt(shift);
+  const sign = product < 0n ? -1n : 1n;
+  const absProduct = product < 0n ? -product : product;
+
+  // HALF_UP: add half the divisor before integer division.
+  const rounded = (absProduct + divisor / 2n) / divisor;
+
+  return fromScaledBigInt(sign * rounded, outScale);
 }
 
-/** Display-only subtract using 6dp integer math. */
-export function subtractDecimals(a: string, b: string): string {
+/** Display-only percentage calculation using fixed-scale integer math with HALF_UP rounding. */
+export function percentageOfDecimal(
+  amount: string,
+  percent: string,
+  outScale = 4,
+): string {
+  const value = toScaledBigInt(amount, 6);
+  const rate = toScaledBigInt(percent, 6);
+
+  if (!value || !rate) {
+    return String.fromCharCode(0x2014);
+  }
+
+  // amount × percentage
+  // Both operands use scale 6, so the product has scale 12.
+  const product = value.sign * rate.sign * value.abs * rate.abs;
+
+  // Divide by 100 and round to the requested output scale.
+  const shift = 12 - outScale;
+  const divisor = 100n * 10n ** BigInt(shift);
+
+  const sign = product < 0n ? -1n : 1n;
+  const absProduct = product < 0n ? -product : product;
+
+  // HALF_UP rounding.
+  const rounded = (absProduct + divisor / 2n) / divisor;
+
+  return fromScaledBigInt(sign * rounded, outScale);
+}
+
+/** Display-only subtract using fixed-scale integer math. Default outScale (6) preserves existing quantity-math callers. */
+export function subtractDecimals(a: string, b: string, outScale = 6): string {
   const left = toScaledBigInt(a, 6);
   const right = toScaledBigInt(b, 6);
   if (!left || !right) {
     return '—';
   }
   const result = left.sign * left.abs - right.sign * right.abs;
-  return fromScaledBigInt(result, 6);
+  // Inputs are parsed at scale 6; rescale the exact result to outScale (no rounding — operands are already at their final precision).
+  const shift = 6 - outScale;
+  const rescaled =
+    shift === 0
+      ? result
+      : shift > 0
+        ? result / 10n ** BigInt(shift)
+        : result * 10n ** BigInt(-shift);
+  return fromScaledBigInt(rescaled, outScale);
+}
+
+/**
+ * Display-only sum of decimal strings using fixed-scale integer math.
+ * Inputs are assumed already rounded to their final precision (e.g. HALF_UP money
+ * amounts from multiplyDecimals/percentageOfDecimal) — summation itself is exact,
+ * no additional rounding is applied.
+ */
+export function sumDecimals(values: string[], outScale = 4): string {
+  let total = 0n;
+  for (const value of values) {
+    const parsed = toScaledBigInt(value, 6);
+    if (!parsed) {
+      return String.fromCharCode(0x2014);
+    }
+    total += parsed.sign * parsed.abs;
+  }
+  const shift = 6 - outScale;
+  const rescaled =
+    shift === 0 ? total : shift > 0 ? total / 10n ** BigInt(shift) : total * 10n ** BigInt(-shift);
+  return fromScaledBigInt(rescaled, outScale);
 }
 
 export function isPositiveDecimal(value: string): boolean {

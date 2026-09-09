@@ -18,11 +18,15 @@ import { forkJoin, Observable } from 'rxjs';
 import { AppPermissions } from '../../../core/permissions/permissions.constants';
 import { PermissionService } from '../../../core/permissions/permission.service';
 import { ProductService } from '../../inventory/products/product.service';
-import { Product } from '../../inventory/models/inventory.models';
+import { UnitService } from '../../inventory/units/unit.service';
+import { Product, ProductUnit, Unit } from '../../inventory/models/inventory.models';
 import { ToastService } from '../../../shared/toast/toast.service';
 import {
   isPositiveDecimal,
   multiplyDecimals,
+  percentageOfDecimal,
+  subtractDecimals,
+  sumDecimals,
 } from '../../../shared/utils/decimal.util';
 import { apiErrorMessage } from '../../../shared/utils/api-error.util';
 import {
@@ -30,6 +34,7 @@ import {
   CustomerAddress,
   CustomerAddressType,
   Quotation,
+  QuotationItemInput,
 } from '../models/sales.models';
 import { CustomerService } from '../customers/customer.service';
 import { QuotationService } from './quotation.service';
@@ -40,6 +45,8 @@ import {
   User,
 } from '../../administration/models/administration.models';
 import { UserService } from '../../administration/users/user.service';
+import { TaxCode } from '../../accounting/models/accounting.models';
+import { TaxCodeService } from '../../accounting/tax-codes/tax-code.service';
 
 type QuotationAction =
   | 'send'
@@ -63,6 +70,8 @@ export class QuotationListComponent implements OnInit {
   private readonly quotations = inject(QuotationService);
   private readonly customerService = inject(CustomerService);
   private readonly productService = inject(ProductService);
+  private readonly unitService = inject(UnitService);
+  private readonly taxCodeService = inject(TaxCodeService);
   private readonly masterData = inject(MasterDataService);
   private readonly users = inject(UserService);
   private readonly fb = inject(FormBuilder);
@@ -83,10 +92,14 @@ export class QuotationListComponent implements OnInit {
   items: Quotation[] = [];
   customers: Customer[] = [];
   products: Product[] = [];
+  units: Unit[] = [];
+  taxCodes: TaxCode[] = [];
   paymentTerms: MasterDataOption[] = [];
   salespeople: User[] = [];
   billingAddresses: CustomerAddress[] = [];
   shippingAddresses: CustomerAddress[] = [];
+  private readonly productUnitsByProduct = new Map<string, ProductUnit[]>();
+  private readonly loadingProductUnits = new Set<string>();
   loading = false;
   error: string | null = null;
   filter = '';
@@ -207,18 +220,114 @@ export class QuotationListComponent implements OnInit {
     );
   }
 
-  createLineGroup(productId = '', quantity = '', unitPrice = ''): FormGroup {
-    return this.fb.group({
+  createLineGroup(
+    productId = '',
+    quantity = '',
+    unitOfMeasureId = '',
+    unitPrice = '',
+    discountPercent = '',
+    taxCodeId = '',
+  ): FormGroup {
+    const group = this.fb.group({
       productId: [productId, Validators.required],
       quantity: [
         quantity,
         [Validators.required, Validators.pattern(/^\d+(\.\d{1,6})?$/)],
       ],
+      unitOfMeasureId: [unitOfMeasureId, Validators.required],
       unitPrice: [
         unitPrice,
         [Validators.required, Validators.pattern(/^\d+(\.\d{1,4})?$/)],
       ],
+      discountPercent: [
+        discountPercent,
+        [Validators.pattern(/^\d+(\.\d{1,2})?$/)],
+      ],
+      taxCodeId: [taxCodeId],
     });
+
+    group.get('productId')!.valueChanges.subscribe((selectedProductId) => {
+      this.onLineProductChange(group, selectedProductId ?? '');
+    });
+    group.get('unitOfMeasureId')!.valueChanges.subscribe((selectedUomId) => {
+      this.onLineUomChange(group, selectedUomId ?? '');
+    });
+
+    return group;
+  }
+
+  /** Selecting a product defaults its UOM to the base unit and its price from Product.sellingPrice. */
+  private onLineProductChange(group: FormGroup, productId: string): void {
+    const product = this.products.find((p) => p.id === productId);
+    if (!product) {
+      return;
+    }
+    group.patchValue(
+      { unitOfMeasureId: product.unitOfMeasureId, unitPrice: product.sellingPrice },
+      { emitEvent: false },
+    );
+    this.ensureProductUnitsLoaded(productId);
+  }
+
+  /** Selecting an alternative UOM defaults price from that ProductUnit.sellingPrice (never derived from conversionFactor). */
+  private onLineUomChange(group: FormGroup, unitOfMeasureId: string): void {
+    const productId = group.get('productId')!.value as string;
+    const product = this.products.find((p) => p.id === productId);
+    if (!product || !unitOfMeasureId) {
+      return;
+    }
+    if (unitOfMeasureId === product.unitOfMeasureId) {
+      group.get('unitPrice')!.setValue(product.sellingPrice, { emitEvent: false });
+      return;
+    }
+    const alternatives = this.productUnitsByProduct.get(productId) ?? [];
+    const match = alternatives.find((u) => u.unitOfMeasureId === unitOfMeasureId);
+    if (match) {
+      group.get('unitPrice')!.setValue(match.sellingPrice, { emitEvent: false });
+    }
+  }
+
+  private ensureProductUnitsLoaded(productId: string): void {
+    if (!productId || this.productUnitsByProduct.has(productId) || this.loadingProductUnits.has(productId)) {
+      return;
+    }
+    this.loadingProductUnits.add(productId);
+    this.productService.listUnits(productId).subscribe({
+      next: (res) => {
+        this.productUnitsByProduct.set(productId, res.items ?? []);
+        this.loadingProductUnits.delete(productId);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.loadingProductUnits.delete(productId);
+        this.toast.error(apiErrorMessage(err, 'Failed to load UOM options'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  /** UOM select options for a line's chosen product: base unit + active alternative units. */
+  uomOptionsFor(productId: string): Array<{ id: string; label: string }> {
+    const product = this.products.find((p) => p.id === productId);
+    if (!product) {
+      return [];
+    }
+    const options: Array<{ id: string; label: string }> = [];
+    const baseUnit = this.units.find((u) => u.id === product.unitOfMeasureId);
+    if (baseUnit) {
+      options.push({ id: baseUnit.id, label: `${baseUnit.code} — ${baseUnit.name}` });
+    }
+    const alternatives = this.productUnitsByProduct.get(productId) ?? [];
+    for (const alt of alternatives) {
+      if (!alt.isActive || alt.unitOfMeasureId === product.unitOfMeasureId) {
+        continue;
+      }
+      const unit = this.units.find((u) => u.id === alt.unitOfMeasureId);
+      if (unit) {
+        options.push({ id: unit.id, label: `${unit.code} — ${unit.name}` });
+      }
+    }
+    return options;
   }
 
   customerLabel(id: string): string {
@@ -276,23 +385,127 @@ export class QuotationListComponent implements OnInit {
     return this.canConvertToOrder && q.status === 'ACCEPTED';
   }
 
-  lineTotal(quantity: string, unitPrice: string): string {
-    if (!quantity || !unitPrice) {
-      return '—';
+  /** Each tax component's amount, rounded independently from the same lineSubtotal — never combined into one rate. */
+  private taxComponentAmounts(
+    lineSubtotal: string,
+    taxCodeId: string | null | undefined,
+  ): string[] {
+    if (!taxCodeId) {
+      return [];
     }
-    return multiplyDecimals(quantity, unitPrice, 4);
+    const taxCode = this.taxCodes.find((t) => t.id === taxCodeId);
+    if (!taxCode) {
+      return [];
+    }
+    return taxCode.components.map((component) =>
+      percentageOfDecimal(lineSubtotal, component.rate, 4),
+    );
+  }
+
+  /**
+   * Mirrors the backend formula exactly: gross → discountAmount → lineSubtotal →
+   * each tax component independently → taxAmount → lineTotal. All arithmetic uses
+   * the decimal-string utilities (HALF_UP at 4dp for gross/discount/each tax
+   * component; subtraction and summation are exact over already-rounded values).
+   * Returns null when quantity/unitPrice are missing or invalid.
+   */
+  private computeLineAmounts(line: {
+    quantity: string;
+    unitPrice: string;
+    discountPercent: string;
+    taxCodeId: string;
+  }): {
+    gross: string;
+    discountAmount: string;
+    lineSubtotal: string;
+    taxAmount: string;
+    lineTotal: string;
+  } | null {
+    if (!isPositiveDecimal(line.quantity) || !isPositiveDecimal(line.unitPrice)) {
+      return null;
+    }
+    const gross = multiplyDecimals(line.quantity, line.unitPrice, 4);
+    const discountPercent = line.discountPercent?.trim() || '0';
+    const discountAmount = percentageOfDecimal(gross, discountPercent, 4);
+    const lineSubtotal = subtractDecimals(gross, discountAmount, 4);
+    const taxAmount = sumDecimals(
+      this.taxComponentAmounts(lineSubtotal, line.taxCodeId),
+      4,
+    );
+    const lineTotal = sumDecimals([lineSubtotal, taxAmount], 4);
+    return { gross, discountAmount, lineSubtotal, taxAmount, lineTotal };
+  }
+
+  /**
+   * Display-only preview mirroring the backend formula (gross → discount → subtotal → tax → total).
+   * The saved quotation's response from the server is always authoritative.
+   */
+  linePreview(line: {
+    quantity: string;
+    unitPrice: string;
+    discountPercent: string;
+    taxCodeId: string;
+  }): { lineSubtotal: string; taxAmount: string; lineTotal: string } {
+    const amounts = this.computeLineAmounts(line);
+    if (!amounts) {
+      return { lineSubtotal: '—', taxAmount: '—', lineTotal: '—' };
+    }
+    return {
+      lineSubtotal: amounts.lineSubtotal,
+      taxAmount: amounts.taxAmount,
+      lineTotal: amounts.lineTotal,
+    };
+  }
+
+  /** Document-level totals preview, summed from the same per-line amounts above. Display-only. */
+  get formTotalsPreview(): {
+    subtotal: string;
+    discountTotal: string;
+    taxTotal: string;
+    grandTotal: string;
+  } {
+    const grossAmounts: string[] = [];
+    const discountAmounts: string[] = [];
+    const taxAmounts: string[] = [];
+    for (const control of this.lines.controls) {
+      const v = control.value as {
+        quantity: string;
+        unitPrice: string;
+        discountPercent: string;
+        taxCodeId: string;
+      };
+      const amounts = this.computeLineAmounts(v);
+      if (!amounts) {
+        continue;
+      }
+      grossAmounts.push(amounts.gross);
+      discountAmounts.push(amounts.discountAmount);
+      taxAmounts.push(amounts.taxAmount);
+    }
+    const subtotal = sumDecimals(grossAmounts, 4);
+    const discountTotal = sumDecimals(discountAmounts, 4);
+    const taxTotal = sumDecimals(taxAmounts, 4);
+    const grandTotal = sumDecimals(
+      [subtractDecimals(subtotal, discountTotal, 4), taxTotal],
+      4,
+    );
+    return { subtotal, discountTotal, taxTotal, grandTotal };
   }
 
   loadLookups(): void {
     forkJoin({
       customers: this.customerService.list(),
       products: this.productService.list(),
+      units: this.unitService.list(),
+      taxCodes: this.taxCodeService.list(),
       paymentTerms: this.masterData.paymentTerms(),
       salespeople: this.users.list({ role: SALESPERSON_ROLE }),
     }).subscribe({
-      next: ({ customers, products, paymentTerms, salespeople }) => {
+      next: ({ customers, products, units, taxCodes, paymentTerms, salespeople }) => {
         this.customers = customers.items ?? [];
         this.products = products.items ?? [];
+        this.units = units.items ?? [];
+        this.taxCodes = (taxCodes.items ?? []).filter((t) => t.isActive);
         this.paymentTerms = (paymentTerms.items ?? []).filter((p) => p.isActive);
         this.salespeople = (salespeople.items ?? []).filter(
           (u) => u.status === 'ACTIVE',
@@ -402,11 +615,34 @@ export class QuotationListComponent implements OnInit {
     const customer = this.customers.find((c) => c.id === item.customerId);
     this.billingAddresses = this.activeAddressesOf(customer, 'BILLING');
     this.shippingAddresses = this.activeAddressesOf(customer, 'SHIPPING');
+    const billingMatch = this.billingAddresses.find(
+      (a) => this.addressLabel(a) === (item.billingAddress ?? ''),
+    );
+
+    const shippingMatch = this.shippingAddresses.find(
+      (a) => this.addressLabel(a) === (item.shippingAddress ?? ''),
+    );
+
+    this.form.patchValue(
+      {
+        billingAddressId: billingMatch?.id ?? '',
+        shippingAddressId: shippingMatch?.id ?? '',
+      },
+      { emitEvent: false },
+    );
     this.lines.clear();
     for (const line of item.items ?? []) {
       this.lines.push(
-        this.createLineGroup(line.productId, line.quantity, line.unitPrice),
+        this.createLineGroup(
+          line.productId,
+          line.quantity,
+          line.unitOfMeasureId ?? '',
+          line.unitPrice,
+          line.discountPercent ?? '',
+          line.taxCodeId ?? '',
+        ),
       );
+      this.ensureProductUnitsLoaded(line.productId);
     }
     if (this.lines.length === 0) {
       this.lines.push(this.createLineGroup());
@@ -503,7 +739,10 @@ export class QuotationListComponent implements OnInit {
     const rawLines = this.lines.getRawValue() as Array<{
       productId: string;
       quantity: string;
+      unitOfMeasureId: string;
       unitPrice: string;
+      discountPercent: string;
+      taxCodeId: string;
     }>;
     for (const line of rawLines) {
       if (!isPositiveDecimal(line.quantity) || !isPositiveDecimal(line.unitPrice)) {
@@ -512,6 +751,10 @@ export class QuotationListComponent implements OnInit {
       }
       if (!this.products.find((p) => p.id === line.productId)) {
         this.toast.error('Select a valid product for every line.');
+        return;
+      }
+      if (!line.unitOfMeasureId) {
+        this.toast.error('Select a unit of measure for every line.');
         return;
       }
     }
@@ -526,12 +769,17 @@ export class QuotationListComponent implements OnInit {
     const deliveryDate = value.deliveryDate?.trim() || undefined;
     const items = rawLines.map((line) => {
       const product = this.products.find((p) => p.id === line.productId)!;
+      const discountPercent = line.discountPercent?.trim() || undefined;
+      const taxCodeId = line.taxCodeId?.trim() || undefined;
       return {
         productId: line.productId,
         productSku: product.sku,
         productName: product.name,
         quantity: String(line.quantity).trim(),
+        unitOfMeasureId: line.unitOfMeasureId,
         unitPrice: String(line.unitPrice).trim(),
+        ...(discountPercent ? { discountPercent } : {}),
+        ...(taxCodeId ? { taxCodeId } : {}),
       };
     });
 
