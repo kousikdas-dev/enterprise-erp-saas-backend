@@ -1,7 +1,9 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { of } from 'rxjs';
 import {
+  Prisma,
   ProformaInvoiceStatus,
+  SalesInvoicePaymentStatus,
   SalesInvoiceSourceType,
   SalesInvoiceStatus,
   SalesOrderStatus,
@@ -41,6 +43,14 @@ describe('SalesInvoicesService', () => {
     return {
       discountTotal: { toFixed: () => '0.0000' },
       taxTotal: { toFixed: () => '0.0000' },
+    };
+  }
+
+  /** Default payment state for a freshly created/updated invoice — real Decimal since the response mapper computes balanceDue = total.minus(amountPaid). */
+  function unpaidState() {
+    return {
+      amountPaid: new Prisma.Decimal(0),
+      paymentStatus: SalesInvoicePaymentStatus.UNPAID,
     };
   }
 
@@ -130,7 +140,8 @@ describe('SalesInvoicesService', () => {
         notes: null,
         subtotal: { toFixed: () => '10.0000' },
         ...zeroTotals(),
-        total: { toFixed: () => '10.0000' },
+        total: new Prisma.Decimal(10),
+        ...unpaidState(),
         sentAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -230,7 +241,8 @@ describe('SalesInvoicesService', () => {
         notes: 'order notes',
         subtotal: { toFixed: () => '10.0000' },
         ...zeroTotals(),
-        total: { toFixed: () => '10.0000' },
+        total: new Prisma.Decimal(10),
+        ...unpaidState(),
         sentAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -345,7 +357,8 @@ describe('SalesInvoicesService', () => {
         notes: 'proforma notes',
         subtotal: { toFixed: () => '10.0000' },
         ...zeroTotals(),
-        total: { toFixed: () => '10.0000' },
+        total: new Prisma.Decimal(10),
+        ...unpaidState(),
         sentAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -449,7 +462,8 @@ describe('SalesInvoicesService', () => {
         ...draftRow,
         subtotal: { toFixed: () => '10.0000' },
         ...zeroTotals(),
-        total: { toFixed: () => '10.0000' },
+        total: new Prisma.Decimal(10),
+        ...unpaidState(),
         items: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -497,6 +511,7 @@ describe('SalesInvoicesService', () => {
       tenantId,
       customerId: 'c1',
       status: SalesInvoiceStatus.DRAFT,
+      total: new Prisma.Decimal(10),
       items: [{ id: 'i1' }],
     };
 
@@ -507,7 +522,8 @@ describe('SalesInvoicesService', () => {
         sentAt: new Date(),
         subtotal: { toFixed: () => '10.0000' },
         ...zeroTotals(),
-        total: { toFixed: () => '10.0000' },
+        total: new Prisma.Decimal(10),
+        ...unpaidState(),
         items: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -584,19 +600,57 @@ describe('SalesInvoicesService', () => {
         BadRequestException,
       );
     });
+
+    it('marks a zero-total invoice as PAID when sent (no balance can ever be due)', async () => {
+      const zeroTotalDraft = { ...draftRow, total: new Prisma.Decimal(0) };
+      const updateMock = jest.fn().mockResolvedValue({
+        ...zeroTotalDraft,
+        status: SalesInvoiceStatus.SENT,
+        sentAt: new Date(),
+        subtotal: { toFixed: () => '0.0000' },
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        amountPaid: new Prisma.Decimal(0),
+        paymentStatus: SalesInvoicePaymentStatus.PAID,
+      });
+      const prisma = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(zeroTotalDraft),
+          update: updateMock,
+        },
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        makeEventBus() as never,
+      );
+      await service.send(actor, 'inv1');
+      expect(updateMock.mock.calls[0][0].data.paymentStatus).toBe(
+        SalesInvoicePaymentStatus.PAID,
+      );
+    });
   });
 
   describe('cancel', () => {
     it.each([SalesInvoiceStatus.DRAFT, SalesInvoiceStatus.SENT])(
       'cancels from %s',
       async (status) => {
-        const row = { id: 'inv1', tenantId, status, items: [] };
+        const row = {
+          id: 'inv1',
+          tenantId,
+          status,
+          items: [],
+          ...unpaidState(),
+        };
         const cancelled = {
           ...row,
           status: SalesInvoiceStatus.CANCELLED,
           subtotal: { toFixed: () => '0.0000' },
           ...zeroTotals(),
-          total: { toFixed: () => '0.0000' },
+          total: new Prisma.Decimal(0),
           sentAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -638,6 +692,438 @@ describe('SalesInvoicesService', () => {
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toBeInstanceOf(
         ConflictException,
+      );
+    });
+
+    it('rejects cancelling a SENT invoice that has recorded payments', async () => {
+      const prisma = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'inv1',
+            tenantId,
+            status: SalesInvoiceStatus.SENT,
+            items: [],
+            amountPaid: new Prisma.Decimal(40),
+            paymentStatus: SalesInvoicePaymentStatus.PARTIALLY_PAID,
+          }),
+        },
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn() } as never,
+        makeEventBus() as never,
+      );
+      await expect(service.cancel(actor, 'inv1')).rejects.toThrow(
+        'Cannot cancel a sales invoice that has recorded payments',
+      );
+    });
+
+    it('rejects cancelling a fully PAID invoice with the same payment-specific error', async () => {
+      const prisma = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'inv1',
+            tenantId,
+            status: SalesInvoiceStatus.SENT,
+            items: [],
+            amountPaid: new Prisma.Decimal(100),
+            paymentStatus: SalesInvoicePaymentStatus.PAID,
+          }),
+        },
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn() } as never,
+        makeEventBus() as never,
+      );
+      await expect(service.cancel(actor, 'inv1')).rejects.toThrow(
+        'Cannot cancel a sales invoice that has recorded payments',
+      );
+    });
+  });
+
+  describe('recordPayment', () => {
+    function sentInvoiceRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'inv1',
+        tenantId,
+        status: SalesInvoiceStatus.SENT,
+        total: new Prisma.Decimal(100),
+        amountPaid: new Prisma.Decimal(0),
+        paymentStatus: SalesInvoicePaymentStatus.UNPAID,
+        ...overrides,
+      };
+    }
+
+    function makePaymentRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'pay1',
+        tenantId,
+        salesInvoiceId: 'inv1',
+        amount: new Prisma.Decimal(40),
+        paymentDate: new Date('2026-01-15'),
+        paymentMethodId: null,
+        reference: null,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    /** Builds a $transaction mock whose tx exposes the raw-SQL lock plus the typed queries recordPayment relies on. */
+    function makeTxHarness(options: {
+      lockRows?: Array<{ id: string }>;
+      invoice: ReturnType<typeof sentInvoiceRow>;
+      createdPayment: ReturnType<typeof makePaymentRow>;
+      updatedInvoice?: Record<string, unknown>;
+    }) {
+      const queryRawMock = jest
+        .fn()
+        .mockResolvedValue(options.lockRows ?? [{ id: 'inv1' }]);
+      const findFirstOrThrowMock = jest.fn().mockResolvedValue(options.invoice);
+      const createPaymentMock = jest
+        .fn()
+        .mockResolvedValue(options.createdPayment);
+      const updateInvoiceMock = jest.fn().mockResolvedValue(
+        options.updatedInvoice ?? {
+          ...options.invoice,
+          items: [],
+          subtotal: options.invoice.total,
+          discountTotal: new Prisma.Decimal(0),
+          taxTotal: new Prisma.Decimal(0),
+          sentAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      );
+      const tx = {
+        $queryRaw: queryRawMock,
+        salesInvoice: {
+          findFirstOrThrow: findFirstOrThrowMock,
+          update: updateInvoiceMock,
+        },
+        salesPayment: { create: createPaymentMock },
+      };
+      const prisma = {
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      return { prisma, tx, queryRawMock, findFirstOrThrowMock, createPaymentMock, updateInvoiceMock };
+    }
+
+    function makeService(prisma: unknown, audit: { record: jest.Mock } = { record: jest.fn().mockResolvedValue(undefined) }) {
+      return new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        audit as never,
+        makeEventBus() as never,
+      );
+    }
+
+    it('accepts a payment against a SENT invoice and returns payment + updated balance', async () => {
+      const invoice = sentInvoiceRow();
+      const payment = makePaymentRow({ amount: new Prisma.Decimal(40) });
+      const { prisma, updateInvoiceMock } = makeTxHarness({
+        invoice,
+        createdPayment: payment,
+      });
+      const service = makeService(prisma);
+
+      const result = await service.recordPayment(actor, 'inv1', {
+        amount: '40',
+        paymentDate: '2026-01-15',
+      });
+
+      expect(result.payment.amount).toBe('40.0000');
+      expect(updateInvoiceMock.mock.calls[0][0].data.amountPaid.toFixed(4)).toBe(
+        '40.0000',
+      );
+      expect(updateInvoiceMock.mock.calls[0][0].data.paymentStatus).toBe(
+        SalesInvoicePaymentStatus.PARTIALLY_PAID,
+      );
+    });
+
+    it('rejects payment against a DRAFT invoice', async () => {
+      const invoice = sentInvoiceRow({ status: SalesInvoiceStatus.DRAFT });
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '10', paymentDate: '2026-01-15' }),
+      ).rejects.toThrow('Only SENT sales invoices can receive payments');
+    });
+
+    it('rejects payment against a CANCELLED invoice', async () => {
+      const invoice = sentInvoiceRow({ status: SalesInvoiceStatus.CANCELLED });
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '10', paymentDate: '2026-01-15' }),
+      ).rejects.toThrow('Only SENT sales invoices can receive payments');
+    });
+
+    it('rejects a zero-amount payment', async () => {
+      const invoice = sentInvoiceRow();
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '0', paymentDate: '2026-01-15' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a negative-amount payment', async () => {
+      const invoice = sentInvoiceRow();
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '-5', paymentDate: '2026-01-15' }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects an overpayment exceeding the remaining balance', async () => {
+      const invoice = sentInvoiceRow({ amountPaid: new Prisma.Decimal(60) });
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '41', paymentDate: '2026-01-15' }),
+      ).rejects.toThrow('Payment amount exceeds the remaining balance due');
+    });
+
+    it('accepts a payment exactly equal to the remaining balance and marks the invoice PAID', async () => {
+      const invoice = sentInvoiceRow({ amountPaid: new Prisma.Decimal(60) });
+      const payment = makePaymentRow({ amount: new Prisma.Decimal(40) });
+      const { prisma, updateInvoiceMock } = makeTxHarness({ invoice, createdPayment: payment });
+      const service = makeService(prisma);
+
+      await service.recordPayment(actor, 'inv1', { amount: '40', paymentDate: '2026-01-15' });
+
+      expect(updateInvoiceMock.mock.calls[0][0].data.amountPaid.toFixed(4)).toBe(
+        '100.0000',
+      );
+      expect(updateInvoiceMock.mock.calls[0][0].data.paymentStatus).toBe(
+        SalesInvoicePaymentStatus.PAID,
+      );
+    });
+
+    it('accumulates multiple partial payments correctly and stays PARTIALLY_PAID', async () => {
+      // Simulates the invoice state as it stands after a prior partial payment of 30.
+      const invoice = sentInvoiceRow({
+        amountPaid: new Prisma.Decimal(30),
+        paymentStatus: SalesInvoicePaymentStatus.PARTIALLY_PAID,
+      });
+      const payment = makePaymentRow({ amount: new Prisma.Decimal(20) });
+      const { prisma, updateInvoiceMock } = makeTxHarness({ invoice, createdPayment: payment });
+      const service = makeService(prisma);
+
+      await service.recordPayment(actor, 'inv1', { amount: '20', paymentDate: '2026-01-15' });
+
+      expect(updateInvoiceMock.mock.calls[0][0].data.amountPaid.toFixed(4)).toBe(
+        '50.0000',
+      );
+      expect(updateInvoiceMock.mock.calls[0][0].data.paymentStatus).toBe(
+        SalesInvoicePaymentStatus.PARTIALLY_PAID,
+      );
+    });
+
+    it('a second payment completing the balance transitions the invoice to PAID', async () => {
+      const invoice = sentInvoiceRow({
+        amountPaid: new Prisma.Decimal(70),
+        paymentStatus: SalesInvoicePaymentStatus.PARTIALLY_PAID,
+      });
+      const payment = makePaymentRow({ amount: new Prisma.Decimal(30) });
+      const { prisma, updateInvoiceMock } = makeTxHarness({ invoice, createdPayment: payment });
+      const service = makeService(prisma);
+
+      await service.recordPayment(actor, 'inv1', { amount: '30', paymentDate: '2026-01-15' });
+
+      expect(updateInvoiceMock.mock.calls[0][0].data.paymentStatus).toBe(
+        SalesInvoicePaymentStatus.PAID,
+      );
+    });
+
+    it('allows an optional paymentMethodId to be omitted (nullable)', async () => {
+      const invoice = sentInvoiceRow();
+      const payment = makePaymentRow({ paymentMethodId: null });
+      const { prisma, createPaymentMock } = makeTxHarness({ invoice, createdPayment: payment });
+      const service = makeService(prisma);
+
+      await service.recordPayment(actor, 'inv1', { amount: '40', paymentDate: '2026-01-15' });
+
+      expect(createPaymentMock.mock.calls[0][0].data.paymentMethodId).toBeNull();
+    });
+
+    it('records the supplied paymentMethodId when provided', async () => {
+      const invoice = sentInvoiceRow();
+      const payment = makePaymentRow({ paymentMethodId: 'pm-1' });
+      const { prisma, createPaymentMock } = makeTxHarness({ invoice, createdPayment: payment });
+      const service = makeService(prisma);
+
+      await service.recordPayment(actor, 'inv1', {
+        amount: '40',
+        paymentDate: '2026-01-15',
+        paymentMethodId: 'pm-1',
+      });
+
+      expect(createPaymentMock.mock.calls[0][0].data.paymentMethodId).toBe('pm-1');
+    });
+
+    it('rejects with NotFoundException when the invoice does not belong to the caller tenant (lock query finds no row)', async () => {
+      const invoice = sentInvoiceRow();
+      const { prisma } = makeTxHarness({
+        invoice,
+        createdPayment: makePaymentRow(),
+        lockRows: [],
+      });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '10', paymentDate: '2026-01-15' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects another payment against an already fully PAID invoice', async () => {
+      const invoice = sentInvoiceRow({
+        amountPaid: new Prisma.Decimal(100),
+        paymentStatus: SalesInvoicePaymentStatus.PAID,
+      });
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '10', paymentDate: '2026-01-15' }),
+      ).rejects.toThrow('Sales invoice is already fully paid');
+    });
+
+    it('rejects payment against a zero-total SENT invoice (marked PAID at send time, so no balance is ever due)', async () => {
+      const invoice = sentInvoiceRow({
+        total: new Prisma.Decimal(0),
+        amountPaid: new Prisma.Decimal(0),
+        paymentStatus: SalesInvoicePaymentStatus.PAID,
+      });
+      const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
+      const service = makeService(prisma);
+
+      await expect(
+        service.recordPayment(actor, 'inv1', { amount: '10', paymentDate: '2026-01-15' }),
+      ).rejects.toThrow('Sales invoice is already fully paid');
+    });
+
+    it('locks the SalesInvoice row FOR UPDATE as the concurrency serialization point before validating', async () => {
+      const invoice = sentInvoiceRow();
+      const { prisma, queryRawMock, findFirstOrThrowMock } = makeTxHarness({
+        invoice,
+        createdPayment: makePaymentRow(),
+      });
+      const service = makeService(prisma);
+
+      await service.recordPayment(actor, 'inv1', { amount: '10', paymentDate: '2026-01-15' });
+
+      expect(queryRawMock).toHaveBeenCalledTimes(1);
+      const lockQuery = queryRawMock.mock.calls[0][0] as { sql: string };
+      expect(lockQuery.sql).toContain('FOR UPDATE');
+      // The lock must be acquired before the authoritative row is re-read for validation.
+      expect(queryRawMock.mock.invocationCallOrder[0]).toBeLessThan(
+        findFirstOrThrowMock.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('computes amountPaid/balanceDue/paymentStatus correctly on the returned invoice', async () => {
+      const invoice = sentInvoiceRow({ amountPaid: new Prisma.Decimal(30) });
+      const payment = makePaymentRow({ amount: new Prisma.Decimal(20) });
+      const updatedInvoice = {
+        ...invoice,
+        amountPaid: new Prisma.Decimal(50),
+        paymentStatus: SalesInvoicePaymentStatus.PARTIALLY_PAID,
+        items: [],
+        subtotal: invoice.total,
+        discountTotal: new Prisma.Decimal(0),
+        taxTotal: new Prisma.Decimal(0),
+        sentAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const { prisma } = makeTxHarness({
+        invoice,
+        createdPayment: payment,
+        updatedInvoice,
+      });
+      const service = makeService(prisma);
+
+      const result = await service.recordPayment(actor, 'inv1', {
+        amount: '20',
+        paymentDate: '2026-01-15',
+      });
+
+      expect(result.invoice.amountPaid).toBe('50.0000');
+      expect(result.invoice.balanceDue).toBe('50.0000');
+      expect(result.invoice.paymentStatus).toBe(
+        SalesInvoicePaymentStatus.PARTIALLY_PAID,
+      );
+    });
+  });
+
+  describe('listPayments', () => {
+    it('lists payment history for a JWT-tenant invoice, scoped to tenant', async () => {
+      const findFirstMock = jest.fn().mockResolvedValue({
+        id: 'inv1',
+        tenantId,
+        status: SalesInvoiceStatus.SENT,
+        items: [],
+      });
+      const findManyMock = jest.fn().mockResolvedValue([
+        {
+          id: 'pay1',
+          tenantId,
+          salesInvoiceId: 'inv1',
+          amount: new Prisma.Decimal(40),
+          paymentDate: new Date('2026-01-15'),
+          paymentMethodId: null,
+          reference: null,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+      const prisma = {
+        salesInvoice: { findFirst: findFirstMock },
+        salesPayment: { findMany: findManyMock },
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn() } as never,
+        makeEventBus() as never,
+      );
+
+      const result = await service.listPayments(actor, 'inv1');
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].amount).toBe('40.0000');
+      expect(findManyMock.mock.calls[0][0].where).toEqual({
+        salesInvoiceId: 'inv1',
+        tenantId,
+      });
+    });
+
+    it('returns 404 when the invoice does not exist in the caller tenant', async () => {
+      const prisma = {
+        salesInvoice: { findFirst: jest.fn().mockResolvedValue(null) },
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn() } as never,
+        makeEventBus() as never,
+      );
+
+      await expect(service.listPayments(actor, 'inv1')).rejects.toBeInstanceOf(
+        NotFoundException,
       );
     });
   });

@@ -3,8 +3,11 @@ import { Observable } from 'rxjs';
 import { ApiClient } from '../../../core/api/api-client.service';
 import {
   CreateSalesInvoiceRequest,
+  CreateSalesPaymentRequest,
   ItemList,
+  RecordSalesPaymentResult,
   SalesInvoice,
+  SalesPayment,
   UpdateSalesInvoiceRequest,
 } from '../models/sales.models';
 
@@ -34,5 +37,21 @@ export class SalesInvoiceService {
 
   cancel(id: string): Observable<SalesInvoice> {
     return this.api.post<SalesInvoice>(`/api/v1/sales-invoices/${id}/cancel`);
+  }
+
+  recordPayment(
+    id: string,
+    body: CreateSalesPaymentRequest,
+  ): Observable<RecordSalesPaymentResult> {
+    return this.api.post<RecordSalesPaymentResult>(
+      `/api/v1/sales-invoices/${id}/payments`,
+      body,
+    );
+  }
+
+  listPayments(id: string): Observable<ItemList<SalesPayment>> {
+    return this.api.get<ItemList<SalesPayment>>(
+      `/api/v1/sales-invoices/${id}/payments`,
+    );
   }
 }

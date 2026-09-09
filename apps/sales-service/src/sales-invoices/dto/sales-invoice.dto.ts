@@ -132,3 +132,26 @@ export class CreateInvoiceFromSourceDto {
   @MaxLength(500)
   notes?: string;
 }
+
+export class CreateSalesPaymentDto {
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  amount!: string;
+
+  @IsISO8601()
+  paymentDate!: string;
+
+  @IsOptional()
+  @IsUUID()
+  paymentMethodId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}

@@ -39,6 +39,8 @@
               <th class="text-center">Status</th>
               <th>Due date</th>
               <th class="text-end">Total</th>
+              <th class="text-end">Balance due</th>
+              <th class="text-center">Payment</th>
               <th class="text-end">Actions</th>
             </tr>
           </thead>
@@ -54,6 +56,10 @@
               </td>
               <td>{{ item.dueDate ? (item.dueDate | date:'yyyy-MM-dd') : '—' }}</td>
               <td class="text-end"><code>{{ item.total }}</code></td>
+              <td class="text-end"><code>{{ item.balanceDue }}</code></td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="paymentStatusBadgeClass(item.paymentStatus)">{{ item.paymentStatus }}</span>
+              </td>
               <td class="text-end text-nowrap">
                 <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
                   View
@@ -71,6 +77,13 @@
                   class="btn btn-sm btn-outline-success me-1"
                   (click)="askAction('send', item)">
                   Send
+                </button>
+                <button
+                  *ngIf="canRecordPaymentFor(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-info me-1"
+                  (click)="openRecordPayment(item)">
+                  Record Payment
                 </button>
                 <button
                   *ngIf="canCancelInvoice(item)"
@@ -258,6 +271,12 @@
       <dt class="col-sm-4">Discount total</dt><dd class="col-sm-8"><code>{{ inv.discountTotal }}</code></dd>
       <dt class="col-sm-4">Tax total</dt><dd class="col-sm-8"><code>{{ inv.taxTotal }}</code></dd>
       <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ inv.total }}</code></dd>
+      <dt class="col-sm-4">Amount paid</dt><dd class="col-sm-8"><code>{{ inv.amountPaid }}</code></dd>
+      <dt class="col-sm-4">Balance due</dt><dd class="col-sm-8"><code>{{ inv.balanceDue }}</code></dd>
+      <dt class="col-sm-4">Payment status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="paymentStatusBadgeClass(inv.paymentStatus)">{{ inv.paymentStatus }}</span>
+      </dd>
     </dl>
     <div class="table-responsive">
       <table class="table table-sm">
@@ -289,8 +308,42 @@
         </tbody>
       </table>
     </div>
+
+    <h6 class="mt-3 mb-2">Payments</h6>
+    <div class="table-responsive" *ngIf="payments.length; else noPayments">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="text-end">Amount</th>
+            <th>Method</th>
+            <th>Reference</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let p of payments">
+            <td>{{ p.paymentDate | date:'yyyy-MM-dd' }}</td>
+            <td class="text-end"><code>{{ p.amount }}</code></td>
+            <td>{{ paymentMethodLabel(p.paymentMethodId) }}</td>
+            <td>{{ p.reference || '—' }}</td>
+            <td>{{ p.notes || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <ng-template #noPayments>
+      <p class="text-muted small mb-0">No payments recorded yet.</p>
+    </ng-template>
   </div>
   <div class="modal-footer">
+    <button
+      *ngIf="viewing && canRecordPaymentFor(viewing)"
+      type="button"
+      class="btn btn-outline-info"
+      (click)="modal.close(); openRecordPayment(viewing!)">
+      Record Payment
+    </button>
     <button
       type="button"
       class="btn btn-outline-secondary"
@@ -325,4 +378,52 @@
       {{ actionBusy ? 'Working…' : 'Confirm' }}
     </button>
   </div>
+</ng-template>
+
+<ng-template #paymentModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Record Payment</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="paymentForm" (ngSubmit)="submitPayment()">
+    <div class="modal-body">
+      <p class="text-muted small mb-3" *ngIf="payingInvoice">
+        Invoice <code>{{ payingInvoice.invoiceNumber }}</code> — balance due <code>{{ payingInvoice.balanceDue }}</code>
+      </p>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="payAmount">Amount</label>
+          <input id="payAmount" class="form-control" formControlName="amount" placeholder="500.0000" />
+          <div class="text-danger small" *ngIf="paymentForm.get('amount')?.touched && paymentForm.get('amount')?.invalid">
+            Enter a positive amount with up to 4 decimal places.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="payDate">Payment date</label>
+          <input id="payDate" type="date" class="form-control" formControlName="paymentDate" />
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="payMethod">Payment method</label>
+        <select id="payMethod" class="form-select" formControlName="paymentMethodId">
+          <option value="">None</option>
+          <option *ngFor="let m of paymentMethods" [value]="m.id">{{ m.code }} — {{ m.name }}</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="payReference">Reference</label>
+        <input id="payReference" class="form-control" formControlName="reference" maxlength="120" />
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="payNotes">Notes</label>
+        <input id="payNotes" class="form-control" formControlName="notes" maxlength="500" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="paymentSaving || paymentForm.invalid">
+        {{ paymentSaving ? 'Saving…' : 'Record Payment' }}
+      </button>
+    </div>
+  </form>
 </ng-template>

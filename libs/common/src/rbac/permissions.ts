@@ -77,6 +77,7 @@ export const PERMISSIONS = {
   SALES_INVOICES_UPDATE: 'sales-invoices.update',
   SALES_INVOICES_SEND: 'sales-invoices.send',
   SALES_INVOICES_CANCEL: 'sales-invoices.cancel',
+  SALES_INVOICES_RECORD_PAYMENT: 'sales-invoices.record-payment',
   SHIPMENTS_CREATE: 'shipments.create',
   SHIPMENTS_READ: 'shipments.read',
   SHIPMENTS_POST: 'shipments.post',

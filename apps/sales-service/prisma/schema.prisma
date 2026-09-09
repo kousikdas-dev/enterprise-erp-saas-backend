@@ -8,7 +8,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 enum QuotationStatus {
   DRAFT
   SENT
@@ -56,6 +55,12 @@ enum SalesInvoiceStatus {
   DRAFT
   SENT
   CANCELLED
+}
+
+enum SalesInvoicePaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
 }
 
 model Customer {
@@ -285,14 +290,14 @@ model ProformaInvoiceItem {
 }
 
 model ProformaInvoiceItemTaxComponent {
-  id                  String  @id @default(uuid()) @db.Uuid
-  tenantId            String  @db.Uuid
+  id                    String  @id @default(uuid()) @db.Uuid
+  tenantId              String  @db.Uuid
   proformaInvoiceItemId String  @db.Uuid
-  sequence            Int
-  type                String
-  name                String?
-  rate                Decimal @db.Decimal(7, 4)
-  componentTaxAmount  Decimal @db.Decimal(19, 4)
+  sequence              Int
+  type                  String
+  name                  String?
+  rate                  Decimal @db.Decimal(7, 4)
+  componentTaxAmount    Decimal @db.Decimal(19, 4)
 
   proformaInvoiceItem ProformaInvoiceItem @relation(fields: [proformaInvoiceItemId], references: [id], onDelete: Cascade)
 
@@ -355,7 +360,7 @@ model SalesOrderItem {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  salesOrder    SalesOrder                  @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  salesOrder    SalesOrder                   @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   shipmentItems ShipmentItem[]
   taxComponents SalesOrderItemTaxComponent[]
 
@@ -426,34 +431,38 @@ model ShipmentItem {
 }
 
 model SalesInvoice {
-  id              String                  @id @default(uuid()) @db.Uuid
-  tenantId        String                  @db.Uuid
+  id              String                    @id @default(uuid()) @db.Uuid
+  tenantId        String                    @db.Uuid
   invoiceNumber   String
   sourceType      SalesInvoiceSourceType?
-  sourceId        String?                 @db.Uuid
-  status          SalesInvoiceStatus      @default(DRAFT)
-  customerId      String                  @db.Uuid
+  sourceId        String?                   @db.Uuid
+  status          SalesInvoiceStatus        @default(DRAFT)
+  customerId      String                    @db.Uuid
   customerName    String
   billingAddress  String?
   shippingAddress String?
   // Master-data/identity UUIDs intentionally have no foreign keys: that data
   // belongs to separate services/databases (mirrors Customer.paymentTermId /
   // Customer.salespersonId).
-  paymentTermId   String?                 @db.Uuid
-  salespersonId   String?                 @db.Uuid
+  paymentTermId   String?                   @db.Uuid
+  salespersonId   String?                   @db.Uuid
   invoiceDate     DateTime
   dueDate         DateTime?
   notes           String?
-  subtotal        Decimal                 @db.Decimal(19, 4)
-  discountTotal   Decimal                 @default(0) @db.Decimal(19, 4)
-  taxTotal        Decimal                 @default(0) @db.Decimal(19, 4)
-  total           Decimal                 @db.Decimal(19, 4)
+  subtotal        Decimal                   @db.Decimal(19, 4)
+  discountTotal   Decimal                   @default(0) @db.Decimal(19, 4)
+  taxTotal        Decimal                   @default(0) @db.Decimal(19, 4)
+  total           Decimal                   @db.Decimal(19, 4)
+  // balanceDue is intentionally not persisted: it is always total - amountPaid.
+  amountPaid      Decimal                   @default(0) @db.Decimal(19, 4)
+  paymentStatus   SalesInvoicePaymentStatus @default(UNPAID)
   sentAt          DateTime?
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
 
   customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items    SalesInvoiceItem[]
+  payments SalesPayment[]
 
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId])
@@ -489,7 +498,7 @@ model SalesInvoiceItem {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  salesInvoice  SalesInvoice                  @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  salesInvoice  SalesInvoice                   @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
   taxComponents SalesInvoiceItemTaxComponent[]
 
   @@index([tenantId])
@@ -515,4 +524,25 @@ model SalesInvoiceItemTaxComponent {
   @@index([tenantId])
   @@index([salesInvoiceItemId])
   @@map("sales_invoice_item_tax_components")
+}
+
+model SalesPayment {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  salesInvoiceId  String   @db.Uuid
+  amount          Decimal  @db.Decimal(19, 4)
+  paymentDate     DateTime
+  // Master-data UUID intentionally has no foreign key: that data belongs to
+  // a separate service/database (mirrors SalesInvoice.paymentTermId).
+  paymentMethodId String?  @db.Uuid
+  reference       String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  salesInvoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([salesInvoiceId])
+  @@map("sales_payments")
 }

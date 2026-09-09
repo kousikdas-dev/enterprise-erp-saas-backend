@@ -29,8 +29,11 @@ import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import {
   CreateSalesInvoiceDto,
+  CreateSalesPaymentDto,
+  RecordSalesPaymentResultDto,
   SalesInvoiceDto,
   SalesInvoiceListDto,
+  SalesPaymentListDto,
   UpdateSalesInvoiceDto,
 } from './dto/sales-invoice.dto';
 import { SalesForwardService } from './sales-forward.service';
@@ -174,6 +177,53 @@ export class SalesInvoicesController {
       user,
       ip: request.ip,
       userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/payments')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT)
+  @ApiOperation({
+    summary: 'Record a sales invoice payment',
+    description:
+      'Records a payment against a SENT sales invoice and returns the payment plus the updated invoice balance. Permission: sales-invoices.record-payment.',
+  })
+  @ApiCreatedResponse({ type: RecordSalesPaymentResultDto })
+  @ApiConflictResponse({ description: 'Sales invoice cannot receive this payment' })
+  @ApiManagementErrors()
+  recordPayment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateSalesPaymentDto,
+    @Req() request: Request,
+  ): Promise<RecordSalesPaymentResultDto> {
+    return this.sales.forward<RecordSalesPaymentResultDto>({
+      method: 'POST',
+      path: `/api/v1/sales-invoices/${id}/payments`,
+      user,
+      body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Get(':id/payments')
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_READ)
+  @ApiOperation({
+    summary: 'List sales invoice payments',
+    description:
+      'Lists the payment history for a JWT-tenant sales invoice. Permission: sales-invoices.read.',
+  })
+  @ApiOkResponse({ type: SalesPaymentListDto })
+  @ApiManagementErrors()
+  listPayments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SalesPaymentListDto> {
+    return this.sales.forward<SalesPaymentListDto>({
+      method: 'GET',
+      path: `/api/v1/sales-invoices/${id}/payments`,
+      user,
     });
   }
 }

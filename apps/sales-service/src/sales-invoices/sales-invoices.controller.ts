@@ -16,6 +16,7 @@ import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
 import {
   CreateSalesInvoiceDto,
+  CreateSalesPaymentDto,
   UpdateSalesInvoiceDto,
 } from './dto/sales-invoice.dto';
 import { SalesInvoicesService } from './sales-invoices.service';
@@ -73,5 +74,23 @@ export class SalesInvoicesController {
     @Req() request: Request,
   ) {
     return this.invoices.cancel(actor, id, requestAuditMeta(request));
+  }
+
+  @Post(':id/payments')
+  recordPayment(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateSalesPaymentDto,
+    @Req() request: Request,
+  ) {
+    return this.invoices.recordPayment(actor, id, dto, requestAuditMeta(request));
+  }
+
+  @Get(':id/payments')
+  listPayments(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.invoices.listPayments(actor, id);
   }
 }

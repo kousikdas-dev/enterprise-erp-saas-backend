@@ -360,6 +360,8 @@ export interface UpdateSalesOrderRequest {
 
 export type SalesInvoiceStatus = 'DRAFT' | 'SENT' | 'CANCELLED';
 
+export type SalesInvoicePaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+
 export interface SalesInvoiceItemTaxComponent {
   id: string;
   sequence: number;
@@ -411,8 +413,36 @@ export interface SalesInvoice {
   discountTotal: string;
   taxTotal: string;
   total: string;
+  amountPaid: string;
+  balanceDue: string;
+  paymentStatus: SalesInvoicePaymentStatus | string;
   sentAt: string | null;
   items: SalesInvoiceItem[];
+}
+
+export interface SalesPayment {
+  id: string;
+  salesInvoiceId: string;
+  amount: string;
+  paymentDate: string;
+  paymentMethodId: string | null;
+  reference: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSalesPaymentRequest {
+  amount: string;
+  paymentDate: string;
+  paymentMethodId?: string;
+  reference?: string;
+  notes?: string;
+}
+
+export interface RecordSalesPaymentResult {
+  payment: SalesPayment;
+  invoice: SalesInvoice;
 }
 
 export interface CreateSalesInvoiceRequest {

@@ -235,6 +235,15 @@ export class SalesInvoiceDto {
   @ApiProperty()
   total!: string;
 
+  @ApiProperty()
+  amountPaid!: string;
+
+  @ApiProperty()
+  balanceDue!: string;
+
+  @ApiProperty({ enum: ['UNPAID', 'PARTIALLY_PAID', 'PAID'] })
+  paymentStatus!: string;
+
   @ApiPropertyOptional({ nullable: true })
   sentAt!: string | null;
 
@@ -245,4 +254,74 @@ export class SalesInvoiceDto {
 export class SalesInvoiceListDto {
   @ApiProperty({ type: [SalesInvoiceDto] })
   items!: SalesInvoiceDto[];
+}
+
+export class CreateSalesPaymentDto {
+  @ApiProperty({ example: '500.0000' })
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  amount!: string;
+
+  @ApiProperty()
+  @IsISO8601()
+  paymentDate!: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  paymentMethodId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class SalesPaymentDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  salesInvoiceId!: string;
+
+  @ApiProperty()
+  amount!: string;
+
+  @ApiProperty()
+  paymentDate!: string;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  paymentMethodId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  reference!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  notes!: string | null;
+
+  @ApiProperty()
+  createdAt!: string;
+
+  @ApiProperty()
+  updatedAt!: string;
+}
+
+export class SalesPaymentListDto {
+  @ApiProperty({ type: [SalesPaymentDto] })
+  items!: SalesPaymentDto[];
+}
+
+export class RecordSalesPaymentResultDto {
+  @ApiProperty({ type: SalesPaymentDto })
+  payment!: SalesPaymentDto;
+
+  @ApiProperty({ type: SalesInvoiceDto })
+  invoice!: SalesInvoiceDto;
 }

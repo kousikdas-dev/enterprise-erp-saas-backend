@@ -17,6 +17,7 @@ import {
 import {
   Prisma,
   ProformaInvoiceStatus,
+  SalesInvoicePaymentStatus,
   SalesInvoiceSourceType,
   SalesInvoiceStatus,
   SalesOrderStatus,
@@ -32,10 +33,12 @@ import { CustomersService } from '../customers/customers.service';
 import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toSalesInvoiceResponse } from './dto/sales-invoice-response';
+import { toSalesPaymentResponse } from './dto/sales-payment-response';
 import {
   CreateInvoiceFromSourceDto,
   CreateSalesInvoiceDto,
   CreateSalesInvoiceItemDto,
+  CreateSalesPaymentDto,
   UpdateSalesInvoiceDto,
 } from './dto/sales-invoice.dto';
 
@@ -514,9 +517,15 @@ export class SalesInvoicesService {
     if (existing.items.length === 0) {
       throw new BadRequestException('Sales invoice has no items');
     }
+    // A zero-total invoice has no balance due, so it is already fully paid
+    // the moment it is sent — no payment could ever legitimately be recorded
+    // against it (any positive amount would exceed the zero balance).
+    const paymentStatus = existing.total.eq(0)
+      ? SalesInvoicePaymentStatus.PAID
+      : SalesInvoicePaymentStatus.UNPAID;
     const row = await this.prisma.salesInvoice.update({
       where: { id },
-      data: { status: SalesInvoiceStatus.SENT, sentAt: new Date() },
+      data: { status: SalesInvoiceStatus.SENT, sentAt: new Date(), paymentStatus },
       include: INVOICE_INCLUDE,
     });
     await this.audit.record({
@@ -546,6 +555,11 @@ export class SalesInvoicesService {
         'Only DRAFT or SENT sales invoices can be cancelled',
       );
     }
+    if (existing.amountPaid.gt(0)) {
+      throw new ConflictException(
+        'Cannot cancel a sales invoice that has recorded payments',
+      );
+    }
     const row = await this.prisma.salesInvoice.update({
       where: { id },
       data: { status: SalesInvoiceStatus.CANCELLED },
@@ -560,6 +574,112 @@ export class SalesInvoicesService {
       request,
     });
     return toSalesInvoiceResponse(row);
+  }
+
+  /**
+   * Records a payment against a SENT sales invoice. The SalesInvoice row is
+   * locked FOR UPDATE for the duration of the transaction (mirroring
+   * ShipmentsService's finalizePosted locking pattern) so the balance-due
+   * check and the amountPaid/paymentStatus update happen against a single,
+   * serialized read of the authoritative row — never an application-level
+   * read taken outside the transaction.
+   */
+  async recordPayment(
+    actor: ActorContext,
+    id: string,
+    dto: CreateSalesPaymentDto,
+    request?: RequestAuditMeta,
+  ) {
+    const amount = parseMoney(dto.amount);
+    if (amount.lte(0)) {
+      throw new BadRequestException('Payment amount must be greater than zero');
+    }
+
+    const { invoice, payment } = await this.prisma.$transaction(async (tx) => {
+      const lockRows = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`
+          SELECT id FROM sales_invoices
+          WHERE id = ${id}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+          FOR UPDATE
+        `,
+      );
+      if (!lockRows[0]) {
+        throw new NotFoundException('Sales invoice not found');
+      }
+
+      const existing = await tx.salesInvoice.findFirstOrThrow({
+        where: { id, tenantId: actor.tenantId },
+      });
+
+      if (existing.status !== SalesInvoiceStatus.SENT) {
+        throw new ConflictException(
+          'Only SENT sales invoices can receive payments',
+        );
+      }
+      if (existing.paymentStatus === SalesInvoicePaymentStatus.PAID) {
+        throw new ConflictException('Sales invoice is already fully paid');
+      }
+
+      const balanceDue = existing.total.minus(existing.amountPaid);
+      if (amount.gt(balanceDue)) {
+        throw new ConflictException(
+          'Payment amount exceeds the remaining balance due',
+        );
+      }
+
+      const createdPayment = await tx.salesPayment.create({
+        data: {
+          tenantId: actor.tenantId,
+          salesInvoiceId: id,
+          amount,
+          paymentDate: new Date(dto.paymentDate),
+          paymentMethodId: dto.paymentMethodId ?? null,
+          reference: dto.reference?.trim() || null,
+          notes: dto.notes?.trim() || null,
+        },
+      });
+
+      const newAmountPaid = existing.amountPaid.plus(amount);
+      const newPaymentStatus = newAmountPaid.gte(existing.total)
+        ? SalesInvoicePaymentStatus.PAID
+        : SalesInvoicePaymentStatus.PARTIALLY_PAID;
+
+      const updatedInvoice = await tx.salesInvoice.update({
+        where: { id },
+        data: { amountPaid: newAmountPaid, paymentStatus: newPaymentStatus },
+        include: INVOICE_INCLUDE,
+      });
+
+      return { invoice: updatedInvoice, payment: createdPayment };
+    });
+
+    await this.audit.record({
+      actor,
+      action: 'sales-invoice.payment-recorded',
+      resource: 'sales-invoice',
+      resourceId: invoice.id,
+      metadata: {
+        paymentId: payment.id,
+        amount: moneyToString(payment.amount),
+        amountPaid: moneyToString(invoice.amountPaid),
+        paymentStatus: invoice.paymentStatus,
+      },
+      request,
+    });
+
+    return {
+      payment: toSalesPaymentResponse(payment),
+      invoice: toSalesInvoiceResponse(invoice),
+    };
+  }
+
+  async listPayments(actor: ActorContext, id: string) {
+    await this.require(actor, id);
+    const rows = await this.prisma.salesPayment.findMany({
+      where: { salesInvoiceId: id, tenantId: actor.tenantId },
+      orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+    });
+    return { items: rows.map(toSalesPaymentResponse) };
   }
 
   async require(actor: ActorContext, id: string) {

@@ -1,5 +1,6 @@
 import {
   Prisma,
+  SalesInvoicePaymentStatus,
   SalesInvoiceSourceType,
   SalesInvoiceStatus,
 } from '../../../generated/prisma-client';
@@ -34,6 +35,8 @@ type SalesInvoiceWithItems = {
   discountTotal: Prisma.Decimal;
   taxTotal: Prisma.Decimal;
   total: Prisma.Decimal;
+  amountPaid: Prisma.Decimal;
+  paymentStatus: SalesInvoicePaymentStatus;
   sentAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -96,6 +99,9 @@ export function toSalesInvoiceResponse(row: SalesInvoiceWithItems) {
     discountTotal: moneyToString(row.discountTotal),
     taxTotal: moneyToString(row.taxTotal),
     total: moneyToString(row.total),
+    amountPaid: moneyToString(row.amountPaid),
+    balanceDue: moneyToString(row.total.minus(row.amountPaid)),
+    paymentStatus: row.paymentStatus,
     sentAt: row.sentAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

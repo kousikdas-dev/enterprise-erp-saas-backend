@@ -26,10 +26,12 @@ import {
 } from '../../../shared/utils/decimal.util';
 import { apiErrorMessage } from '../../../shared/utils/api-error.util';
 import {
+  CreateSalesPaymentRequest,
   Customer,
   CustomerAddress,
   CustomerAddressType,
   SalesInvoice,
+  SalesPayment,
 } from '../models/sales.models';
 import { CustomerService } from '../customers/customer.service';
 import { SalesInvoiceService } from './sales-invoice.service';
@@ -53,6 +55,7 @@ export class SalesInvoiceListComponent implements OnInit {
   @ViewChild('formModal') formModal!: TemplateRef<unknown>;
   @ViewChild('detailModal') detailModal!: TemplateRef<unknown>;
   @ViewChild('actionModal') actionModal!: TemplateRef<unknown>;
+  @ViewChild('paymentModal') paymentModal!: TemplateRef<unknown>;
 
   private readonly invoices = inject(SalesInvoiceService);
   private readonly customerService = inject(CustomerService);
@@ -69,24 +72,40 @@ export class SalesInvoiceListComponent implements OnInit {
   readonly canUpdate = this.permissions.has(AppPermissions.SALES_INVOICES_UPDATE);
   readonly canSend = this.permissions.has(AppPermissions.SALES_INVOICES_SEND);
   readonly canCancel = this.permissions.has(AppPermissions.SALES_INVOICES_CANCEL);
+  readonly canRecordPayment = this.permissions.has(
+    AppPermissions.SALES_INVOICES_RECORD_PAYMENT,
+  );
 
   items: SalesInvoice[] = [];
   customers: Customer[] = [];
   products: Product[] = [];
   paymentTerms: MasterDataOption[] = [];
+  paymentMethods: MasterDataOption[] = [];
   salespeople: User[] = [];
   billingAddresses: CustomerAddress[] = [];
   shippingAddresses: CustomerAddress[] = [];
+  payments: SalesPayment[] = [];
   loading = false;
   error: string | null = null;
   filter = '';
   saving = false;
   actionBusy = false;
+  paymentSaving = false;
   editing: SalesInvoice | null = null;
   viewing: SalesInvoice | null = null;
+  payingInvoice: SalesInvoice | null = null;
   pendingAction: { type: SalesInvoiceAction; invoice: SalesInvoice } | null = null;
   private modalRef?: NgbModalRef;
+  private paymentModalRef?: NgbModalRef;
   private formResetting = false;
+
+  paymentForm = this.fb.group({
+    amount: ['', [Validators.required, Validators.pattern(/^\d+(\.\d{1,4})?$/)]],
+    paymentDate: ['', Validators.required],
+    paymentMethodId: [''],
+    reference: ['', Validators.maxLength(120)],
+    notes: ['', Validators.maxLength(500)],
+  });
 
   form = this.fb.group({
     customerId: ['', Validators.required],
@@ -237,7 +256,11 @@ export class SalesInvoiceListComponent implements OnInit {
   }
 
   canCancelInvoice(item: SalesInvoice): boolean {
-    return this.canCancel && (item.status === 'DRAFT' || item.status === 'SENT');
+    return (
+      this.canCancel &&
+      (item.status === 'DRAFT' || item.status === 'SENT') &&
+      !isPositiveDecimal(item.amountPaid)
+    );
   }
 
   lineTotal(quantity: string, unitPrice: string): string {
@@ -252,12 +275,14 @@ export class SalesInvoiceListComponent implements OnInit {
       customers: this.customerService.list(),
       products: this.productService.list(),
       paymentTerms: this.masterData.paymentTerms(),
+      paymentMethods: this.masterData.paymentMethods(),
       salespeople: this.users.list({ role: SALESPERSON_ROLE }),
     }).subscribe({
-      next: ({ customers, products, paymentTerms, salespeople }) => {
+      next: ({ customers, products, paymentTerms, paymentMethods, salespeople }) => {
         this.customers = customers.items ?? [];
         this.products = products.items ?? [];
         this.paymentTerms = (paymentTerms.items ?? []).filter((p) => p.isActive);
+        this.paymentMethods = (paymentMethods.items ?? []).filter((p) => p.isActive);
         this.salespeople = (salespeople.items ?? []).filter(
           (u) => u.status === 'ACTIVE',
         );
@@ -276,6 +301,25 @@ export class SalesInvoiceListComponent implements OnInit {
     }
     const u = this.salespeople.find((x) => x.id === id);
     return u ? `${u.firstName} ${u.lastName}`.trim() || u.email : id.slice(0, 8);
+  }
+
+  paymentMethodLabel(id: string | null): string {
+    if (!id) {
+      return '—';
+    }
+    const m = this.paymentMethods.find((x) => x.id === id);
+    return m ? m.name : id.slice(0, 8);
+  }
+
+  paymentStatusBadgeClass(status: string): string {
+    switch (status) {
+      case 'PAID':
+        return 'bg-success';
+      case 'PARTIALLY_PAID':
+        return 'bg-info text-dark';
+      default:
+        return 'bg-secondary';
+    }
   }
 
   paymentTermLabel(id: string | null): string {
@@ -379,10 +423,15 @@ export class SalesInvoiceListComponent implements OnInit {
 
   openDetail(item: SalesInvoice): void {
     this.viewing = item;
+    this.payments = [];
     this.modal.open(this.detailModal, { centered: true, size: 'lg' });
-    this.invoices.getById(item.id).subscribe({
-      next: (detail) => {
+    forkJoin({
+      detail: this.invoices.getById(item.id),
+      payments: this.invoices.listPayments(item.id),
+    }).subscribe({
+      next: ({ detail, payments }) => {
         this.viewing = detail;
+        this.payments = payments.items ?? [];
         this.cdr.detectChanges();
       },
       error: (err) => {
@@ -390,6 +439,77 @@ export class SalesInvoiceListComponent implements OnInit {
         this.cdr.detectChanges();
       },
     });
+  }
+
+  canRecordPaymentFor(item: SalesInvoice): boolean {
+    return (
+      this.canRecordPayment &&
+      item.status === 'SENT' &&
+      item.paymentStatus !== 'PAID'
+    );
+  }
+
+  openRecordPayment(item: SalesInvoice): void {
+    if (!this.canRecordPaymentFor(item)) {
+      return;
+    }
+    this.payingInvoice = item;
+    this.paymentForm.reset({
+      amount: '',
+      paymentDate: '',
+      paymentMethodId: '',
+      reference: '',
+      notes: '',
+    });
+    this.cdr.detectChanges();
+    this.paymentModalRef = this.modal.open(this.paymentModal, { centered: true });
+  }
+
+  submitPayment(): void {
+    if (!this.payingInvoice || this.paymentForm.invalid || this.paymentSaving) {
+      this.paymentForm.markAllAsTouched();
+      return;
+    }
+    const value = this.paymentForm.getRawValue();
+    const amount = String(value.amount).trim();
+    if (!isPositiveDecimal(amount)) {
+      this.toast.error('Payment amount must be a positive decimal.');
+      return;
+    }
+    const paymentMethodId = value.paymentMethodId?.trim() || undefined;
+    const reference = value.reference?.trim() || undefined;
+    const notes = value.notes?.trim() || undefined;
+    const invoiceId = this.payingInvoice.id;
+
+    this.paymentSaving = true;
+    this.cdr.detectChanges();
+
+    this.invoices
+      .recordPayment(invoiceId, {
+        amount,
+        paymentDate: value.paymentDate!,
+        paymentMethodId,
+        reference,
+        notes,
+      })
+      .subscribe({
+        next: () => {
+          this.paymentSaving = false;
+          this.paymentModalRef?.close();
+          this.payingInvoice = null;
+          this.toast.success('Payment recorded');
+          this.load();
+          if (this.viewing?.id === invoiceId) {
+            this.openDetail({ ...this.viewing });
+          }
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.paymentSaving = false;
+          this.toast.error(apiErrorMessage(err, 'Failed to record payment'));
+          this.cdr.detectChanges();
+        },
+      });
   }
 
   askAction(type: SalesInvoiceAction, invoice: SalesInvoice): void {
