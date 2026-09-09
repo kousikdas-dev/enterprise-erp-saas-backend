@@ -78,7 +78,7 @@ export class ShipmentListComponent implements OnInit {
 
   get shippableOrders(): SalesOrder[] {
     return this.orders.filter(
-      (o) => o.status === 'CONFIRMED' || o.status === 'PARTIALLY_SHIPPED',
+      (o) => o.status === 'CONFIRMED' || o.status === 'PARTIALLY_FULFILLED',
     );
   }
 

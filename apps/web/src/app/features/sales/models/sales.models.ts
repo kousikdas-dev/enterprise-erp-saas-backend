@@ -290,8 +290,8 @@ export interface CreateInvoiceFromSourceRequest {
 export type SalesOrderStatus =
   | 'DRAFT'
   | 'CONFIRMED'
-  | 'PARTIALLY_SHIPPED'
-  | 'SHIPPED'
+  | 'PARTIALLY_FULFILLED'
+  | 'FULFILLED'
   | 'CANCELLED';
 
 export interface SalesOrderItemTaxComponent {

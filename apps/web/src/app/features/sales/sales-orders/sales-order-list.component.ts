@@ -133,9 +133,9 @@ export class SalesOrderListComponent implements OnInit {
         return 'bg-secondary';
       case 'CONFIRMED':
         return 'bg-primary';
-      case 'PARTIALLY_SHIPPED':
+      case 'PARTIALLY_FULFILLED':
         return 'bg-info text-dark';
-      case 'SHIPPED':
+      case 'FULFILLED':
         return 'bg-success';
       case 'CANCELLED':
         return 'bg-danger';
