@@ -40,11 +40,79 @@ import {
 } from './dto/sales-invoice.dto';
 
 const INVOICE_INCLUDE = {
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
+};
+
+const SALES_ORDER_INCLUDE = {
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
+};
+
+const PROFORMA_INCLUDE = {
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
 };
 
 /** No currency concept exists anywhere in this domain yet; every invoice is posted in this fixed unit. */
 const DEFAULT_CURRENCY = 'USD';
+
+interface SnapshotSourceTaxComponent {
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+}
+
+/** A SalesOrderItem or ProformaInvoiceItem row, as the shape common to both conversion sources. */
+interface SnapshotSourceItem {
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: Prisma.Decimal | null;
+  unitPrice: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: SnapshotSourceTaxComponent[];
+}
+
+interface PersistItemInput {
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: Prisma.Decimal | null;
+  unitPrice: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: SnapshotSourceTaxComponent[];
+}
 
 @Injectable()
 export class SalesInvoicesService {
@@ -83,6 +151,8 @@ export class SalesInvoicesService {
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         notes: dto.notes?.trim() || null,
         subtotal: totals.subtotal,
+        discountTotal: totals.discountTotal,
+        taxTotal: totals.taxTotal,
         total: totals.total,
         items: lines,
       },
@@ -99,7 +169,7 @@ export class SalesInvoicesService {
   ) {
     const order = await this.prisma.salesOrder.findFirst({
       where: { id: salesOrderId, tenantId: actor.tenantId },
-      include: { items: { orderBy: { createdAt: 'asc' } } },
+      include: SALES_ORDER_INCLUDE,
     });
     if (!order) throw new NotFoundException('Sales order not found');
     if (order.status === SalesOrderStatus.CANCELLED) {
@@ -128,15 +198,10 @@ export class SalesInvoicesService {
         dueDate: dto?.dueDate ? new Date(dto.dueDate) : null,
         notes: dto?.notes?.trim() || order.notes,
         subtotal: order.subtotal,
+        discountTotal: order.discountTotal,
+        taxTotal: order.taxTotal,
         total: order.total,
-        items: order.items.map((item) => ({
-          productId: item.productId,
-          productSku: item.productSku,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-        })),
+        items: order.items.map((item) => this.toSnapshotItemInput(item)),
       },
       request,
       { source: 'sales-order', salesOrderId: order.id },
@@ -151,7 +216,7 @@ export class SalesInvoicesService {
   ) {
     const proforma = await this.prisma.proformaInvoice.findFirst({
       where: { id: proformaInvoiceId, tenantId: actor.tenantId },
-      include: { items: { orderBy: { createdAt: 'asc' } } },
+      include: PROFORMA_INCLUDE,
     });
     if (!proforma) throw new NotFoundException('Proforma invoice not found');
     if (proforma.status !== ProformaInvoiceStatus.ISSUED) {
@@ -180,15 +245,10 @@ export class SalesInvoicesService {
         dueDate: dto?.dueDate ? new Date(dto.dueDate) : null,
         notes: dto?.notes?.trim() || proforma.notes,
         subtotal: proforma.subtotal,
+        discountTotal: proforma.discountTotal,
+        taxTotal: proforma.taxTotal,
         total: proforma.total,
-        items: proforma.items.map((item) => ({
-          productId: item.productId,
-          productSku: item.productSku,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-        })),
+        items: proforma.items.map((item) => this.toSnapshotItemInput(item)),
       },
       request,
       { source: 'proforma-invoice', proformaInvoiceId: proforma.id },
@@ -210,15 +270,10 @@ export class SalesInvoicesService {
       dueDate: Date | null;
       notes: string | null;
       subtotal: Prisma.Decimal;
+      discountTotal: Prisma.Decimal;
+      taxTotal: Prisma.Decimal;
       total: Prisma.Decimal;
-      items: Array<{
-        productId: string;
-        productSku: string;
-        productName: string;
-        quantity: Prisma.Decimal;
-        unitPrice: Prisma.Decimal;
-        lineTotal: Prisma.Decimal;
-      }>;
+      items: PersistItemInput[];
     },
     request: RequestAuditMeta | undefined,
     auditSourceMeta: Record<string, unknown>,
@@ -243,6 +298,8 @@ export class SalesInvoicesService {
             dueDate: input.dueDate,
             notes: input.notes,
             subtotal: input.subtotal,
+            discountTotal: input.discountTotal,
+            taxTotal: input.taxTotal,
             total: input.total,
             items: {
               create: input.items.map((item) => ({
@@ -251,8 +308,29 @@ export class SalesInvoicesService {
                 productSku: item.productSku,
                 productName: item.productName,
                 quantity: item.quantity,
+                unitOfMeasureId: item.unitOfMeasureId,
+                uomCode: item.uomCode,
+                uomName: item.uomName,
+                conversionFactor: item.conversionFactor,
                 unitPrice: item.unitPrice,
+                discountPercent: item.discountPercent,
+                discountAmount: item.discountAmount,
+                taxCodeId: item.taxCodeId,
+                taxCode: item.taxCode,
+                taxCodeName: item.taxCodeName,
+                taxAmount: item.taxAmount,
+                lineSubtotal: item.lineSubtotal,
                 lineTotal: item.lineTotal,
+                taxComponents: {
+                  create: item.taxComponents.map((component) => ({
+                    tenantId: actor.tenantId,
+                    sequence: component.sequence,
+                    type: component.type,
+                    name: component.name,
+                    rate: component.rate,
+                    componentTaxAmount: component.componentTaxAmount,
+                  })),
+                },
               })),
             },
           },
@@ -387,6 +465,8 @@ export class SalesInvoicesService {
           data: {
             ...headerData,
             subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
             total: totals.total,
           },
           include: INVOICE_INCLUDE,
@@ -529,6 +609,36 @@ export class SalesInvoicesService {
     );
   }
 
+  /** Copies every UOM/discount/tax snapshot field verbatim — never recalculated. */
+  private toSnapshotItemInput(item: SnapshotSourceItem): PersistItemInput {
+    return {
+      productId: item.productId,
+      productSku: item.productSku,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitOfMeasureId: item.unitOfMeasureId,
+      uomCode: item.uomCode,
+      uomName: item.uomName,
+      conversionFactor: item.conversionFactor,
+      unitPrice: item.unitPrice,
+      discountPercent: item.discountPercent,
+      discountAmount: item.discountAmount,
+      taxCodeId: item.taxCodeId,
+      taxCode: item.taxCode,
+      taxCodeName: item.taxCodeName,
+      taxAmount: item.taxAmount,
+      lineSubtotal: item.lineSubtotal,
+      lineTotal: item.lineTotal,
+      taxComponents: item.taxComponents.map((component) => ({
+        sequence: component.sequence,
+        type: component.type,
+        name: component.name,
+        rate: component.rate,
+        componentTaxAmount: component.componentTaxAmount,
+      })),
+    };
+  }
+
   private mapLines(
     tenantId: string,
     items: CreateSalesInvoiceItemDto[],
@@ -543,20 +653,43 @@ export class SalesInvoicesService {
         productSku: item.productSku.trim(),
         productName: item.productName.trim(),
         quantity,
+        // Manual sales invoices do not yet expose UOM/discount/tax input
+        // capability, so every snapshot field is explicitly its neutral
+        // value rather than left undefined.
+        unitOfMeasureId: null as string | null,
+        uomCode: null as string | null,
+        uomName: null as string | null,
+        conversionFactor: null as Prisma.Decimal | null,
         unitPrice,
+        discountPercent: new Prisma.Decimal(0),
+        discountAmount: new Prisma.Decimal(0),
+        taxCodeId: null as string | null,
+        taxCode: null as string | null,
+        taxCodeName: null as string | null,
+        taxAmount: new Prisma.Decimal(0),
+        lineSubtotal: lineTotal,
         lineTotal,
+        taxComponents: [] as SnapshotSourceTaxComponent[],
       };
     });
   }
 
-  private sumTotals(
-    lines: Array<{ lineTotal: Prisma.Decimal }>,
-  ): { subtotal: Prisma.Decimal; total: Prisma.Decimal } {
+  private sumTotals(lines: Array<{ lineTotal: Prisma.Decimal }>): {
+    subtotal: Prisma.Decimal;
+    discountTotal: Prisma.Decimal;
+    taxTotal: Prisma.Decimal;
+    total: Prisma.Decimal;
+  } {
     const subtotal = lines.reduce(
       (sum, line) => sum.plus(line.lineTotal),
       new Prisma.Decimal(0),
     );
-    return { subtotal, total: subtotal };
+    return {
+      subtotal,
+      discountTotal: new Prisma.Decimal(0),
+      taxTotal: new Prisma.Decimal(0),
+      total: subtotal,
+    };
   }
 
   private async nextInvoiceNumber(tenantId: string): Promise<string> {

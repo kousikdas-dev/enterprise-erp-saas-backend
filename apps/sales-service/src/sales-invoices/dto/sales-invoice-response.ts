@@ -5,6 +5,15 @@ import {
 } from '../../../generated/prisma-client';
 import { moneyToString, quantityToString } from '../../common/decimal';
 
+type SalesInvoiceItemTaxComponentRow = {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+};
+
 type SalesInvoiceWithItems = {
   id: string;
   tenantId: string;
@@ -22,6 +31,8 @@ type SalesInvoiceWithItems = {
   dueDate: Date | null;
   notes: string | null;
   subtotal: Prisma.Decimal;
+  discountTotal: Prisma.Decimal;
+  taxTotal: Prisma.Decimal;
   total: Prisma.Decimal;
   sentAt: Date | null;
   createdAt: Date;
@@ -34,12 +45,35 @@ type SalesInvoiceWithItems = {
     productSku: string;
     productName: string;
     quantity: Prisma.Decimal;
+    unitOfMeasureId: string | null;
+    uomCode: string | null;
+    uomName: string | null;
+    conversionFactor: Prisma.Decimal | null;
     unitPrice: Prisma.Decimal;
+    discountPercent: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
+    taxCodeId: string | null;
+    taxCode: string | null;
+    taxCodeName: string | null;
+    taxAmount: Prisma.Decimal;
+    lineSubtotal: Prisma.Decimal;
     lineTotal: Prisma.Decimal;
     createdAt: Date;
     updatedAt: Date;
+    taxComponents: SalesInvoiceItemTaxComponentRow[];
   }>;
 };
+
+function toTaxComponentResponse(component: SalesInvoiceItemTaxComponentRow) {
+  return {
+    id: component.id,
+    sequence: component.sequence,
+    type: component.type,
+    name: component.name,
+    rate: component.rate.toFixed(4),
+    componentTaxAmount: moneyToString(component.componentTaxAmount),
+  };
+}
 
 export function toSalesInvoiceResponse(row: SalesInvoiceWithItems) {
   return {
@@ -59,6 +93,8 @@ export function toSalesInvoiceResponse(row: SalesInvoiceWithItems) {
     dueDate: row.dueDate,
     notes: row.notes,
     subtotal: moneyToString(row.subtotal),
+    discountTotal: moneyToString(row.discountTotal),
+    taxTotal: moneyToString(row.taxTotal),
     total: moneyToString(row.total),
     sentAt: row.sentAt,
     createdAt: row.createdAt,
@@ -71,10 +107,24 @@ export function toSalesInvoiceResponse(row: SalesInvoiceWithItems) {
       productSku: item.productSku,
       productName: item.productName,
       quantity: quantityToString(item.quantity),
+      unitOfMeasureId: item.unitOfMeasureId,
+      uomCode: item.uomCode,
+      uomName: item.uomName,
+      conversionFactor: item.conversionFactor
+        ? quantityToString(item.conversionFactor)
+        : null,
       unitPrice: moneyToString(item.unitPrice),
+      discountPercent: item.discountPercent.toFixed(2),
+      discountAmount: moneyToString(item.discountAmount),
+      taxCodeId: item.taxCodeId,
+      taxCode: item.taxCode,
+      taxCodeName: item.taxCodeName,
+      taxAmount: moneyToString(item.taxAmount),
+      lineSubtotal: moneyToString(item.lineSubtotal),
       lineTotal: moneyToString(item.lineTotal),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      taxComponents: item.taxComponents.map(toTaxComponentResponse),
     })),
   };
 }

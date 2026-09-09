@@ -1,5 +1,6 @@
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
+import { InventoryProductClient } from './inventory-product.client';
 import { InventoryStockClient } from './inventory-stock.client';
 
 @Module({
@@ -9,7 +10,7 @@ import { InventoryStockClient } from './inventory-stock.client';
       maxRedirects: 0,
     }),
   ],
-  providers: [InventoryStockClient],
-  exports: [InventoryStockClient],
+  providers: [InventoryStockClient, InventoryProductClient],
+  exports: [InventoryStockClient, InventoryProductClient],
 })
 export class InventoryClientModule {}

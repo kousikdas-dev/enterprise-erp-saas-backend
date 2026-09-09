@@ -26,9 +26,21 @@ export class CreateQuotationItemDto {
   @IsString()
   quantity!: string;
 
+  @IsUUID()
+  unitOfMeasureId!: string;
+
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   unitPrice!: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  discountPercent?: string;
+
+  @IsOptional()
+  @IsUUID()
+  taxCodeId?: string;
 }
 
 export class CreateQuotationDto {

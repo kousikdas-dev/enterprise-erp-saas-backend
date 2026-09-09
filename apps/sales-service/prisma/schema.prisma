@@ -146,6 +146,8 @@ model Quotation {
   salespersonId   String?         @db.Uuid
   deliveryDate    DateTime?
   subtotal        Decimal         @db.Decimal(19, 4)
+  discountTotal   Decimal         @default(0) @db.Decimal(19, 4)
+  taxTotal        Decimal         @default(0) @db.Decimal(19, 4)
   total           Decimal         @db.Decimal(19, 4)
   validUntil      DateTime?
   sentAt          DateTime?
@@ -167,24 +169,55 @@ model Quotation {
 }
 
 model QuotationItem {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @db.Uuid
-  quotationId String   @db.Uuid
-  productId   String   @db.Uuid
-  productSku  String
-  productName String
-  quantity    Decimal  @db.Decimal(19, 6)
-  unitPrice   Decimal  @db.Decimal(19, 4)
-  lineTotal   Decimal  @db.Decimal(19, 4)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  quotationId      String   @db.Uuid
+  productId        String   @db.Uuid
+  productSku       String
+  productName      String
+  quantity         Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+  unitPrice        Decimal  @db.Decimal(19, 4)
+  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId        String?  @db.Uuid
+  taxCode          String?
+  taxCodeName      String?
+  taxAmount        Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal     Decimal  @db.Decimal(19, 4)
+  lineTotal        Decimal  @db.Decimal(19, 4)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotation     Quotation                   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  taxComponents QuotationItemTaxComponent[]
 
   @@index([tenantId])
   @@index([quotationId])
   @@index([productId])
+  @@index([tenantId, unitOfMeasureId])
+  @@index([tenantId, taxCodeId])
   @@map("quotation_items")
+}
+
+model QuotationItemTaxComponent {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @db.Uuid
+  quotationItemId    String  @db.Uuid
+  sequence           Int
+  type               String
+  name               String?
+  rate               Decimal @db.Decimal(7, 4)
+  componentTaxAmount Decimal @db.Decimal(19, 4)
+
+  quotationItem QuotationItem @relation(fields: [quotationItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([quotationItemId])
+  @@map("quotation_item_tax_components")
 }
 
 model ProformaInvoice {
@@ -200,6 +233,8 @@ model ProformaInvoice {
   shippingAddress String?
   notes           String?
   subtotal        Decimal               @db.Decimal(19, 4)
+  discountTotal   Decimal               @default(0) @db.Decimal(19, 4)
+  taxTotal        Decimal               @default(0) @db.Decimal(19, 4)
   total           Decimal               @db.Decimal(19, 4)
   issuedAt        DateTime?
   createdAt       DateTime              @default(now())
@@ -222,17 +257,48 @@ model ProformaInvoiceItem {
   productSku        String
   productName       String
   quantity          Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId   String?  @db.Uuid
+  uomCode           String?
+  uomName           String?
+  conversionFactor  Decimal? @db.Decimal(19, 6)
   unitPrice         Decimal  @db.Decimal(19, 4)
+  discountPercent   Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount    Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId         String?  @db.Uuid
+  taxCode           String?
+  taxCodeName       String?
+  taxAmount         Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal      Decimal  @db.Decimal(19, 4)
   lineTotal         Decimal  @db.Decimal(19, 4)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  proformaInvoice ProformaInvoice @relation(fields: [proformaInvoiceId], references: [id], onDelete: Cascade)
+  proformaInvoice ProformaInvoice                   @relation(fields: [proformaInvoiceId], references: [id], onDelete: Cascade)
+  taxComponents   ProformaInvoiceItemTaxComponent[]
 
   @@index([tenantId])
   @@index([proformaInvoiceId])
   @@index([productId])
+  @@index([tenantId, unitOfMeasureId])
+  @@index([tenantId, taxCodeId])
   @@map("proforma_invoice_items")
+}
+
+model ProformaInvoiceItemTaxComponent {
+  id                  String  @id @default(uuid()) @db.Uuid
+  tenantId            String  @db.Uuid
+  proformaInvoiceItemId String  @db.Uuid
+  sequence            Int
+  type                String
+  name                String?
+  rate                Decimal @db.Decimal(7, 4)
+  componentTaxAmount  Decimal @db.Decimal(19, 4)
+
+  proformaInvoiceItem ProformaInvoiceItem @relation(fields: [proformaInvoiceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([proformaInvoiceItemId])
+  @@map("proforma_invoice_item_tax_components")
 }
 
 model SalesOrder {
@@ -246,6 +312,8 @@ model SalesOrder {
   shippingAddress String?
   notes           String?
   subtotal        Decimal          @db.Decimal(19, 4)
+  discountTotal   Decimal          @default(0) @db.Decimal(19, 4)
+  taxTotal        Decimal          @default(0) @db.Decimal(19, 4)
   total           Decimal          @db.Decimal(19, 4)
   confirmedAt     DateTime?
   createdAt       DateTime         @default(now())
@@ -263,26 +331,57 @@ model SalesOrder {
 }
 
 model SalesOrderItem {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @db.Uuid
-  salesOrderId    String   @db.Uuid
-  productId       String   @db.Uuid
-  productSku      String
-  productName     String
-  quantity        Decimal  @db.Decimal(19, 6)
-  unitPrice       Decimal  @db.Decimal(19, 4)
-  lineTotal       Decimal  @db.Decimal(19, 4)
-  shippedQuantity Decimal  @default(0) @db.Decimal(19, 6)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  salesOrderId     String   @db.Uuid
+  productId        String   @db.Uuid
+  productSku       String
+  productName      String
+  quantity         Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+  unitPrice        Decimal  @db.Decimal(19, 4)
+  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId        String?  @db.Uuid
+  taxCode          String?
+  taxCodeName      String?
+  taxAmount        Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal     Decimal  @db.Decimal(19, 4)
+  lineTotal        Decimal  @db.Decimal(19, 4)
+  shippedQuantity  Decimal  @default(0) @db.Decimal(19, 6)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  salesOrder    SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  salesOrder    SalesOrder                  @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   shipmentItems ShipmentItem[]
+  taxComponents SalesOrderItemTaxComponent[]
 
   @@index([tenantId])
   @@index([salesOrderId])
   @@index([productId])
+  @@index([tenantId, unitOfMeasureId])
+  @@index([tenantId, taxCodeId])
   @@map("sales_order_items")
+}
+
+model SalesOrderItemTaxComponent {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @db.Uuid
+  salesOrderItemId   String  @db.Uuid
+  sequence           Int
+  type               String
+  name               String?
+  rate               Decimal @db.Decimal(7, 4)
+  componentTaxAmount Decimal @db.Decimal(19, 4)
+
+  salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([salesOrderItemId])
+  @@map("sales_order_item_tax_components")
 }
 
 model Shipment {
@@ -346,6 +445,8 @@ model SalesInvoice {
   dueDate         DateTime?
   notes           String?
   subtotal        Decimal                 @db.Decimal(19, 4)
+  discountTotal   Decimal                 @default(0) @db.Decimal(19, 4)
+  taxTotal        Decimal                 @default(0) @db.Decimal(19, 4)
   total           Decimal                 @db.Decimal(19, 4)
   sentAt          DateTime?
   createdAt       DateTime                @default(now())
@@ -365,22 +466,53 @@ model SalesInvoice {
 }
 
 model SalesInvoiceItem {
-  id             String   @id @default(uuid()) @db.Uuid
-  tenantId       String   @db.Uuid
-  salesInvoiceId String   @db.Uuid
-  productId      String   @db.Uuid
-  productSku     String
-  productName    String
-  quantity       Decimal  @db.Decimal(19, 6)
-  unitPrice      Decimal  @db.Decimal(19, 4)
-  lineTotal      Decimal  @db.Decimal(19, 4)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  salesInvoiceId   String   @db.Uuid
+  productId        String   @db.Uuid
+  productSku       String
+  productName      String
+  quantity         Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+  unitPrice        Decimal  @db.Decimal(19, 4)
+  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId        String?  @db.Uuid
+  taxCode          String?
+  taxCodeName      String?
+  taxAmount        Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal     Decimal  @db.Decimal(19, 4)
+  lineTotal        Decimal  @db.Decimal(19, 4)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  salesInvoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  salesInvoice  SalesInvoice                  @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  taxComponents SalesInvoiceItemTaxComponent[]
 
   @@index([tenantId])
   @@index([salesInvoiceId])
   @@index([productId])
+  @@index([tenantId, unitOfMeasureId])
+  @@index([tenantId, taxCodeId])
   @@map("sales_invoice_items")
+}
+
+model SalesInvoiceItemTaxComponent {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @db.Uuid
+  salesInvoiceItemId String  @db.Uuid
+  sequence           Int
+  type               String
+  name               String?
+  rate               Decimal @db.Decimal(7, 4)
+  componentTaxAmount Decimal @db.Decimal(19, 4)
+
+  salesInvoiceItem SalesInvoiceItem @relation(fields: [salesInvoiceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([salesInvoiceItemId])
+  @@map("sales_invoice_item_tax_components")
 }

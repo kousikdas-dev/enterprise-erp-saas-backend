@@ -27,12 +27,57 @@ import {
 } from './dto/proforma-invoice.dto';
 
 const PROFORMA_INCLUDE = {
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
 };
 
 const QUOTATION_INCLUDE = {
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
 };
+
+const SALES_ORDER_INCLUDE = {
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
+};
+
+interface SnapshotSourceTaxComponent {
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+}
+
+/** A QuotationItem or SalesOrderItem row, as the shape common to both conversion sources. */
+interface SnapshotSourceItem {
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: Prisma.Decimal | null;
+  unitPrice: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: SnapshotSourceTaxComponent[];
+}
+
+type ProformaSnapshotItemInput = SnapshotSourceItem;
 
 @Injectable()
 export class ProformaInvoicesService {
@@ -74,15 +119,10 @@ export class ProformaInvoicesService {
         shippingAddress: quotation.shippingAddress,
         notes: quotation.notes,
         subtotal: quotation.subtotal,
+        discountTotal: quotation.discountTotal,
+        taxTotal: quotation.taxTotal,
         total: quotation.total,
-        items: quotation.items.map((item) => ({
-          productId: item.productId,
-          productSku: item.productSku,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-        })),
+        items: quotation.items.map((item) => this.toSnapshotItemInput(item)),
       },
       request,
     );
@@ -95,7 +135,7 @@ export class ProformaInvoicesService {
   ) {
     const order = await this.prisma.salesOrder.findFirst({
       where: { id: salesOrderId, tenantId: actor.tenantId },
-      include: { items: { orderBy: { createdAt: 'asc' } } },
+      include: SALES_ORDER_INCLUDE,
     });
     if (!order) throw new NotFoundException('Sales order not found');
     if (order.status === SalesOrderStatus.CANCELLED) {
@@ -118,21 +158,16 @@ export class ProformaInvoicesService {
         shippingAddress: order.shippingAddress,
         notes: order.notes,
         subtotal: order.subtotal,
+        discountTotal: order.discountTotal,
+        taxTotal: order.taxTotal,
         total: order.total,
-        items: order.items.map((item) => ({
-          productId: item.productId,
-          productSku: item.productSku,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-        })),
+        items: order.items.map((item) => this.toSnapshotItemInput(item)),
       },
       request,
     );
   }
 
-  /** Shared create path for Quotation (Phase 2) and Sales Order (Phase 3). */
+  /** Shared create path for Quotation and Sales Order conversions. */
   async createFromSnapshot(
     actor: ActorContext,
     input: {
@@ -144,15 +179,10 @@ export class ProformaInvoicesService {
       shippingAddress: string | null;
       notes: string | null;
       subtotal: Prisma.Decimal;
+      discountTotal: Prisma.Decimal;
+      taxTotal: Prisma.Decimal;
       total: Prisma.Decimal;
-      items: Array<{
-        productId: string;
-        productSku: string;
-        productName: string;
-        quantity: Prisma.Decimal;
-        unitPrice: Prisma.Decimal;
-        lineTotal: Prisma.Decimal;
-      }>;
+      items: ProformaSnapshotItemInput[];
     },
     request?: RequestAuditMeta,
   ) {
@@ -172,6 +202,8 @@ export class ProformaInvoicesService {
             shippingAddress: input.shippingAddress,
             notes: input.notes,
             subtotal: input.subtotal,
+            discountTotal: input.discountTotal,
+            taxTotal: input.taxTotal,
             total: input.total,
             items: {
               create: input.items.map((item) => ({
@@ -180,8 +212,29 @@ export class ProformaInvoicesService {
                 productSku: item.productSku,
                 productName: item.productName,
                 quantity: item.quantity,
+                unitOfMeasureId: item.unitOfMeasureId,
+                uomCode: item.uomCode,
+                uomName: item.uomName,
+                conversionFactor: item.conversionFactor,
                 unitPrice: item.unitPrice,
+                discountPercent: item.discountPercent,
+                discountAmount: item.discountAmount,
+                taxCodeId: item.taxCodeId,
+                taxCode: item.taxCode,
+                taxCodeName: item.taxCodeName,
+                taxAmount: item.taxAmount,
+                lineSubtotal: item.lineSubtotal,
                 lineTotal: item.lineTotal,
+                taxComponents: {
+                  create: item.taxComponents.map((component) => ({
+                    tenantId: actor.tenantId,
+                    sequence: component.sequence,
+                    type: component.type,
+                    name: component.name,
+                    rate: component.rate,
+                    componentTaxAmount: component.componentTaxAmount,
+                  })),
+                },
               })),
             },
           },
@@ -276,6 +329,8 @@ export class ProformaInvoicesService {
             notes:
               dto.notes === undefined ? undefined : dto.notes?.trim() || null,
             subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
             total: totals.total,
           },
           include: PROFORMA_INCLUDE,
@@ -372,6 +427,38 @@ export class ProformaInvoicesService {
     return row;
   }
 
+  /** Copies every UOM/discount/tax snapshot field verbatim — never recalculated. */
+  private toSnapshotItemInput(
+    item: SnapshotSourceItem,
+  ): ProformaSnapshotItemInput {
+    return {
+      productId: item.productId,
+      productSku: item.productSku,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitOfMeasureId: item.unitOfMeasureId,
+      uomCode: item.uomCode,
+      uomName: item.uomName,
+      conversionFactor: item.conversionFactor,
+      unitPrice: item.unitPrice,
+      discountPercent: item.discountPercent,
+      discountAmount: item.discountAmount,
+      taxCodeId: item.taxCodeId,
+      taxCode: item.taxCode,
+      taxCodeName: item.taxCodeName,
+      taxAmount: item.taxAmount,
+      lineSubtotal: item.lineSubtotal,
+      lineTotal: item.lineTotal,
+      taxComponents: item.taxComponents.map((component) => ({
+        sequence: component.sequence,
+        type: component.type,
+        name: component.name,
+        rate: component.rate,
+        componentTaxAmount: component.componentTaxAmount,
+      })),
+    };
+  }
+
   private mapLines(tenantId: string, items: UpdateProformaInvoiceItemDto[]) {
     return items.map((item) => {
       const quantity = parsePositiveDecimal(item.quantity);
@@ -389,14 +476,25 @@ export class ProformaInvoicesService {
     });
   }
 
-  private sumTotals(
-    lines: Array<{ lineTotal: Prisma.Decimal }>,
-  ): { subtotal: Prisma.Decimal; total: Prisma.Decimal } {
+  private sumTotals(lines: Array<{ lineTotal: Prisma.Decimal }>): {
+    subtotal: Prisma.Decimal;
+    discountTotal: Prisma.Decimal;
+    taxTotal: Prisma.Decimal;
+    total: Prisma.Decimal;
+  } {
     const subtotal = lines.reduce(
       (sum, line) => sum.plus(line.lineTotal),
       new Prisma.Decimal(0),
     );
-    return { subtotal, total: subtotal };
+    // Manually-replaced items via update() do not carry discount/tax (that
+    // input capability is not yet exposed here), so both totals are 0 —
+    // explicit here to avoid leaving stale values from a prior conversion.
+    return {
+      subtotal,
+      discountTotal: new Prisma.Decimal(0),
+      taxTotal: new Prisma.Decimal(0),
+      total: subtotal,
+    };
   }
 
   private async nextDocumentNumber(tenantId: string): Promise<string> {

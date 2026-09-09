@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AccountsModule } from '../accounts/accounts.module';
+import { InternalTaxCodesController } from './internal-tax-codes.controller';
 import { TaxCodesController } from './tax-codes.controller';
 import { TaxCodesService } from './tax-codes.service';
 
 @Module({
   imports: [AccountsModule],
-  controllers: [TaxCodesController],
+  controllers: [TaxCodesController, InternalTaxCodesController],
   providers: [TaxCodesService],
   exports: [TaxCodesService],
 })

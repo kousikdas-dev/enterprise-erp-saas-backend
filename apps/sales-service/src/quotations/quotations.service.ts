@@ -5,14 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, QuotationStatus } from '../../generated/prisma-client';
+import { AccountingTaxCodeClient } from '../accounting/accounting-tax-code.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
 import {
   moneyToString,
   parseMoney,
+  parsePercent,
   parsePositiveDecimal,
+  roundMoney,
 } from '../common/decimal';
 import { CustomersService } from '../customers/customers.service';
+import { InventoryProductClient } from '../inventory/inventory-product.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toQuotationResponse } from './dto/quotation-response';
 import {
@@ -22,8 +26,42 @@ import {
 } from './dto/quotation.dto';
 
 const QUOTATION_INCLUDE = {
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
 };
+
+interface QuotationLineTaxComponent {
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+}
+
+interface QuotationLine {
+  tenantId: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  conversionFactor: Prisma.Decimal;
+  unitPrice: Prisma.Decimal;
+  gross: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: QuotationLineTaxComponent[];
+}
 
 @Injectable()
 export class QuotationsService {
@@ -31,6 +69,8 @@ export class QuotationsService {
     private readonly prisma: PrismaService,
     private readonly customers: CustomersService,
     private readonly audit: IdentityAuditClient,
+    private readonly inventoryProducts: InventoryProductClient,
+    private readonly accountingTaxCodes: AccountingTaxCodeClient,
   ) {}
 
   async create(
@@ -39,7 +79,7 @@ export class QuotationsService {
     request?: RequestAuditMeta,
   ) {
     const customer = await this.customers.require(actor, dto.customerId);
-    const lines = this.mapLines(actor.tenantId, dto.items);
+    const lines = await this.mapLines(actor, dto.items);
     const totals = this.sumTotals(lines);
     const row = await this.prisma.quotation.create({
       data: {
@@ -56,17 +96,11 @@ export class QuotationsService {
         deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
         subtotal: totals.subtotal,
+        discountTotal: totals.discountTotal,
+        taxTotal: totals.taxTotal,
         total: totals.total,
         items: {
-          create: lines.map((line) => ({
-            tenantId: line.tenantId,
-            productId: line.productId,
-            productSku: line.productSku,
-            productName: line.productName,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            lineTotal: line.lineTotal,
-          })),
+          create: lines.map((line) => this.toItemCreateInput(line)),
         },
       },
       include: QUOTATION_INCLUDE,
@@ -126,25 +160,19 @@ export class QuotationsService {
       customer = await this.customers.require(actor, dto.customerId);
     }
 
+    const lines = dto.items ? await this.mapLines(actor, dto.items) : null;
+
     const row = await this.prisma.$transaction(async (tx) => {
-      if (dto.items) {
-        const lines = this.mapLines(actor.tenantId, dto.items);
+      if (lines) {
         const totals = this.sumTotals(lines);
         await tx.quotationItem.deleteMany({
           where: { quotationId: id, tenantId: actor.tenantId },
         });
-        await tx.quotationItem.createMany({
-          data: lines.map((line) => ({
-            tenantId: line.tenantId,
-            quotationId: id,
-            productId: line.productId,
-            productSku: line.productSku,
-            productName: line.productName,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            lineTotal: line.lineTotal,
-          })),
-        });
+        for (const line of lines) {
+          await tx.quotationItem.create({
+            data: { quotationId: id, ...this.toItemCreateInput(line) },
+          });
+        }
         return tx.quotation.update({
           where: { id },
           data: {
@@ -189,6 +217,8 @@ export class QuotationsService {
                   ? new Date(dto.validUntil)
                   : null,
             subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
             total: totals.total,
           },
           include: QUOTATION_INCLUDE,
@@ -378,30 +408,158 @@ export class QuotationsService {
       .join(', ') || null;
   }
 
-  private mapLines(tenantId: string, items: CreateQuotationItemDto[]) {
-    return items.map((item) => {
-      const quantity = parsePositiveDecimal(item.quantity);
-      const unitPrice = parseMoney(item.unitPrice);
-      const lineTotal = quantity.mul(unitPrice);
-      return {
-        tenantId,
-        productId: item.productId,
-        productSku: item.productSku.trim(),
-        productName: item.productName.trim(),
-        quantity,
-        unitPrice,
-        lineTotal,
-      };
-    });
+  private toItemCreateInput(line: QuotationLine) {
+    return {
+      tenantId: line.tenantId,
+      productId: line.productId,
+      productSku: line.productSku,
+      productName: line.productName,
+      quantity: line.quantity,
+      unitOfMeasureId: line.unitOfMeasureId,
+      uomCode: line.uomCode,
+      uomName: line.uomName,
+      conversionFactor: line.conversionFactor,
+      unitPrice: line.unitPrice,
+      discountPercent: line.discountPercent,
+      discountAmount: line.discountAmount,
+      taxCodeId: line.taxCodeId,
+      taxCode: line.taxCode,
+      taxCodeName: line.taxCodeName,
+      taxAmount: line.taxAmount,
+      lineSubtotal: line.lineSubtotal,
+      lineTotal: line.lineTotal,
+      taxComponents: {
+        create: line.taxComponents.map((component) => ({
+          tenantId: line.tenantId,
+          sequence: component.sequence,
+          type: component.type,
+          name: component.name,
+          rate: component.rate,
+          componentTaxAmount: component.componentTaxAmount,
+        })),
+      },
+    };
   }
 
-  private sumTotals(
-    lines: Array<{ lineTotal: Prisma.Decimal }>,
-  ): { subtotal: Prisma.Decimal; total: Prisma.Decimal } {
+  private async mapLines(
+    actor: ActorContext,
+    items: CreateQuotationItemDto[],
+  ): Promise<QuotationLine[]> {
+    return Promise.all(
+      items.map(async (item) => {
+        const quantity = parsePositiveDecimal(item.quantity);
+        const unitPrice = parseMoney(item.unitPrice);
+        const gross = roundMoney(quantity.mul(unitPrice));
+
+        const uomOptions = await this.inventoryProducts.getUomOptions(
+          actor,
+          item.productId,
+        );
+        let uomCode: string;
+        let uomName: string;
+        let conversionFactor: Prisma.Decimal;
+        if (item.unitOfMeasureId === uomOptions.base.unitOfMeasureId) {
+          uomCode = uomOptions.base.code;
+          uomName = uomOptions.base.name;
+          conversionFactor = new Prisma.Decimal(1);
+        } else {
+          const alternative = uomOptions.alternatives.find(
+            (candidate) => candidate.unitOfMeasureId === item.unitOfMeasureId,
+          );
+          if (!alternative) {
+            throw new BadRequestException(
+              'Selected unit of measure is not valid for this product',
+            );
+          }
+          uomCode = alternative.code;
+          uomName = alternative.name;
+          conversionFactor = new Prisma.Decimal(alternative.conversionFactor);
+        }
+
+        const discountPercent = parsePercent(item.discountPercent ?? '0');
+        const discountAmount = roundMoney(
+          gross.mul(discountPercent).div(100),
+        );
+        const lineSubtotal = gross.minus(discountAmount);
+
+        let taxCode: string | null = null;
+        let taxCodeName: string | null = null;
+        let taxComponents: QuotationLineTaxComponent[] = [];
+        let taxAmount = new Prisma.Decimal(0);
+
+        if (item.taxCodeId) {
+          const taxCodeResponse = await this.accountingTaxCodes.getById(
+            actor,
+            item.taxCodeId,
+          );
+          taxCode = taxCodeResponse.code;
+          taxCodeName = taxCodeResponse.name;
+          taxComponents = taxCodeResponse.components.map((component) => {
+            const rate = new Prisma.Decimal(component.rate);
+            const componentTaxAmount = roundMoney(
+              lineSubtotal.mul(rate).div(100),
+            );
+            return {
+              sequence: component.sequence,
+              type: component.type,
+              name: component.name,
+              rate,
+              componentTaxAmount,
+            };
+          });
+          taxAmount = taxComponents.reduce(
+            (sum, component) => sum.plus(component.componentTaxAmount),
+            new Prisma.Decimal(0),
+          );
+        }
+
+        const lineTotal = lineSubtotal.plus(taxAmount);
+
+        return {
+          tenantId: actor.tenantId,
+          productId: item.productId,
+          productSku: item.productSku.trim(),
+          productName: item.productName.trim(),
+          quantity,
+          unitOfMeasureId: item.unitOfMeasureId,
+          uomCode,
+          uomName,
+          conversionFactor,
+          unitPrice,
+          gross,
+          discountPercent,
+          discountAmount,
+          taxCodeId: item.taxCodeId ?? null,
+          taxCode,
+          taxCodeName,
+          taxAmount,
+          lineSubtotal,
+          lineTotal,
+          taxComponents,
+        };
+      }),
+    );
+  }
+
+  private sumTotals(lines: QuotationLine[]): {
+    subtotal: Prisma.Decimal;
+    discountTotal: Prisma.Decimal;
+    taxTotal: Prisma.Decimal;
+    total: Prisma.Decimal;
+  } {
     const subtotal = lines.reduce(
-      (sum, line) => sum.plus(line.lineTotal),
+      (sum, line) => sum.plus(line.gross),
       new Prisma.Decimal(0),
     );
-    return { subtotal, total: subtotal };
+    const discountTotal = lines.reduce(
+      (sum, line) => sum.plus(line.discountAmount),
+      new Prisma.Decimal(0),
+    );
+    const taxTotal = lines.reduce(
+      (sum, line) => sum.plus(line.taxAmount),
+      new Prisma.Decimal(0),
+    );
+    const total = subtotal.minus(discountTotal).plus(taxTotal);
+    return { subtotal, discountTotal, taxTotal, total };
   }
 }

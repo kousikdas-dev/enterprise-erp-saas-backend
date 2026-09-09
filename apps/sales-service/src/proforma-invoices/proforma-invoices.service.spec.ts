@@ -13,30 +13,86 @@ describe('ProformaInvoicesService', () => {
     tenantId,
   };
 
-  it('creates DRAFT proforma from SENT quotation with document number', async () => {
-    const quotation = {
-      id: 'q1',
-      tenantId,
-      status: QuotationStatus.SENT,
-      customerId: 'c1',
-      customerName: 'Acme',
-      billingAddress: 'B',
-      shippingAddress: 'S',
-      notes: null,
-      subtotal: { toString: () => '10' },
-      total: { toString: () => '10' },
-      items: [
+  function zeroTotals() {
+    return {
+      subtotal: { toFixed: () => '0.0000' },
+      discountTotal: { toFixed: () => '0.0000' },
+      taxTotal: { toFixed: () => '0.0000' },
+      total: { toFixed: () => '0.0000' },
+    };
+  }
+
+  /** A QuotationItem/SalesOrderItem-shaped source row, with UOM/discount/tax fields and taxComponents. */
+  function sourceItem(overrides: Record<string, unknown> = {}) {
+    return {
+      productId: 'p1',
+      productSku: 'SKU',
+      productName: 'Widget',
+      quantity: { toFixed: () => '1.000000', toString: () => '1' },
+      unitOfMeasureId: 'unit-ea',
+      uomCode: 'EA',
+      uomName: 'Each',
+      conversionFactor: { toFixed: () => '1.000000' },
+      unitPrice: { toFixed: () => '10.0000', toString: () => '10' },
+      discountPercent: { toFixed: () => '10.00' },
+      discountAmount: { toFixed: () => '1.0000' },
+      taxCodeId: 'tax-1',
+      taxCode: 'GST18',
+      taxCodeName: 'GST 18%',
+      taxAmount: { toFixed: () => '1.6200' },
+      lineSubtotal: { toFixed: () => '9.0000' },
+      lineTotal: { toFixed: () => '10.6200' },
+      taxComponents: [
         {
-          productId: 'p1',
-          productSku: 'SKU',
-          productName: 'Widget',
-          quantity: { toFixed: () => '1.000000', toString: () => '1' },
-          unitPrice: { toFixed: () => '10.0000', toString: () => '10' },
-          lineTotal: { toFixed: () => '10.0000', toString: () => '10' },
+          sequence: 1,
+          type: 'CGST',
+          name: null,
+          rate: { toFixed: () => '9.0000' },
+          componentTaxAmount: { toFixed: () => '0.8100' },
+        },
+        {
+          sequence: 2,
+          type: 'SGST',
+          name: null,
+          rate: { toFixed: () => '9.0000' },
+          componentTaxAmount: { toFixed: () => '0.8100' },
         },
       ],
+      ...overrides,
     };
-    const created = {
+  }
+
+  function createdItemRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'pfi1',
+      tenantId,
+      proformaInvoiceId: 'pf1',
+      productId: 'p1',
+      productSku: 'SKU',
+      productName: 'Widget',
+      quantity: { toFixed: () => '1.000000' },
+      unitOfMeasureId: 'unit-ea',
+      uomCode: 'EA',
+      uomName: 'Each',
+      conversionFactor: { toFixed: () => '1.000000' },
+      unitPrice: { toFixed: () => '10.0000' },
+      discountPercent: { toFixed: () => '10.00' },
+      discountAmount: { toFixed: () => '1.0000' },
+      taxCodeId: 'tax-1',
+      taxCode: 'GST18',
+      taxCodeName: 'GST 18%',
+      taxAmount: { toFixed: () => '1.6200' },
+      lineSubtotal: { toFixed: () => '9.0000' },
+      lineTotal: { toFixed: () => '10.6200' },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      taxComponents: [],
+      ...overrides,
+    };
+  }
+
+  function createdRow(overrides: Record<string, unknown> = {}) {
+    return {
       id: 'pf1',
       tenantId,
       documentNumber: 'PF-00000001',
@@ -49,26 +105,35 @@ describe('ProformaInvoicesService', () => {
       shippingAddress: 'S',
       notes: null,
       subtotal: { toFixed: () => '10.0000' },
-      total: { toFixed: () => '10.0000' },
+      discountTotal: { toFixed: () => '1.0000' },
+      taxTotal: { toFixed: () => '1.6200' },
+      total: { toFixed: () => '10.6200' },
       issuedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-      items: [
-        {
-          id: 'pfi1',
-          tenantId,
-          proformaInvoiceId: 'pf1',
-          productId: 'p1',
-          productSku: 'SKU',
-          productName: 'Widget',
-          quantity: { toFixed: () => '1.000000' },
-          unitPrice: { toFixed: () => '10.0000' },
-          lineTotal: { toFixed: () => '10.0000' },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ],
+      items: [createdItemRow()],
+      ...overrides,
     };
+  }
+
+  it('creates DRAFT proforma from SENT quotation and copies UOM/discount/tax snapshot fields verbatim', async () => {
+    const item = sourceItem();
+    const quotation = {
+      id: 'q1',
+      tenantId,
+      status: QuotationStatus.SENT,
+      customerId: 'c1',
+      customerName: 'Acme',
+      billingAddress: 'B',
+      shippingAddress: 'S',
+      notes: null,
+      subtotal: { toString: () => '10' },
+      discountTotal: { toString: () => '1' },
+      taxTotal: { toString: () => '1.62' },
+      total: { toString: () => '10.62' },
+      items: [item],
+    };
+    const created = createdRow({ documentNumber: 'PF-00000001' });
     const createMock = jest.fn().mockResolvedValue(created);
     const prisma = {
       quotation: { findFirst: jest.fn().mockResolvedValue(quotation) },
@@ -89,6 +154,38 @@ describe('ProformaInvoicesService', () => {
       ProformaInvoiceStatus.DRAFT,
     );
     expect(createMock.mock.calls[0][0].data.issuedAt).toBeUndefined();
+
+    const data = createMock.mock.calls[0][0].data;
+    // header totals copied verbatim (same object references, not recalculated)
+    expect(data.discountTotal).toBe(quotation.discountTotal);
+    expect(data.taxTotal).toBe(quotation.taxTotal);
+
+    // item snapshot fields copied verbatim
+    const createdItem = data.items.create[0];
+    expect(createdItem.unitOfMeasureId).toBe(item.unitOfMeasureId);
+    expect(createdItem.uomCode).toBe(item.uomCode);
+    expect(createdItem.uomName).toBe(item.uomName);
+    expect(createdItem.conversionFactor).toBe(item.conversionFactor);
+    expect(createdItem.discountPercent).toBe(item.discountPercent);
+    expect(createdItem.discountAmount).toBe(item.discountAmount);
+    expect(createdItem.taxCodeId).toBe(item.taxCodeId);
+    expect(createdItem.taxCode).toBe(item.taxCode);
+    expect(createdItem.taxCodeName).toBe(item.taxCodeName);
+    expect(createdItem.taxAmount).toBe(item.taxAmount);
+    expect(createdItem.lineSubtotal).toBe(item.lineSubtotal);
+
+    // tax component snapshot rows copied verbatim, not recalculated
+    expect(createdItem.taxComponents.create).toHaveLength(2);
+    expect(createdItem.taxComponents.create[0].rate).toBe(
+      item.taxComponents[0].rate,
+    );
+    expect(createdItem.taxComponents.create[0].componentTaxAmount).toBe(
+      item.taxComponents[0].componentTaxAmount,
+    );
+    expect(createdItem.taxComponents.create[1].type).toBe(
+      item.taxComponents[1].type,
+    );
+
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'proforma-invoice.created' }),
     );
@@ -127,7 +224,8 @@ describe('ProformaInvoicesService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('creates DRAFT proforma from sales order via shared snapshot path', async () => {
+  it('creates DRAFT proforma from sales order via shared snapshot path and copies its UOM/discount/tax fields verbatim', async () => {
+    const item = sourceItem();
     const order = {
       id: 'so1',
       tenantId,
@@ -138,56 +236,23 @@ describe('ProformaInvoicesService', () => {
       shippingAddress: 'S',
       notes: null,
       subtotal: { toString: () => '10' },
-      total: { toString: () => '10' },
-      items: [
-        {
-          productId: 'p1',
-          productSku: 'SKU',
-          productName: 'Widget',
-          quantity: { toFixed: () => '1.000000', toString: () => '1' },
-          unitPrice: { toFixed: () => '10.0000', toString: () => '10' },
-          lineTotal: { toFixed: () => '10.0000', toString: () => '10' },
-        },
-      ],
+      discountTotal: { toString: () => '1' },
+      taxTotal: { toString: () => '1.62' },
+      total: { toString: () => '10.62' },
+      items: [item],
     };
-    const created = {
+    const created = createdRow({
       id: 'pf2',
-      tenantId,
       documentNumber: 'PF-00000002',
       sourceType: ProformaSourceType.SALES_ORDER,
       sourceId: 'so1',
-      status: ProformaInvoiceStatus.DRAFT,
-      customerId: 'c1',
-      customerName: 'Acme',
-      billingAddress: 'B',
-      shippingAddress: 'S',
-      notes: null,
-      subtotal: { toFixed: () => '10.0000' },
-      total: { toFixed: () => '10.0000' },
-      issuedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      items: [
-        {
-          id: 'pfi2',
-          tenantId,
-          proformaInvoiceId: 'pf2',
-          productId: 'p1',
-          productSku: 'SKU',
-          productName: 'Widget',
-          quantity: { toFixed: () => '1.000000' },
-          unitPrice: { toFixed: () => '10.0000' },
-          lineTotal: { toFixed: () => '10.0000' },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ],
-    };
+    });
+    const createMock = jest.fn().mockResolvedValue(created);
     const prisma = {
       salesOrder: { findFirst: jest.fn().mockResolvedValue(order) },
       proformaInvoice: {
         count: jest.fn().mockResolvedValue(1),
-        create: jest.fn().mockResolvedValue(created),
+        create: createMock,
       },
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -197,6 +262,14 @@ describe('ProformaInvoicesService', () => {
     expect(result.sourceId).toBe('so1');
     expect(result.documentNumber).toBe('PF-00000002');
     expect(result.status).toBe(ProformaInvoiceStatus.DRAFT);
+
+    const data = createMock.mock.calls[0][0].data;
+    expect(data.discountTotal).toBe(order.discountTotal);
+    expect(data.taxTotal).toBe(order.taxTotal);
+    const createdItem = data.items.create[0];
+    expect(createdItem.unitOfMeasureId).toBe(item.unitOfMeasureId);
+    expect(createdItem.taxCodeId).toBe(item.taxCodeId);
+    expect(createdItem.taxComponents.create).toHaveLength(2);
   });
 
   describe('update', () => {
@@ -244,23 +317,8 @@ describe('ProformaInvoicesService', () => {
         notes: 'updated',
         billingAddress: 'New billing',
         shippingAddress: null,
-        subtotal: { toFixed: () => '10.0000' },
-        total: { toFixed: () => '10.0000' },
-        items: [
-          {
-            id: 'pfi1',
-            tenantId,
-            proformaInvoiceId: 'pf1',
-            productId: 'p1',
-            productSku: 'SKU',
-            productName: 'Widget',
-            quantity: { toFixed: () => '1.000000' },
-            unitPrice: { toFixed: () => '10.0000' },
-            lineTotal: { toFixed: () => '10.0000' },
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ],
+        ...zeroTotals(),
+        items: [createdItemRow()],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -281,6 +339,49 @@ describe('ProformaInvoicesService', () => {
         expect.objectContaining({ action: 'proforma-invoice.updated' }),
       );
     });
+
+    it('resets discountTotal/taxTotal to 0 when items are manually replaced', async () => {
+      const updated = {
+        ...draftRow,
+        notes: null,
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const updateMock = jest.fn().mockResolvedValue(updated);
+      const tx = {
+        proformaInvoice: { update: updateMock },
+        proformaInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const service = new ProformaInvoicesService(
+        prisma as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+      );
+
+      await service.update(actor, 'pf1', {
+        items: [
+          {
+            productId: 'p1',
+            productSku: 'SKU',
+            productName: 'Widget',
+            quantity: '1',
+            unitPrice: '10.0000',
+          },
+        ],
+      });
+
+      const data = updateMock.mock.calls[0][0].data;
+      expect(data.discountTotal.toFixed(4)).toBe('0.0000');
+      expect(data.taxTotal.toFixed(4)).toBe('0.0000');
+    });
   });
 
   describe('send', () => {
@@ -295,8 +396,7 @@ describe('ProformaInvoicesService', () => {
         ...draftRow,
         status: ProformaInvoiceStatus.ISSUED,
         issuedAt: new Date(),
-        subtotal: { toFixed: () => '10.0000' },
-        total: { toFixed: () => '10.0000' },
+        ...zeroTotals(),
         items: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -366,9 +466,9 @@ describe('ProformaInvoicesService', () => {
         const cancelled = {
           ...row,
           status: ProformaInvoiceStatus.CANCELLED,
-          subtotal: { toFixed: () => '0.0000' },
-          total: { toFixed: () => '0.0000' },
+          ...zeroTotals(),
           issuedAt: null,
+          items: [],
           createdAt: new Date(),
           updatedAt: new Date(),
         };

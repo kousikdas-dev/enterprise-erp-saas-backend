@@ -28,8 +28,48 @@ import {
 } from './dto/sales-order.dto';
 
 const ORDER_INCLUDE = {
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
 };
+
+const QUOTATION_INCLUDE = {
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
+};
+
+interface QuotationSnapshotTaxComponent {
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+}
+
+/** A QuotationItem row, as returned with its taxComponents included. */
+interface QuotationSnapshotItem {
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: Prisma.Decimal | null;
+  unitPrice: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: QuotationSnapshotTaxComponent[];
+}
 
 @Injectable()
 export class SalesOrdersService {
@@ -58,6 +98,8 @@ export class SalesOrdersService {
           dto.shippingAddress?.trim() || this.formatCustomerAddress(customer),
         notes: dto.notes?.trim() || null,
         subtotal: totals.subtotal,
+        discountTotal: totals.discountTotal,
+        taxTotal: totals.taxTotal,
         total: totals.total,
         items: {
           create: lines.map((line) => ({
@@ -96,7 +138,7 @@ export class SalesOrdersService {
   ) {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id: quotationId, tenantId: actor.tenantId },
-      include: { items: { orderBy: { createdAt: 'asc' } } },
+      include: QUOTATION_INCLUDE,
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
     if (quotation.status !== QuotationStatus.ACCEPTED) {
@@ -129,18 +171,13 @@ export class SalesOrdersService {
           shippingAddress: quotation.shippingAddress,
           notes: quotation.notes,
           subtotal: quotation.subtotal,
+          discountTotal: quotation.discountTotal,
+          taxTotal: quotation.taxTotal,
           total: quotation.total,
           items: {
-            create: quotation.items.map((item) => ({
-              tenantId: actor.tenantId,
-              productId: item.productId,
-              productSku: item.productSku,
-              productName: item.productName,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              lineTotal: item.lineTotal,
-              shippedQuantity: new Prisma.Decimal(0),
-            })),
+            create: quotation.items.map((item) =>
+              this.toSnapshotItemInput(item, actor.tenantId),
+            ),
           },
         },
         include: ORDER_INCLUDE,
@@ -249,6 +286,8 @@ export class SalesOrdersService {
             notes:
               dto.notes === undefined ? undefined : dto.notes.trim() || null,
             subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
             total: totals.total,
           },
           include: ORDER_INCLUDE,
@@ -390,6 +429,41 @@ export class SalesOrdersService {
       .join(', ') || null;
   }
 
+  /** Copies every UOM/discount/tax snapshot field verbatim — never recalculated. */
+  private toSnapshotItemInput(item: QuotationSnapshotItem, tenantId: string) {
+    return {
+      tenantId,
+      productId: item.productId,
+      productSku: item.productSku,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitOfMeasureId: item.unitOfMeasureId,
+      uomCode: item.uomCode,
+      uomName: item.uomName,
+      conversionFactor: item.conversionFactor,
+      unitPrice: item.unitPrice,
+      discountPercent: item.discountPercent,
+      discountAmount: item.discountAmount,
+      taxCodeId: item.taxCodeId,
+      taxCode: item.taxCode,
+      taxCodeName: item.taxCodeName,
+      taxAmount: item.taxAmount,
+      lineSubtotal: item.lineSubtotal,
+      lineTotal: item.lineTotal,
+      shippedQuantity: new Prisma.Decimal(0),
+      taxComponents: {
+        create: item.taxComponents.map((component) => ({
+          tenantId,
+          sequence: component.sequence,
+          type: component.type,
+          name: component.name,
+          rate: component.rate,
+          componentTaxAmount: component.componentTaxAmount,
+        })),
+      },
+    };
+  }
+
   private mapLines(tenantId: string, items: CreateSalesOrderItemDto[]) {
     return items.map((item) => {
       const quantity = parsePositiveDecimal(item.quantity);
@@ -411,6 +485,15 @@ export class SalesOrdersService {
       (sum, line) => sum.plus(line.lineTotal),
       new Prisma.Decimal(0),
     );
-    return { subtotal, total: subtotal };
+    // Manually-created/replaced items via create()/update() do not carry
+    // discount/tax (that input capability is not yet exposed here), so both
+    // totals are 0 — explicit here to avoid leaving stale values from a
+    // prior quotation conversion.
+    return {
+      subtotal,
+      discountTotal: new Prisma.Decimal(0),
+      taxTotal: new Prisma.Decimal(0),
+      total: subtotal,
+    };
   }
 }
