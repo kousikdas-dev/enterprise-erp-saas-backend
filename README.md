@@ -168,6 +168,15 @@ npm run start:purchase
 
 `npm run start:purchase` listens on **3005** on the host for local hybrid development. In Docker Compose, Purchase is internal-only (`http://purchase-service:3005`) and is **not** published on the host.
 
+**Always use `npm run start:<service>` (watch mode) for manual/API testing.** It recompiles
+current source automatically on every save. `npm run start:prod:<service>` (`node
+dist/apps/<service>/main.js`) does **not** rebuild anything — it silently runs whatever is
+already in `dist/`, which may be stale or missing recent changes. Reserve `start:prod:*` for
+deliberately verifying a compiled artifact, and only run it right after `npm run build:<service>`
+in the same session. The same applies to `docker compose up` without `--build`: it reuses a
+previously built image. Use `docker compose up --build` to guarantee a fresh compile from
+current source.
+
 Or run the compiled stack with `docker compose up --build`.
 
 Health:

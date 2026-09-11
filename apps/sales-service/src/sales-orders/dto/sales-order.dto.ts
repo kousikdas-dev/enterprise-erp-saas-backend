@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
@@ -25,9 +26,21 @@ export class CreateSalesOrderItemDto {
   @IsString()
   quantity!: string;
 
+  @IsUUID()
+  unitOfMeasureId!: string;
+
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   unitPrice!: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  discountPercent?: string;
+
+  @IsOptional()
+  @IsUUID()
+  taxCodeId?: string;
 }
 
 export class CreateSalesOrderDto {
@@ -48,6 +61,18 @@ export class CreateSalesOrderDto {
   @IsString()
   @MaxLength(500)
   shippingAddress?: string;
+
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -75,6 +100,18 @@ export class UpdateSalesOrderDto {
   @IsString()
   @MaxLength(500)
   shippingAddress?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string | null;
+
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string | null;
 
   @IsOptional()
   @IsArray()

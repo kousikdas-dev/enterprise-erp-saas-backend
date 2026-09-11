@@ -16,6 +16,7 @@ import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
 import { CreateInvoiceFromSourceDto } from '../sales-invoices/dto/sales-invoice.dto';
 import { SalesInvoicesService } from '../sales-invoices/sales-invoices.service';
+import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 import { UpdateProformaInvoiceDto } from './dto/proforma-invoice.dto';
 import { ProformaInvoicesService } from './proforma-invoices.service';
 
@@ -25,6 +26,7 @@ export class ProformaInvoicesController {
   constructor(
     private readonly proformas: ProformaInvoicesService,
     private readonly salesInvoices: SalesInvoicesService,
+    private readonly salesOrders: SalesOrdersService,
   ) {}
 
   @Get()
@@ -79,6 +81,19 @@ export class ProformaInvoicesController {
       actor,
       id,
       dto,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/convert-to-order')
+  convertToOrder(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.salesOrders.convertFromProforma(
+      actor,
+      id,
       requestAuditMeta(request),
     );
   }

@@ -11,13 +11,17 @@ import {
   QuotationStatus,
   SalesOrderStatus,
 } from '../../generated/prisma-client';
+import { AccountingTaxCodeClient } from '../accounting/accounting-tax-code.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
 import {
   moneyToString,
   parseMoney,
+  parsePercent,
   parsePositiveDecimal,
+  roundMoney,
 } from '../common/decimal';
+import { InventoryProductClient } from '../inventory/inventory-product.client';
 import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toProformaResponse } from './dto/proforma-invoice-response';
@@ -79,11 +83,44 @@ interface SnapshotSourceItem {
 
 type ProformaSnapshotItemInput = SnapshotSourceItem;
 
+interface ProformaLineTaxComponent {
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+}
+
+interface ProformaLine {
+  tenantId: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  conversionFactor: Prisma.Decimal;
+  unitPrice: Prisma.Decimal;
+  gross: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: ProformaLineTaxComponent[];
+}
+
 @Injectable()
 export class ProformaInvoicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: IdentityAuditClient,
+    private readonly inventoryProducts: InventoryProductClient,
+    private readonly accountingTaxCodes: AccountingTaxCodeClient,
   ) {}
 
   async createFromQuotation(
@@ -296,36 +333,24 @@ export class ProformaInvoicesService {
       throw new BadRequestException('No fields to update');
     }
 
+    // Resolved (and, for items, externally-validated via HTTP) before the
+    // transaction starts — mirrors QuotationsService.update(), which never
+    // holds a DB transaction open across calls to inventory-service/accounting-service.
+    const lines = dto.items ? await this.mapLines(actor, dto.items) : null;
+
     const row = await this.prisma.$transaction(async (tx) => {
-      if (dto.items) {
-        const lines = this.mapLines(actor.tenantId, dto.items);
+      if (lines) {
         const totals = this.sumTotals(lines);
         await tx.proformaInvoiceItem.deleteMany({
           where: { proformaInvoiceId: id, tenantId: actor.tenantId },
         });
-        await tx.proformaInvoiceItem.createMany({
-          data: lines.map((line) => ({
-            tenantId: line.tenantId,
-            proformaInvoiceId: id,
-            productId: line.productId,
-            productSku: line.productSku,
-            productName: line.productName,
-            quantity: line.quantity,
-            unitOfMeasureId: line.unitOfMeasureId,
-            uomCode: line.uomCode,
-            uomName: line.uomName,
-            conversionFactor: line.conversionFactor,
-            unitPrice: line.unitPrice,
-            discountPercent: line.discountPercent,
-            discountAmount: line.discountAmount,
-            taxCodeId: line.taxCodeId,
-            taxCode: line.taxCode,
-            taxCodeName: line.taxCodeName,
-            taxAmount: line.taxAmount,
-            lineSubtotal: line.lineSubtotal,
-            lineTotal: line.lineTotal,
-          })),
-        });
+        // Per-item create (not createMany): createMany cannot create the
+        // nested taxComponents relation, which would silently drop tax rows.
+        for (const line of lines) {
+          await tx.proformaInvoiceItem.create({
+            data: { proformaInvoiceId: id, ...this.toItemCreateInput(line) },
+          });
+        }
         return tx.proformaInvoice.update({
           where: { id },
           data: {
@@ -470,56 +495,167 @@ export class ProformaInvoicesService {
     };
   }
 
-  private mapLines(tenantId: string, items: UpdateProformaInvoiceItemDto[]) {
-    return items.map((item) => {
-      const quantity = parsePositiveDecimal(item.quantity);
-      const unitPrice = parseMoney(item.unitPrice);
-      const lineTotal = quantity.mul(unitPrice);
-      return {
-        tenantId,
-        productId: item.productId,
-        productSku: item.productSku.trim(),
-        productName: item.productName.trim(),
-        quantity,
-        // Manually-replaced items via update() do not yet expose UOM/discount/tax
-        // input capability, so every snapshot field is explicitly its neutral
-        // value rather than left undefined.
-        unitOfMeasureId: null as string | null,
-        uomCode: null as string | null,
-        uomName: null as string | null,
-        conversionFactor: null as Prisma.Decimal | null,
-        unitPrice,
-        discountPercent: new Prisma.Decimal(0),
-        discountAmount: new Prisma.Decimal(0),
-        taxCodeId: null as string | null,
-        taxCode: null as string | null,
-        taxCodeName: null as string | null,
-        taxAmount: new Prisma.Decimal(0),
-        lineSubtotal: lineTotal,
-        lineTotal,
-      };
-    });
+  private toItemCreateInput(line: ProformaLine) {
+    return {
+      tenantId: line.tenantId,
+      productId: line.productId,
+      productSku: line.productSku,
+      productName: line.productName,
+      quantity: line.quantity,
+      unitOfMeasureId: line.unitOfMeasureId,
+      uomCode: line.uomCode,
+      uomName: line.uomName,
+      conversionFactor: line.conversionFactor,
+      unitPrice: line.unitPrice,
+      discountPercent: line.discountPercent,
+      discountAmount: line.discountAmount,
+      taxCodeId: line.taxCodeId,
+      taxCode: line.taxCode,
+      taxCodeName: line.taxCodeName,
+      taxAmount: line.taxAmount,
+      lineSubtotal: line.lineSubtotal,
+      lineTotal: line.lineTotal,
+      taxComponents: {
+        create: line.taxComponents.map((component) => ({
+          tenantId: line.tenantId,
+          sequence: component.sequence,
+          type: component.type,
+          name: component.name,
+          rate: component.rate,
+          componentTaxAmount: component.componentTaxAmount,
+        })),
+      },
+    };
   }
 
-  private sumTotals(lines: Array<{ lineTotal: Prisma.Decimal }>): {
+  /**
+   * Mirrors QuotationsService.mapLines() exactly: gross → UOM resolution
+   * (base vs. alternative, validated against the product via
+   * InventoryProductClient) → discountAmount → lineSubtotal → each tax
+   * component independently (via AccountingTaxCodeClient) → taxAmount →
+   * lineTotal. All client-supplied amounts are recomputed server-side —
+   * nothing from the request is trusted as a calculated value.
+   */
+  private async mapLines(
+    actor: ActorContext,
+    items: UpdateProformaInvoiceItemDto[],
+  ): Promise<ProformaLine[]> {
+    return Promise.all(
+      items.map(async (item) => {
+        const quantity = parsePositiveDecimal(item.quantity);
+        const unitPrice = parseMoney(item.unitPrice);
+        const gross = roundMoney(quantity.mul(unitPrice));
+
+        const uomOptions = await this.inventoryProducts.getUomOptions(
+          actor,
+          item.productId,
+        );
+        let uomCode: string;
+        let uomName: string;
+        let conversionFactor: Prisma.Decimal;
+        if (item.unitOfMeasureId === uomOptions.base.unitOfMeasureId) {
+          uomCode = uomOptions.base.code;
+          uomName = uomOptions.base.name;
+          conversionFactor = new Prisma.Decimal(1);
+        } else {
+          const alternative = uomOptions.alternatives.find(
+            (candidate) => candidate.unitOfMeasureId === item.unitOfMeasureId,
+          );
+          if (!alternative) {
+            throw new BadRequestException(
+              'Selected unit of measure is not valid for this product',
+            );
+          }
+          uomCode = alternative.code;
+          uomName = alternative.name;
+          conversionFactor = new Prisma.Decimal(alternative.conversionFactor);
+        }
+
+        const discountPercent = parsePercent(item.discountPercent ?? '0');
+        const discountAmount = roundMoney(
+          gross.mul(discountPercent).div(100),
+        );
+        const lineSubtotal = gross.minus(discountAmount);
+
+        let taxCode: string | null = null;
+        let taxCodeName: string | null = null;
+        let taxComponents: ProformaLineTaxComponent[] = [];
+        let taxAmount = new Prisma.Decimal(0);
+
+        if (item.taxCodeId) {
+          const taxCodeResponse = await this.accountingTaxCodes.getById(
+            actor,
+            item.taxCodeId,
+          );
+          taxCode = taxCodeResponse.code;
+          taxCodeName = taxCodeResponse.name;
+          taxComponents = taxCodeResponse.components.map((component) => {
+            const rate = new Prisma.Decimal(component.rate);
+            const componentTaxAmount = roundMoney(
+              lineSubtotal.mul(rate).div(100),
+            );
+            return {
+              sequence: component.sequence,
+              type: component.type,
+              name: component.name,
+              rate,
+              componentTaxAmount,
+            };
+          });
+          taxAmount = taxComponents.reduce(
+            (sum, component) => sum.plus(component.componentTaxAmount),
+            new Prisma.Decimal(0),
+          );
+        }
+
+        const lineTotal = lineSubtotal.plus(taxAmount);
+
+        return {
+          tenantId: actor.tenantId,
+          productId: item.productId,
+          productSku: item.productSku.trim(),
+          productName: item.productName.trim(),
+          quantity,
+          unitOfMeasureId: item.unitOfMeasureId,
+          uomCode,
+          uomName,
+          conversionFactor,
+          unitPrice,
+          gross,
+          discountPercent,
+          discountAmount,
+          taxCodeId: item.taxCodeId ?? null,
+          taxCode,
+          taxCodeName,
+          taxAmount,
+          lineSubtotal,
+          lineTotal,
+          taxComponents,
+        };
+      }),
+    );
+  }
+
+  private sumTotals(lines: ProformaLine[]): {
     subtotal: Prisma.Decimal;
     discountTotal: Prisma.Decimal;
     taxTotal: Prisma.Decimal;
     total: Prisma.Decimal;
   } {
     const subtotal = lines.reduce(
-      (sum, line) => sum.plus(line.lineTotal),
+      (sum, line) => sum.plus(line.gross),
       new Prisma.Decimal(0),
     );
-    // Manually-replaced items via update() do not carry discount/tax (that
-    // input capability is not yet exposed here), so both totals are 0 —
-    // explicit here to avoid leaving stale values from a prior conversion.
-    return {
-      subtotal,
-      discountTotal: new Prisma.Decimal(0),
-      taxTotal: new Prisma.Decimal(0),
-      total: subtotal,
-    };
+    const discountTotal = lines.reduce(
+      (sum, line) => sum.plus(line.discountAmount),
+      new Prisma.Decimal(0),
+    );
+    const taxTotal = lines.reduce(
+      (sum, line) => sum.plus(line.taxAmount),
+      new Prisma.Decimal(0),
+    );
+    const total = subtotal.minus(discountTotal).plus(taxTotal);
+    return { subtotal, discountTotal, taxTotal, total };
   }
 
   private async nextDocumentNumber(tenantId: string): Promise<string> {

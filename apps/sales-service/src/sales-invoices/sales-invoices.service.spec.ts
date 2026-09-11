@@ -39,6 +39,44 @@ describe('SalesInvoicesService', () => {
     return { emit: jest.fn().mockReturnValue(of(undefined)) };
   }
 
+  /** Default InventoryProductClient mock: product 'p1' has base UOM `unitOfMeasureId` (EA) and one alternative (BOX, factor 12). */
+  function makeInventoryProducts(overrides: Partial<{ getUomOptions: jest.Mock }> = {}) {
+    return {
+      getUomOptions: jest.fn().mockResolvedValue({
+        productId: 'p1',
+        base: { unitOfMeasureId, code: 'EA', name: 'Each' },
+        alternatives: [
+          {
+            unitOfMeasureId: 'unit-box',
+            code: 'BOX',
+            name: 'Box',
+            conversionFactor: '12',
+            sellingPrice: '110.0000',
+          },
+        ],
+      }),
+      ...overrides,
+    };
+  }
+
+  /** Default AccountingTaxCodeClient mock: `taxCodeId` resolves to a 2-component 18% GST code (9% CGST + 9% SGST), matching sourceItem()'s snapshot shape. */
+  function makeAccountingTaxCodes(overrides: Partial<{ getById: jest.Mock }> = {}) {
+    return {
+      getById: jest.fn().mockResolvedValue({
+        id: taxCodeId,
+        code: 'GST18',
+        name: 'GST 18%',
+        description: null,
+        isActive: true,
+        components: [
+          { id: 'c1', sequence: 1, type: 'CGST', name: null, rate: '9.00' },
+          { id: 'c2', sequence: 2, type: 'SGST', name: null, rate: '9.00' },
+        ],
+      }),
+      ...overrides,
+    };
+  }
+
   function zeroTotals() {
     return {
       discountTotal: { toFixed: () => '0.0000' },
@@ -158,6 +196,8 @@ describe('SalesInvoicesService', () => {
         customers as never,
         audit as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
 
       const result = await service.create(actor, {
@@ -168,6 +208,7 @@ describe('SalesInvoicesService', () => {
             productSku: 'SKU',
             productName: 'Widget',
             quantity: '1',
+            unitOfMeasureId,
             unitPrice: '10',
           },
         ],
@@ -185,18 +226,130 @@ describe('SalesInvoicesService', () => {
         }),
       );
 
-      // manual invoices have no UOM/discount/tax input capability yet: every
-      // new snapshot field must be its neutral (null/zero/empty) value.
+      // No discount/tax code supplied: those fields stay at their neutral
+      // value, but UOM is now resolved and validated server-side via
+      // InventoryProductClient — it is no longer forced to null.
       const data = createMock.mock.calls[0][0].data;
       expect(data.discountTotal.toFixed(4)).toBe('0.0000');
       expect(data.taxTotal.toFixed(4)).toBe('0.0000');
       const createdItem = data.items.create[0];
-      expect(createdItem.unitOfMeasureId).toBeNull();
+      expect(createdItem.unitOfMeasureId).toBe(unitOfMeasureId);
+      expect(createdItem.uomCode).toBe('EA');
       expect(createdItem.discountAmount.toFixed(4)).toBe('0.0000');
       expect(createdItem.taxCodeId).toBeNull();
       expect(createdItem.taxAmount.toFixed(4)).toBe('0.0000');
       expect(createdItem.lineSubtotal.toFixed(4)).toBe('10.0000');
       expect(createdItem.taxComponents.create).toEqual([]);
+    });
+
+    it('computes lineSubtotal/taxAmount/lineTotal and document totals from discount % and an independent multi-component tax code, using HALF_UP rounding (mirrors QuotationsService)', async () => {
+      const created = {
+        id: 'inv1',
+        tenantId,
+        invoiceNumber: 'INV-00000001',
+        sourceType: null,
+        sourceId: null,
+        status: SalesInvoiceStatus.DRAFT,
+        customerId: 'c1',
+        customerName: 'Acme',
+        billingAddress: '1 Main St, Metropolis, NY, 00000, US',
+        shippingAddress: '1 Main St, Metropolis, NY, 00000, US',
+        paymentTermId: 'pt-default',
+        salespersonId: 'sp-default',
+        invoiceDate: new Date(),
+        dueDate: null,
+        notes: null,
+        subtotal: { toFixed: () => '100.0000' },
+        discountTotal: { toFixed: () => '10.0000' },
+        taxTotal: { toFixed: () => '16.2000' },
+        total: new Prisma.Decimal(106.2),
+        ...unpaidState(),
+        sentAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        items: [invoiceItem],
+      };
+      const createMock = jest.fn().mockResolvedValue(created);
+      const prisma = {
+        salesInvoice: { count: jest.fn().mockResolvedValue(0), create: createMock },
+      };
+      const customers = { require: jest.fn().mockResolvedValue(customer) };
+      const audit = { record: jest.fn().mockResolvedValue(undefined) };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        customers as never,
+        audit as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+      );
+
+      await service.create(actor, {
+        customerId: 'c1',
+        items: [
+          {
+            productId: 'p1',
+            productSku: 'SKU',
+            productName: 'Widget',
+            quantity: '10',
+            unitOfMeasureId,
+            unitPrice: '10',
+            discountPercent: '10',
+            taxCodeId,
+          },
+        ],
+      });
+
+      const data = createMock.mock.calls[0][0].data;
+      // gross = 10 * 10 = 100; discount = 10% of 100 = 10; lineSubtotal = 90.
+      expect(data.subtotal.toFixed(4)).toBe('100.0000');
+      expect(data.discountTotal.toFixed(4)).toBe('10.0000');
+      // Each 9% component rounds independently on the 90 subtotal: 8.1 + 8.1 = 16.2.
+      expect(data.taxTotal.toFixed(4)).toBe('16.2000');
+      expect(data.total.toFixed(4)).toBe('106.2000');
+
+      const createdItem = data.items.create[0];
+      expect(createdItem.discountAmount.toFixed(4)).toBe('10.0000');
+      expect(createdItem.lineSubtotal.toFixed(4)).toBe('90.0000');
+      expect(createdItem.taxAmount.toFixed(4)).toBe('16.2000');
+      expect(createdItem.lineTotal.toFixed(4)).toBe('106.2000');
+      expect(createdItem.taxCode).toBe('GST18');
+      expect(createdItem.taxComponents.create).toHaveLength(2);
+      expect(createdItem.taxComponents.create[0].componentTaxAmount.toFixed(4)).toBe(
+        '8.1000',
+      );
+      expect(createdItem.taxComponents.create[1].componentTaxAmount.toFixed(4)).toBe(
+        '8.1000',
+      );
+    });
+
+    it('rejects a unitOfMeasureId that is not valid for the selected product', async () => {
+      const prisma = { salesInvoice: { count: jest.fn().mockResolvedValue(0) } };
+      const customers = { require: jest.fn().mockResolvedValue(customer) };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        customers as never,
+        { record: jest.fn() } as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+      );
+
+      await expect(
+        service.create(actor, {
+          customerId: 'c1',
+          items: [
+            {
+              productId: 'p1',
+              productSku: 'SKU',
+              productName: 'Widget',
+              quantity: '1',
+              unitOfMeasureId: 'unit-not-valid-for-product',
+              unitPrice: '10',
+            },
+          ],
+        }),
+      ).rejects.toThrow('Selected unit of measure is not valid for this product');
     });
   });
 
@@ -211,6 +364,11 @@ describe('SalesInvoicesService', () => {
         billingAddress: 'B',
         shippingAddress: 'S',
         notes: 'order notes',
+        // Distinct from the `customer` fixture's pt-default/sp-default, to prove
+        // the order (not the customer) is the source — see the header-inheritance
+        // tests below.
+        paymentTermId: 'so-pt',
+        salespersonId: 'so-sp',
         subtotal: { toString: () => '10' },
         discountTotal: { toString: () => '1' },
         taxTotal: { toString: () => '1.62' },
@@ -234,8 +392,8 @@ describe('SalesInvoicesService', () => {
         customerName: 'Acme',
         billingAddress: 'B',
         shippingAddress: 'S',
-        paymentTermId: 'pt-default',
-        salespersonId: 'sp-default',
+        paymentTermId: 'so-pt',
+        salespersonId: 'so-sp',
         invoiceDate: new Date(),
         dueDate: null,
         notes: 'order notes',
@@ -263,6 +421,8 @@ describe('SalesInvoicesService', () => {
         customers as never,
         audit as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
 
       const result = await service.createFromSalesOrder(actor, 'so1', {});
@@ -272,6 +432,10 @@ describe('SalesInvoicesService', () => {
       const data = createMock.mock.calls[0][0].data;
       expect(data.discountTotal).toBe(order.discountTotal);
       expect(data.taxTotal).toBe(order.taxTotal);
+      expect(data.paymentTermId).toBe(order.paymentTermId);
+      expect(data.salespersonId).toBe(order.salespersonId);
+      // The Sales Order is authoritative — Customer master is never consulted.
+      expect(customers.require).not.toHaveBeenCalled();
       const createdItem = data.items.create[0];
       expect(createdItem.unitOfMeasureId).toBe(item.unitOfMeasureId);
       expect(createdItem.discountAmount).toBe(item.discountAmount);
@@ -281,6 +445,113 @@ describe('SalesInvoicesService', () => {
       expect(createdItem.taxComponents.create[0].rate).toBe(
         item.taxComponents[0].rate,
       );
+    });
+
+    /** Minimal SalesInvoice-shaped row for toSalesInvoiceResponse() — the returned
+     * value itself isn't under test here, only the arguments passed to create(). */
+    function invoiceRowFixture(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'inv-x',
+        tenantId,
+        invoiceNumber: 'INV-X',
+        sourceType: SalesInvoiceSourceType.SALES_ORDER,
+        sourceId: 'so1',
+        status: SalesInvoiceStatus.DRAFT,
+        customerId: 'c1',
+        customerName: 'Acme',
+        billingAddress: 'B',
+        shippingAddress: 'S',
+        paymentTermId: null,
+        salespersonId: null,
+        invoiceDate: new Date(),
+        dueDate: null,
+        notes: 'order notes',
+        subtotal: { toFixed: () => '10.0000' },
+        ...zeroTotals(),
+        total: new Prisma.Decimal(10),
+        ...unpaidState(),
+        sentAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        items: [],
+        ...overrides,
+      };
+    }
+
+    it('uses the sales order\'s own paymentTermId/salespersonId even when they differ from the customer\'s', async () => {
+      const order = orderFixture({
+        paymentTermId: 'B',
+        salespersonId: 'B',
+      });
+      const created = invoiceRowFixture({ id: 'inv3' });
+      const createMock = jest.fn().mockResolvedValue(created);
+      const prisma = {
+        salesOrder: { findFirst: jest.fn().mockResolvedValue(order) },
+        salesInvoice: {
+          count: jest.fn().mockResolvedValue(1),
+          create: createMock,
+        },
+      };
+      const customers = {
+        require: jest.fn().mockResolvedValue({
+          ...customer,
+          paymentTermId: 'A',
+          salespersonId: 'A',
+        }),
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        customers as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+      );
+
+      await service.createFromSalesOrder(actor, 'so1', {});
+
+      const data = createMock.mock.calls[0][0].data;
+      expect(data.paymentTermId).toBe('B');
+      expect(data.salespersonId).toBe('B');
+      expect(customers.require).not.toHaveBeenCalled();
+    });
+
+    it('preserves null paymentTermId/salespersonId from the sales order — never falls back to Customer master', async () => {
+      const order = orderFixture({
+        paymentTermId: null,
+        salespersonId: null,
+      });
+      const created = invoiceRowFixture({ id: 'inv4' });
+      const createMock = jest.fn().mockResolvedValue(created);
+      const prisma = {
+        salesOrder: { findFirst: jest.fn().mockResolvedValue(order) },
+        salesInvoice: {
+          count: jest.fn().mockResolvedValue(1),
+          create: createMock,
+        },
+      };
+      const customers = {
+        require: jest.fn().mockResolvedValue({
+          ...customer,
+          paymentTermId: 'A',
+          salespersonId: 'A',
+        }),
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        customers as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+      );
+
+      await service.createFromSalesOrder(actor, 'so1', {});
+
+      const data = createMock.mock.calls[0][0].data;
+      expect(data.paymentTermId).toBeNull();
+      expect(data.salespersonId).toBeNull();
+      expect(customers.require).not.toHaveBeenCalled();
     });
 
     it('rejects when the sales order is CANCELLED', async () => {
@@ -296,6 +567,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(
         service.createFromSalesOrder(actor, 'so1', {}),
@@ -309,6 +582,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(
         service.createFromSalesOrder(actor, 'so1', {}),
@@ -379,6 +654,8 @@ describe('SalesInvoicesService', () => {
         customers as never,
         audit as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
 
       const result = await service.createFromProformaInvoice(actor, 'pf1', {});
@@ -407,6 +684,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(
         service.createFromProformaInvoice(actor, 'pf1', {}),
@@ -436,6 +715,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(
         service.update(actor, 'inv1', { notes: 'x' }),
@@ -451,13 +732,15 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(service.update(actor, 'inv1', {})).rejects.toBeInstanceOf(
         BadRequestException,
       );
     });
 
-    it('resets discountTotal/taxTotal to 0 when items are manually replaced', async () => {
+    it('computes discountTotal/taxTotal as 0 when items are replaced with no discount/tax code', async () => {
       const updated = {
         ...draftRow,
         subtotal: { toFixed: () => '10.0000' },
@@ -469,11 +752,12 @@ describe('SalesInvoicesService', () => {
         updatedAt: new Date(),
       };
       const updateMock = jest.fn().mockResolvedValue(updated);
+      const createItemMock = jest.fn().mockResolvedValue({ id: 'sii-new' });
       const tx = {
         salesInvoice: { update: updateMock },
         salesInvoiceItem: {
           deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: createItemMock,
         },
       };
       const prisma = {
@@ -485,6 +769,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn().mockResolvedValue(undefined) } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
 
       await service.update(actor, 'inv1', {
@@ -494,6 +780,7 @@ describe('SalesInvoicesService', () => {
             productSku: 'SKU',
             productName: 'Widget',
             quantity: '1',
+            unitOfMeasureId,
             unitPrice: '10.0000',
           },
         ],
@@ -502,6 +789,70 @@ describe('SalesInvoicesService', () => {
       const data = updateMock.mock.calls[0][0].data;
       expect(data.discountTotal.toFixed(4)).toBe('0.0000');
       expect(data.taxTotal.toFixed(4)).toBe('0.0000');
+      expect(createItemMock.mock.calls[0][0].data.taxComponents.create).toEqual([]);
+    });
+
+    it('replaces items via per-item create (not createMany) so nested taxComponents rows are persisted', async () => {
+      // Regression test for the createMany -> create() fix: createMany cannot
+      // create nested relations, so a naive implementation would silently
+      // drop the SalesInvoiceItemTaxComponent rows for a multi-component tax code.
+      const updated = {
+        ...draftRow,
+        subtotal: { toFixed: () => '100.0000' },
+        discountTotal: { toFixed: () => '0.0000' },
+        taxTotal: { toFixed: () => '18.0000' },
+        total: new Prisma.Decimal(118),
+        ...unpaidState(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const updateMock = jest.fn().mockResolvedValue(updated);
+      const createItemMock = jest.fn().mockResolvedValue({ id: 'sii-new' });
+      const tx = {
+        salesInvoice: { update: updateMock },
+        salesInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: createItemMock,
+        },
+      };
+      const prisma = {
+        salesInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+      );
+
+      await service.update(actor, 'inv1', {
+        items: [
+          {
+            productId: 'p1',
+            productSku: 'SKU',
+            productName: 'Widget',
+            quantity: '10',
+            unitOfMeasureId,
+            unitPrice: '10',
+            taxCodeId,
+          },
+        ],
+      });
+
+      expect(createItemMock).toHaveBeenCalledTimes(1);
+      const itemData = createItemMock.mock.calls[0][0].data;
+      expect(itemData.salesInvoiceId).toBe('inv1');
+      expect(itemData.taxComponents.create).toHaveLength(2);
+      expect(itemData.taxComponents.create[0]).toEqual(
+        expect.objectContaining({ type: 'CGST' }),
+      );
+      expect(itemData.taxComponents.create[1]).toEqual(
+        expect.objectContaining({ type: 'SGST' }),
+      );
     });
   });
 
@@ -542,6 +893,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         audit as never,
         eventBus as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       const result = await service.send(actor, 'inv1');
       expect(result.status).toBe(SalesInvoiceStatus.SENT);
@@ -577,6 +930,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         eventBus as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(service.send(actor, 'inv1')).rejects.toBeInstanceOf(
         ConflictException,
@@ -595,6 +950,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(service.send(actor, 'inv1')).rejects.toBeInstanceOf(
         BadRequestException,
@@ -626,6 +983,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn().mockResolvedValue(undefined) } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await service.send(actor, 'inv1');
       expect(updateMock.mock.calls[0][0].data.paymentStatus).toBe(
@@ -667,6 +1026,8 @@ describe('SalesInvoicesService', () => {
           { require: jest.fn() } as never,
           audit as never,
           makeEventBus() as never,
+          makeInventoryProducts() as never,
+          makeAccountingTaxCodes() as never,
         );
         const result = await service.cancel(actor, 'inv1');
         expect(result.status).toBe(SalesInvoiceStatus.CANCELLED);
@@ -689,6 +1050,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toBeInstanceOf(
         ConflictException,
@@ -713,6 +1076,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toThrow(
         'Cannot cancel a sales invoice that has recorded payments',
@@ -737,6 +1102,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toThrow(
         'Cannot cancel a sales invoice that has recorded payments',
@@ -819,6 +1186,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         audit as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
     }
 
@@ -1099,6 +1468,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
 
       const result = await service.listPayments(actor, 'inv1');
@@ -1120,6 +1491,8 @@ describe('SalesInvoicesService', () => {
         { require: jest.fn() } as never,
         { record: jest.fn() } as never,
         makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
       );
 
       await expect(service.listPayments(actor, 'inv1')).rejects.toBeInstanceOf(

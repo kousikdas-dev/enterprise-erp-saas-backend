@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
@@ -30,10 +31,25 @@ export class CreateSalesOrderItemDto {
   @IsString()
   quantity!: string;
 
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  unitOfMeasureId!: string;
+
   @ApiProperty({ example: '25.0000' })
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   unitPrice!: string;
+
+  @ApiPropertyOptional({ example: '10.00' })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  discountPercent?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  taxCodeId?: string;
 }
 
 export class CreateSalesOrderDto {
@@ -58,6 +74,21 @@ export class CreateSalesOrderDto {
   @IsString()
   @MaxLength(500)
   shippingAddress?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string;
 
   @ApiProperty({ type: [CreateSalesOrderItemDto] })
   @IsArray()
@@ -90,6 +121,21 @@ export class UpdateSalesOrderDto {
   @IsString()
   @MaxLength(500)
   shippingAddress?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  paymentTermId?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  salespersonId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsISO8601()
+  deliveryDate?: string | null;
 
   @ApiPropertyOptional({ type: [CreateSalesOrderItemDto] })
   @IsOptional()
@@ -142,6 +188,9 @@ export class SalesOrderDto {
   @ApiPropertyOptional({ nullable: true })
   quotationId!: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  proformaInvoiceId!: string | null;
+
   @ApiProperty()
   status!: string;
 
@@ -149,7 +198,22 @@ export class SalesOrderDto {
   customerName!: string;
 
   @ApiPropertyOptional({ nullable: true })
+  billingAddress!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  shippingAddress!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  paymentTermId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  salespersonId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  deliveryDate!: string | null;
 
   @ApiProperty()
   subtotal!: string;

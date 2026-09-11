@@ -245,7 +245,8 @@ model ProformaInvoice {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
-  items ProformaInvoiceItem[]
+  items      ProformaInvoiceItem[]
+  salesOrder SalesOrder?
 
   @@unique([tenantId, documentNumber])
   @@index([tenantId])
@@ -307,31 +308,41 @@ model ProformaInvoiceItemTaxComponent {
 }
 
 model SalesOrder {
-  id              String           @id @default(uuid()) @db.Uuid
-  tenantId        String           @db.Uuid
-  customerId      String           @db.Uuid
-  quotationId     String?          @unique @db.Uuid
-  status          SalesOrderStatus @default(DRAFT)
-  customerName    String
-  billingAddress  String?
-  shippingAddress String?
-  notes           String?
-  subtotal        Decimal          @db.Decimal(19, 4)
-  discountTotal   Decimal          @default(0) @db.Decimal(19, 4)
-  taxTotal        Decimal          @default(0) @db.Decimal(19, 4)
-  total           Decimal          @db.Decimal(19, 4)
-  confirmedAt     DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id                String           @id @default(uuid()) @db.Uuid
+  tenantId          String           @db.Uuid
+  customerId        String           @db.Uuid
+  quotationId       String?          @unique @db.Uuid
+  proformaInvoiceId String?          @unique @db.Uuid
+  status            SalesOrderStatus @default(DRAFT)
+  customerName      String
+  billingAddress    String?
+  shippingAddress   String?
+  notes             String?
+  // Master-data/identity UUIDs intentionally have no foreign keys: that data
+  // belongs to separate services/databases (mirrors Quotation.paymentTermId /
+  // Quotation.salespersonId).
+  paymentTermId     String?          @db.Uuid
+  salespersonId     String?          @db.Uuid
+  deliveryDate      DateTime?
+  subtotal          Decimal          @db.Decimal(19, 4)
+  discountTotal     Decimal          @default(0) @db.Decimal(19, 4)
+  taxTotal          Decimal          @default(0) @db.Decimal(19, 4)
+  total             Decimal          @db.Decimal(19, 4)
+  confirmedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
-  customer  Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  quotation Quotation?       @relation(fields: [quotationId], references: [id], onDelete: Restrict)
-  items     SalesOrderItem[]
-  shipments Shipment[]
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  quotation       Quotation?       @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  proformaInvoice ProformaInvoice? @relation(fields: [proformaInvoiceId], references: [id], onDelete: Restrict)
+  items           SalesOrderItem[]
+  shipments       Shipment[]
 
   @@index([tenantId])
   @@index([customerId])
   @@index([tenantId, status])
+  @@index([tenantId, paymentTermId])
+  @@index([tenantId, salespersonId])
   @@map("sales_orders")
 }
 

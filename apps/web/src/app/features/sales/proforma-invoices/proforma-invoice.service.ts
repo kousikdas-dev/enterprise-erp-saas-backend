@@ -6,6 +6,7 @@ import {
   ItemList,
   ProformaInvoice,
   SalesInvoice,
+  SalesOrder,
   UpdateProformaInvoiceRequest,
 } from '../models/sales.models';
 
@@ -39,5 +40,9 @@ export class ProformaInvoiceService {
     body?: CreateInvoiceFromSourceRequest,
   ): Observable<SalesInvoice> {
     return this.api.post<SalesInvoice>(`/v1/proforma-invoices/${id}/invoice`, body);
+  }
+
+  convertToOrder(id: string): Observable<SalesOrder> {
+    return this.api.post<SalesOrder>(`/v1/proforma-invoices/${id}/convert-to-order`);
   }
 }

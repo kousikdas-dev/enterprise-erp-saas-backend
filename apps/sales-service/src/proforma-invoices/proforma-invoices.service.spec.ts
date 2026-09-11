@@ -12,6 +12,10 @@ describe('ProformaInvoicesService', () => {
     userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     tenantId,
   };
+  const productId = '33333333-3333-4333-8333-333333333333';
+  const unitOfMeasureId = '99999999-9999-4999-8999-999999999999';
+  const altUnitOfMeasureId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const taxCodeId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
   function zeroTotals() {
     return {
@@ -19,6 +23,76 @@ describe('ProformaInvoicesService', () => {
       discountTotal: { toFixed: () => '0.0000' },
       taxTotal: { toFixed: () => '0.0000' },
       total: { toFixed: () => '0.0000' },
+    };
+  }
+
+  function defaultUomOptions(overrides: Record<string, unknown> = {}) {
+    return {
+      productId,
+      base: { unitOfMeasureId, code: 'EA', name: 'Each' },
+      alternatives: [],
+      ...overrides,
+    };
+  }
+
+  function defaultInventoryProducts(
+    overrides: Partial<{ getUomOptions: jest.Mock }> = {},
+  ) {
+    return {
+      getUomOptions: jest.fn().mockResolvedValue(defaultUomOptions()),
+      ...overrides,
+    };
+  }
+
+  function defaultAccountingTaxCodes(
+    overrides: Partial<{ getById: jest.Mock }> = {},
+  ) {
+    return {
+      getById: jest.fn(),
+      ...overrides,
+    };
+  }
+
+  function taxCodeResponse(overrides: Record<string, unknown> = {}) {
+    return {
+      id: taxCodeId,
+      code: 'GST18',
+      name: 'GST 18%',
+      description: null,
+      isActive: true,
+      components: [
+        { id: 'comp-1', sequence: 1, type: 'CGST', name: null, rate: '9.0000' },
+        { id: 'comp-2', sequence: 2, type: 'SGST', name: null, rate: '9.0000' },
+      ],
+      ...overrides,
+    };
+  }
+
+  function createService(
+    deps: {
+      prisma?: unknown;
+      audit?: unknown;
+      inventoryProducts?: unknown;
+      accountingTaxCodes?: unknown;
+    } = {},
+  ) {
+    return new ProformaInvoicesService(
+      (deps.prisma ?? {}) as never,
+      (deps.audit ?? { record: jest.fn().mockResolvedValue(undefined) }) as never,
+      (deps.inventoryProducts ?? defaultInventoryProducts()) as never,
+      (deps.accountingTaxCodes ?? defaultAccountingTaxCodes()) as never,
+    );
+  }
+
+  function baseItemInput(overrides: Record<string, unknown> = {}) {
+    return {
+      productId,
+      productSku: 'SKU-1',
+      productName: 'Widget',
+      quantity: '10',
+      unitOfMeasureId,
+      unitPrice: '5.0000',
+      ...overrides,
     };
   }
 
@@ -143,7 +217,7 @@ describe('ProformaInvoicesService', () => {
       },
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
-    const service = new ProformaInvoicesService(prisma as never, audit as never);
+    const service = createService({ prisma, audit });
 
     const result = await service.createFromQuotation(actor, 'q1');
     expect(result.documentNumber).toBe('PF-00000001');
@@ -202,10 +276,7 @@ describe('ProformaInvoicesService', () => {
         }),
       },
     };
-    const service = new ProformaInvoicesService(
-      prisma as never,
-      { record: jest.fn() } as never,
-    );
+    const service = createService({ prisma });
     await expect(
       service.createFromQuotation(actor, 'q1'),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -215,10 +286,7 @@ describe('ProformaInvoicesService', () => {
     const prisma = {
       quotation: { findFirst: jest.fn().mockResolvedValue(null) },
     };
-    const service = new ProformaInvoicesService(
-      prisma as never,
-      { record: jest.fn() } as never,
-    );
+    const service = createService({ prisma });
     await expect(
       service.createFromQuotation(actor, 'q1'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -256,7 +324,7 @@ describe('ProformaInvoicesService', () => {
       },
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
-    const service = new ProformaInvoicesService(prisma as never, audit as never);
+    const service = createService({ prisma, audit });
     const result = await service.createFromSalesOrder(actor, 'so1');
     expect(result.sourceType).toBe(ProformaSourceType.SALES_ORDER);
     expect(result.sourceId).toBe('so1');
@@ -272,11 +340,43 @@ describe('ProformaInvoicesService', () => {
     expect(createdItem.taxComponents.create).toHaveLength(2);
   });
 
+  describe('getById', () => {
+    it('returns the persisted source document on a quotation-created proforma', async () => {
+      const row = createdRow({
+        sourceType: ProformaSourceType.QUOTATION,
+        sourceId: 'q1',
+      });
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(row) },
+      };
+      const service = createService({ prisma });
+      const result = await service.getById(actor, 'pf1');
+      expect(result.sourceType).toBe(ProformaSourceType.QUOTATION);
+      expect(result.sourceId).toBe('q1');
+    });
+
+    it('returns the persisted source document on a sales-order-created proforma', async () => {
+      const row = createdRow({
+        sourceType: ProformaSourceType.SALES_ORDER,
+        sourceId: 'so1',
+      });
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(row) },
+      };
+      const service = createService({ prisma });
+      const result = await service.getById(actor, 'pf1');
+      expect(result.sourceType).toBe(ProformaSourceType.SALES_ORDER);
+      expect(result.sourceId).toBe('so1');
+    });
+  });
+
   describe('update', () => {
     const draftRow = {
       id: 'pf1',
       tenantId,
       status: ProformaInvoiceStatus.DRAFT,
+      sourceType: ProformaSourceType.QUOTATION,
+      sourceId: 'q1',
       items: [{ id: 'i1' }],
     };
 
@@ -289,10 +389,7 @@ describe('ProformaInvoicesService', () => {
           }),
         },
       };
-      const service = new ProformaInvoicesService(
-        prisma as never,
-        { record: jest.fn() } as never,
-      );
+      const service = createService({ prisma });
       await expect(
         service.update(actor, 'pf1', { notes: 'x' }),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -302,16 +399,13 @@ describe('ProformaInvoicesService', () => {
       const prisma = {
         proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
       };
-      const service = new ProformaInvoicesService(
-        prisma as never,
-        { record: jest.fn() } as never,
-      );
+      const service = createService({ prisma });
       await expect(service.update(actor, 'pf1', {})).rejects.toBeInstanceOf(
         BadRequestException,
       );
     });
 
-    it('updates header fields on a DRAFT proforma', async () => {
+    it('updates header fields on a DRAFT proforma and returns the unchanged source document', async () => {
       const updated = {
         ...draftRow,
         notes: 'updated',
@@ -322,25 +416,287 @@ describe('ProformaInvoicesService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      const tx = { proformaInvoice: { update: jest.fn().mockResolvedValue(updated) } };
+      const updateMock = jest.fn().mockResolvedValue(updated);
+      const tx = { proformaInvoice: { update: updateMock } };
       const prisma = {
         proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
         $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
       };
       const audit = { record: jest.fn().mockResolvedValue(undefined) };
-      const service = new ProformaInvoicesService(prisma as never, audit as never);
+      const service = createService({ prisma, audit });
       const result = await service.update(actor, 'pf1', {
         notes: 'updated',
         billingAddress: 'New billing',
         shippingAddress: null,
       });
       expect(result.notes).toBe('updated');
+      expect(result.sourceType).toBe(ProformaSourceType.QUOTATION);
+      expect(result.sourceId).toBe('q1');
+      // sourceType/sourceId are never part of the update payload sent to Prisma
+      const data = updateMock.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('sourceType');
+      expect(data).not.toHaveProperty('sourceId');
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'proforma-invoice.updated' }),
       );
     });
 
-    it('resets discountTotal/taxTotal to 0 when items are manually replaced', async () => {
+    it('ignores sourceType/sourceId even if present on the update DTO — source cannot be changed via edit', async () => {
+      const updated = {
+        ...draftRow,
+        notes: 'updated',
+        ...zeroTotals(),
+        items: [createdItemRow()],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const updateMock = jest.fn().mockResolvedValue(updated);
+      const tx = { proformaInvoice: { update: updateMock } };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const service = createService({ prisma });
+
+      // UpdateProformaInvoiceDto has no sourceType/sourceId fields; this
+      // simulates a malicious/legacy caller smuggling them in anyway.
+      const dto = {
+        notes: 'updated',
+        sourceType: ProformaSourceType.SALES_ORDER,
+        sourceId: 'so-hijack',
+      } as unknown as Parameters<typeof service.update>[2];
+
+      const result = await service.update(actor, 'pf1', dto);
+
+      expect(result.sourceType).toBe(ProformaSourceType.QUOTATION);
+      expect(result.sourceId).toBe('q1');
+      const data = updateMock.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('sourceType');
+      expect(data).not.toHaveProperty('sourceId');
+    });
+
+    it('recomputes discountTotal/taxTotal from the replaced items and persists nested taxComponents via per-item create', async () => {
+      const updated = {
+        ...draftRow,
+        notes: null,
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const updateMock = jest.fn().mockResolvedValue(updated);
+      const createItemMock = jest.fn().mockResolvedValue(undefined);
+      const tx = {
+        proformaInvoice: { update: updateMock },
+        proformaInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: createItemMock,
+        },
+      };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const accountingTaxCodes = defaultAccountingTaxCodes({
+        getById: jest.fn().mockResolvedValue(taxCodeResponse()),
+      });
+      const service = createService({ prisma, accountingTaxCodes });
+
+      await service.update(actor, 'pf1', {
+        items: [
+          baseItemInput({
+            quantity: '10',
+            unitPrice: '5.0000',
+            discountPercent: '10',
+            taxCodeId,
+          }),
+        ],
+      });
+
+      expect(createItemMock).toHaveBeenCalledTimes(1);
+      const itemData = createItemMock.mock.calls[0][0].data;
+      expect(itemData.taxComponents.create).toHaveLength(2);
+      const data = updateMock.mock.calls[0][0].data;
+      // gross = 50; discount 10% = 5; lineSubtotal = 45; tax 18% of 45 = 8.1
+      expect(data.discountTotal.toFixed(4)).toBe('5.0000');
+      expect(data.taxTotal.toFixed(4)).toBe('8.1000');
+      expect(data.total.toFixed(4)).toBe('53.1000');
+    });
+
+    it('defaults discountPercent to 0 and taxAmount to 0 when neither is provided on update', async () => {
+      const updated = {
+        ...draftRow,
+        notes: null,
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const tx = {
+        proformaInvoice: { update: jest.fn().mockResolvedValue(updated) },
+        proformaInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const service = createService({ prisma });
+
+      await service.update(actor, 'pf1', {
+        items: [baseItemInput({ quantity: '10', unitPrice: '5.0000' })],
+      });
+
+      const itemData = (tx.proformaInvoiceItem.create as jest.Mock).mock
+        .calls[0][0].data;
+      expect(itemData.discountPercent.toFixed(2)).toBe('0.00');
+      expect(itemData.discountAmount.toFixed(4)).toBe('0.0000');
+      expect(itemData.taxAmount.toFixed(4)).toBe('0.0000');
+      expect(itemData.taxCodeId).toBeNull();
+      expect(itemData.taxComponents.create).toEqual([]);
+    });
+
+    it('rejects a unitOfMeasureId that is neither the base unit nor an active alternative', async () => {
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) =>
+          fn({
+            proformaInvoiceItem: {
+              deleteMany: jest.fn(),
+              create: jest.fn(),
+            },
+          }),
+        ),
+      };
+      const service = createService({ prisma });
+
+      await expect(
+        service.update(actor, 'pf1', {
+          items: [
+            baseItemInput({ unitOfMeasureId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }),
+          ],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('accepts an active ProductUnit alternative and snapshots its conversionFactor on update', async () => {
+      const updated = {
+        ...draftRow,
+        notes: null,
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const tx = {
+        proformaInvoice: { update: jest.fn().mockResolvedValue(updated) },
+        proformaInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const inventoryProducts = defaultInventoryProducts({
+        getUomOptions: jest.fn().mockResolvedValue(
+          defaultUomOptions({
+            alternatives: [
+              {
+                unitOfMeasureId: altUnitOfMeasureId,
+                code: 'BOX',
+                name: 'Box of 12',
+                conversionFactor: '12.000000',
+                sellingPrice: '90.0000',
+              },
+            ],
+          }),
+        ),
+      });
+      const service = createService({ prisma, inventoryProducts });
+
+      await service.update(actor, 'pf1', {
+        items: [baseItemInput({ unitOfMeasureId: altUnitOfMeasureId })],
+      });
+
+      const itemData = (tx.proformaInvoiceItem.create as jest.Mock).mock
+        .calls[0][0].data;
+      expect(itemData.unitOfMeasureId).toBe(altUnitOfMeasureId);
+      expect(itemData.uomCode).toBe('BOX');
+      expect(itemData.conversionFactor.toFixed(6)).toBe('12.000000');
+    });
+
+    it('rounds gross using HALF_UP to 4 decimal places on update', async () => {
+      const updated = {
+        ...draftRow,
+        notes: null,
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const tx = {
+        proformaInvoice: { update: jest.fn().mockResolvedValue(updated) },
+        proformaInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const service = createService({ prisma });
+
+      await service.update(actor, 'pf1', {
+        items: [baseItemInput({ quantity: '1.5', unitPrice: '3.3335' })],
+      });
+
+      const itemData = (tx.proformaInvoiceItem.create as jest.Mock).mock
+        .calls[0][0].data;
+      // 1.5 * 3.3335 = 5.00025 -> HALF_UP to 4dp = 5.0003
+      expect(itemData.lineSubtotal.toFixed(4)).toBe('5.0003');
+      expect(itemData.lineTotal.toFixed(4)).toBe('5.0003');
+    });
+
+    it('propagates a 404 when the product/UOM cannot be resolved', async () => {
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+      };
+      const inventoryProducts = defaultInventoryProducts({
+        getUomOptions: jest
+          .fn()
+          .mockRejectedValue(new NotFoundException('Product not found')),
+      });
+      const service = createService({ prisma, inventoryProducts });
+
+      await expect(
+        service.update(actor, 'pf1', { items: [baseItemInput()] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('propagates a 404 when the selected tax code cannot be resolved', async () => {
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+      };
+      const accountingTaxCodes = defaultAccountingTaxCodes({
+        getById: jest
+          .fn()
+          .mockRejectedValue(new NotFoundException('Tax code not found')),
+      });
+      const service = createService({ prisma, accountingTaxCodes });
+
+      await expect(
+        service.update(actor, 'pf1', {
+          items: [baseItemInput({ taxCodeId })],
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('computes document discountTotal/taxTotal/total across multiple lines on update', async () => {
       const updated = {
         ...draftRow,
         notes: null,
@@ -354,33 +710,41 @@ describe('ProformaInvoicesService', () => {
         proformaInvoice: { update: updateMock },
         proformaInvoiceItem: {
           deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: jest.fn().mockResolvedValue(undefined),
         },
       };
       const prisma = {
         proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
         $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
       };
-      const service = new ProformaInvoicesService(
-        prisma as never,
-        { record: jest.fn().mockResolvedValue(undefined) } as never,
-      );
+      const accountingTaxCodes = defaultAccountingTaxCodes({
+        getById: jest.fn().mockResolvedValue(
+          taxCodeResponse({
+            components: [
+              { id: 'comp-1', sequence: 1, type: 'CGST', name: null, rate: '9.0000' },
+            ],
+          }),
+        ),
+      });
+      const service = createService({ prisma, accountingTaxCodes });
 
       await service.update(actor, 'pf1', {
         items: [
-          {
-            productId: 'p1',
-            productSku: 'SKU',
-            productName: 'Widget',
-            quantity: '1',
-            unitPrice: '10.0000',
-          },
+          baseItemInput({ quantity: '10', unitPrice: '5.0000' }),
+          baseItemInput({
+            quantity: '2',
+            unitPrice: '25.0000',
+            discountPercent: '10',
+            taxCodeId,
+          }),
         ],
       });
 
       const data = updateMock.mock.calls[0][0].data;
-      expect(data.discountTotal.toFixed(4)).toBe('0.0000');
-      expect(data.taxTotal.toFixed(4)).toBe('0.0000');
+      expect(data.subtotal.toFixed(4)).toBe('100.0000');
+      expect(data.discountTotal.toFixed(4)).toBe('5.0000');
+      expect(data.taxTotal.toFixed(4)).toBe('4.0500');
+      expect(data.total.toFixed(4)).toBe('99.0500');
     });
   });
 
@@ -409,7 +773,7 @@ describe('ProformaInvoicesService', () => {
         },
       };
       const audit = { record: jest.fn().mockResolvedValue(undefined) };
-      const service = new ProformaInvoicesService(prisma as never, audit as never);
+      const service = createService({ prisma, audit });
       const result = await service.send(actor, 'pf1');
       expect(result.status).toBe(ProformaInvoiceStatus.ISSUED);
       expect(updateMock.mock.calls[0][0].data.status).toBe(
@@ -428,10 +792,7 @@ describe('ProformaInvoicesService', () => {
           }),
         },
       };
-      const service = new ProformaInvoicesService(
-        prisma as never,
-        { record: jest.fn() } as never,
-      );
+      const service = createService({ prisma });
       await expect(service.send(actor, 'pf1')).rejects.toBeInstanceOf(
         ConflictException,
       );
@@ -448,10 +809,7 @@ describe('ProformaInvoicesService', () => {
           }),
         },
       };
-      const service = new ProformaInvoicesService(
-        prisma as never,
-        { record: jest.fn() } as never,
-      );
+      const service = createService({ prisma });
       await expect(service.send(actor, 'pf1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
@@ -479,7 +837,7 @@ describe('ProformaInvoicesService', () => {
           },
         };
         const audit = { record: jest.fn().mockResolvedValue(undefined) };
-        const service = new ProformaInvoicesService(prisma as never, audit as never);
+        const service = createService({ prisma, audit });
         const result = await service.cancel(actor, 'pf1');
         expect(result.status).toBe(ProformaInvoiceStatus.CANCELLED);
       },
@@ -496,10 +854,7 @@ describe('ProformaInvoicesService', () => {
           }),
         },
       };
-      const service = new ProformaInvoicesService(
-        prisma as never,
-        { record: jest.fn() } as never,
-      );
+      const service = createService({ prisma });
       await expect(service.cancel(actor, 'pf1')).rejects.toBeInstanceOf(
         ConflictException,
       );

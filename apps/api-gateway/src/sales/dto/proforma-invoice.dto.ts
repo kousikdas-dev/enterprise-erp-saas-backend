@@ -30,10 +30,25 @@ export class UpdateProformaInvoiceItemDto {
   @IsString()
   quantity!: string;
 
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  unitOfMeasureId!: string;
+
   @ApiProperty({ example: '25.0000' })
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   unitPrice!: string;
+
+  @ApiPropertyOptional({ example: '10.00' })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  discountPercent?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  taxCodeId?: string;
 }
 
 export class UpdateProformaInvoiceDto {

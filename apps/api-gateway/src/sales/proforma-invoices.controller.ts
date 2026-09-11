@@ -36,6 +36,7 @@ import {
   CreateInvoiceFromSourceDto,
   SalesInvoiceDto,
 } from './dto/sales-invoice.dto';
+import { SalesOrderDto } from './dto/sales-order.dto';
 import { SalesForwardService } from './sales-forward.service';
 
 @ApiTags('Proforma Invoices')
@@ -180,6 +181,33 @@ export class ProformaInvoicesController {
       path: `/api/v1/proforma-invoices/${id}/invoice`,
       user,
       body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/convert-to-order')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(PERMISSIONS.SALES_ORDERS_CREATE)
+  @ApiOperation({
+    summary: 'Convert proforma invoice to sales order',
+    description:
+      'Converts an ISSUED proforma invoice into a DRAFT sales order. Permission: sales-orders.create.',
+  })
+  @ApiCreatedResponse({ type: SalesOrderDto })
+  @ApiConflictResponse({
+    description: 'Proforma invoice not ISSUED or already converted',
+  })
+  @ApiManagementErrors()
+  convertToOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<SalesOrderDto> {
+    return this.sales.forward<SalesOrderDto>({
+      method: 'POST',
+      path: `/api/v1/proforma-invoices/${id}/convert-to-order`,
+      user,
       ip: request.ip,
       userAgent: headerString(request.headers['user-agent']),
     });

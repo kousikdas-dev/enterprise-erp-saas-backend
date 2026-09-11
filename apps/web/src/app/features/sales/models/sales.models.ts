@@ -197,6 +197,17 @@ export interface QuotationItemInput extends QuotationLineInput {
   taxCodeId?: string;
 }
 
+/**
+ * Sales invoice line input: same UOM/discount/tax shape as QuotationItemInput,
+ * kept as its own named type rather than reused directly so the two document
+ * types' request contracts aren't coupled to each other.
+ */
+export interface SalesInvoiceItemInput extends QuotationLineInput {
+  unitOfMeasureId: string;
+  discountPercent?: string;
+  taxCodeId?: string;
+}
+
 export interface CreateQuotationRequest {
   customerId: string;
   notes?: string;
@@ -270,14 +281,22 @@ export interface ProformaInvoice {
   discountTotal: string;
   taxTotal: string;
   total: string;
+  createdAt: string;
   items: ProformaInvoiceItem[];
+}
+
+/** Proforma invoice line input: same UOM/discount/tax shape as QuotationItemInput/SalesOrderItemInput. */
+export interface ProformaInvoiceItemInput extends QuotationLineInput {
+  unitOfMeasureId: string;
+  discountPercent?: string;
+  taxCodeId?: string;
 }
 
 export interface UpdateProformaInvoiceRequest {
   notes?: string | null;
   billingAddress?: string | null;
   shippingAddress?: string | null;
-  items?: QuotationLineInput[];
+  items?: ProformaInvoiceItemInput[];
 }
 
 /** Optional overrides for the /sales-orders/:id/invoice and /proforma-invoices/:id/invoice conversion routes. */
@@ -332,9 +351,15 @@ export interface SalesOrder {
   tenantId: string;
   customerId: string;
   quotationId: string | null;
+  proformaInvoiceId: string | null;
   status: SalesOrderStatus | string;
   customerName: string;
+  billingAddress: string | null;
+  shippingAddress: string | null;
   notes: string | null;
+  paymentTermId: string | null;
+  salespersonId: string | null;
+  deliveryDate: string | null;
   subtotal: string;
   discountTotal: string;
   taxTotal: string;
@@ -342,12 +367,22 @@ export interface SalesOrder {
   items: SalesOrderItem[];
 }
 
+/** Sales order line input: same UOM/discount/tax shape as QuotationItemInput/SalesInvoiceItemInput. */
+export interface SalesOrderItemInput extends QuotationLineInput {
+  unitOfMeasureId: string;
+  discountPercent?: string;
+  taxCodeId?: string;
+}
+
 export interface CreateSalesOrderRequest {
   customerId: string;
   notes?: string;
   billingAddress?: string;
   shippingAddress?: string;
-  items: QuotationLineInput[];
+  paymentTermId?: string;
+  salespersonId?: string;
+  deliveryDate?: string;
+  items: SalesOrderItemInput[];
 }
 
 export interface UpdateSalesOrderRequest {
@@ -355,7 +390,10 @@ export interface UpdateSalesOrderRequest {
   notes?: string;
   billingAddress?: string | null;
   shippingAddress?: string | null;
-  items?: QuotationLineInput[];
+  paymentTermId?: string | null;
+  salespersonId?: string | null;
+  deliveryDate?: string | null;
+  items?: SalesOrderItemInput[];
 }
 
 export type SalesInvoiceStatus = 'DRAFT' | 'SENT' | 'CANCELLED';
@@ -454,7 +492,7 @@ export interface CreateSalesInvoiceRequest {
   shippingAddress?: string;
   paymentTermId?: string;
   salespersonId?: string;
-  items: QuotationLineInput[];
+  items: SalesInvoiceItemInput[];
 }
 
 export interface UpdateSalesInvoiceRequest {
@@ -466,7 +504,7 @@ export interface UpdateSalesInvoiceRequest {
   shippingAddress?: string | null;
   paymentTermId?: string | null;
   salespersonId?: string | null;
-  items?: QuotationLineInput[];
+  items?: SalesInvoiceItemInput[];
 }
 
 export type ShipmentStatus = 'PENDING_STOCK' | 'POSTED';

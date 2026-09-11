@@ -15,11 +15,15 @@ type SalesOrderWithItems = {
   tenantId: string;
   customerId: string;
   quotationId: string | null;
+  proformaInvoiceId: string | null;
   status: SalesOrderStatus;
   customerName: string;
   billingAddress: string | null;
   shippingAddress: string | null;
   notes: string | null;
+  paymentTermId: string | null;
+  salespersonId: string | null;
+  deliveryDate: Date | null;
   subtotal: Prisma.Decimal;
   discountTotal: Prisma.Decimal;
   taxTotal: Prisma.Decimal;
@@ -72,11 +76,15 @@ export function toSalesOrderResponse(row: SalesOrderWithItems) {
     tenantId: row.tenantId,
     customerId: row.customerId,
     quotationId: row.quotationId,
+    proformaInvoiceId: row.proformaInvoiceId,
     status: row.status,
     customerName: row.customerName,
     billingAddress: row.billingAddress,
     shippingAddress: row.shippingAddress,
     notes: row.notes,
+    paymentTermId: row.paymentTermId,
+    salespersonId: row.salespersonId,
+    deliveryDate: row.deliveryDate,
     subtotal: moneyToString(row.subtotal),
     discountTotal: moneyToString(row.discountTotal),
     taxTotal: moneyToString(row.taxTotal),

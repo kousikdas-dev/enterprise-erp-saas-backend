@@ -41,7 +41,7 @@
             <tr *ngFor="let item of filtered">
               <td><code>{{ item.documentNumber }}</code></td>
               <td>{{ item.customerName }}</td>
-              <td class="text-muted">{{ item.sourceType }} — {{ item.sourceId | slice:0:8 }}…</td>
+              <td class="text-muted">{{ sourceLabel(item) }} — <code>{{ item.sourceId | slice:0:8 }}…</code></td>
               <td class="text-center">
                 <span class="badge bg-info text-dark">{{ item.status }}</span>
               </td>
@@ -74,9 +74,16 @@
                 <button
                   *ngIf="canCreateInvoiceFor(item)"
                   type="button"
-                  class="btn btn-sm btn-outline-info"
+                  class="btn btn-sm btn-outline-info me-1"
                   (click)="askAction('invoice', item)">
                   Create Invoice
+                </button>
+                <button
+                  *ngIf="canConvertProforma(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success"
+                  (click)="askAction('convert', item)">
+                  Convert to Order
                 </button>
               </td>
             </tr>
@@ -94,13 +101,45 @@
   </div>
   <form [formGroup]="form" (ngSubmit)="save()">
     <div class="modal-body">
+      <dl class="row mb-3" *ngIf="editing as e">
+        <dt class="col-sm-3">Document #</dt><dd class="col-sm-3"><code>{{ e.documentNumber }}</code></dd>
+        <dt class="col-sm-3">Proforma date</dt><dd class="col-sm-3">{{ e.createdAt | date:'yyyy-MM-dd' }}</dd>
+        <dt class="col-sm-3">Customer</dt><dd class="col-sm-3">{{ e.customerName }}</dd>
+        <dt class="col-sm-3">Status</dt>
+        <dd class="col-sm-3"><span class="badge bg-info text-dark">{{ e.status }}</span></dd>
+        <dt class="col-sm-3">Source Document</dt>
+        <dd class="col-sm-3">{{ sourceLabel(e) }} — <code>{{ e.sourceId | slice:0:8 }}…</code></dd>
+      </dl>
+      <div class="form-text mb-3">
+        Document #, Proforma date, Customer, Status, and Source Document are read-only — inherited from the document this proforma was created from.
+      </div>
       <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="pfBilling">Billing address</label>
+          <select
+            *ngIf="billingAddresses.length"
+            id="pfBillingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="billingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of billingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
           <textarea id="pfBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label" for="pfShipping">Shipping address</label>
+          <select
+            *ngIf="shippingAddresses.length"
+            id="pfShippingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="shippingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of shippingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
           <textarea id="pfShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
         </div>
       </div>
@@ -118,9 +157,14 @@
         <table class="table table-sm align-middle">
           <thead>
             <tr>
-              <th style="min-width: 220px;">Product</th>
-              <th style="min-width: 120px;">Quantity</th>
-              <th style="min-width: 120px;">Unit price</th>
+              <th style="min-width: 200px;">Product</th>
+              <th style="min-width: 110px;">Quantity</th>
+              <th style="min-width: 140px;">UOM</th>
+              <th style="min-width: 110px;">Unit price</th>
+              <th style="min-width: 90px;">Discount %</th>
+              <th style="min-width: 160px;">Tax</th>
+              <th class="text-end">Line subtotal</th>
+              <th class="text-end">Tax amount</th>
               <th class="text-end">Line total</th>
               <th></th>
             </tr>
@@ -140,13 +184,37 @@
                 </div>
               </td>
               <td>
+                <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                  <option value="">Select UOM…</option>
+                  <option *ngFor="let u of uomOptionsFor(line.value.productId)" [value]="u.id">{{ u.label }}</option>
+                </select>
+              </td>
+              <td>
                 <input class="form-control form-control-sm" formControlName="unitPrice" placeholder="25.0000" />
                 <div class="text-danger small" *ngIf="line.get('unitPrice')?.touched && line.get('unitPrice')?.invalid">
                   Max 4 decimal places.
                 </div>
               </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="discountPercent" placeholder="0.00" />
+                <div class="text-danger small" *ngIf="line.get('discountPercent')?.touched && line.get('discountPercent')?.invalid">
+                  Max 2 decimal places.
+                </div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="taxCodeId">
+                  <option value="">No tax</option>
+                  <option *ngFor="let t of taxCodes" [value]="t.id">{{ t.code }} — {{ t.name }}</option>
+                </select>
+              </td>
               <td class="text-end">
-                <code>{{ lineTotal(line.value.quantity, line.value.unitPrice) }}</code>
+                <code>{{ linePreview(line.value).lineSubtotal }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).taxAmount }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).lineTotal }}</code>
               </td>
               <td class="text-end">
                 <button
@@ -161,7 +229,29 @@
           </tbody>
         </table>
       </div>
-      <div class="form-text">Line totals are display-only. Backend validates quantities and prices.</div>
+      <div class="d-flex justify-content-end mb-2">
+        <table class="table table-sm table-borderless mb-0" style="max-width: 320px;">
+          <tbody>
+            <tr>
+              <td>Subtotal</td>
+              <td class="text-end"><code>{{ formTotalsPreview.subtotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Discount total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.discountTotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Tax total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.taxTotal }}</code></td>
+            </tr>
+            <tr>
+              <td><strong>Grand total</strong></td>
+              <td class="text-end"><code><strong>{{ formTotalsPreview.grandTotal }}</strong></code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">Line and document totals shown here are display-only previews. The backend computes and returns the authoritative amounts on save.</div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
@@ -180,12 +270,14 @@
   <div class="modal-body" *ngIf="viewing as p">
     <dl class="row">
       <dt class="col-sm-4">Document #</dt><dd class="col-sm-8"><code>{{ p.documentNumber }}</code></dd>
+      <dt class="col-sm-4">Proforma date</dt><dd class="col-sm-8">{{ p.createdAt | date:'yyyy-MM-dd' }}</dd>
       <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ p.customerName }}</dd>
-      <dt class="col-sm-4">Source</dt><dd class="col-sm-8">{{ p.sourceType }} — <code>{{ p.sourceId }}</code></dd>
       <dt class="col-sm-4">Status</dt><dd class="col-sm-8"><span class="badge bg-info text-dark">{{ p.status }}</span></dd>
-      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ p.notes || '—' }}</dd>
+      <dt class="col-sm-4">Source Document</dt>
+      <dd class="col-sm-8">{{ sourceLabel(p) }} — <code>{{ p.sourceId | slice:0:8 }}…</code></dd>
       <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ p.billingAddress || '—' }}</dd>
       <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ p.shippingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ p.notes || '—' }}</dd>
       <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ p.subtotal }}</code></dd>
       <dt class="col-sm-4">Discount total</dt><dd class="col-sm-8"><code>{{ p.discountTotal }}</code></dd>
       <dt class="col-sm-4">Tax total</dt><dd class="col-sm-8"><code>{{ p.taxTotal }}</code></dd>

@@ -114,12 +114,52 @@
         </div>
       </div>
       <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="soPaymentTerm">Payment terms</label>
+          <select id="soPaymentTerm" class="form-select" formControlName="paymentTermId">
+            <option value="">None</option>
+            <option *ngFor="let p of paymentTerms" [value]="p.id">{{ p.code }} — {{ p.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="soSalesperson">Salesperson</label>
+          <select id="soSalesperson" class="form-select" formControlName="salespersonId">
+            <option value="">None</option>
+            <option *ngFor="let u of salespeople" [value]="u.id">{{ u.firstName }} {{ u.lastName }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="soDeliveryDate">Delivery date</label>
+          <input id="soDeliveryDate" type="date" class="form-control" formControlName="deliveryDate" />
+        </div>
+      </div>
+      <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="soBilling">Billing address</label>
+          <select
+            *ngIf="billingAddresses.length"
+            id="soBillingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="billingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of billingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
           <textarea id="soBilling" class="form-control" formControlName="billingAddress" maxlength="500" rows="2"></textarea>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label" for="soShipping">Shipping address</label>
+          <select
+            *ngIf="shippingAddresses.length"
+            id="soShippingAddressId"
+            class="form-select form-select-sm mb-2"
+            formControlName="shippingAddressId">
+            <option value="">Custom / typed address</option>
+            <option *ngFor="let a of shippingAddresses" [value]="a.id">
+              {{ addressLabel(a) }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
           <textarea id="soShipping" class="form-control" formControlName="shippingAddress" maxlength="500" rows="2"></textarea>
         </div>
       </div>
@@ -133,9 +173,14 @@
         <table class="table table-sm align-middle">
           <thead>
             <tr>
-              <th style="min-width: 220px;">Product</th>
-              <th style="min-width: 120px;">Quantity</th>
-              <th style="min-width: 120px;">Unit price</th>
+              <th style="min-width: 200px;">Product</th>
+              <th style="min-width: 110px;">Quantity</th>
+              <th style="min-width: 140px;">UOM</th>
+              <th style="min-width: 110px;">Unit price</th>
+              <th style="min-width: 90px;">Discount %</th>
+              <th style="min-width: 160px;">Tax</th>
+              <th class="text-end">Line subtotal</th>
+              <th class="text-end">Tax amount</th>
               <th class="text-end">Line total</th>
               <th></th>
             </tr>
@@ -155,13 +200,37 @@
                 </div>
               </td>
               <td>
+                <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                  <option value="">Select UOM…</option>
+                  <option *ngFor="let u of uomOptionsFor(line.value.productId)" [value]="u.id">{{ u.label }}</option>
+                </select>
+              </td>
+              <td>
                 <input class="form-control form-control-sm" formControlName="unitPrice" placeholder="25.0000" />
                 <div class="text-danger small" *ngIf="line.get('unitPrice')?.touched && line.get('unitPrice')?.invalid">
                   Max 4 decimal places.
                 </div>
               </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="discountPercent" placeholder="0.00" />
+                <div class="text-danger small" *ngIf="line.get('discountPercent')?.touched && line.get('discountPercent')?.invalid">
+                  Max 2 decimal places.
+                </div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="taxCodeId">
+                  <option value="">No tax</option>
+                  <option *ngFor="let t of taxCodes" [value]="t.id">{{ t.code }} — {{ t.name }}</option>
+                </select>
+              </td>
               <td class="text-end">
-                <code>{{ lineTotal(line.value.quantity, line.value.unitPrice) }}</code>
+                <code>{{ linePreview(line.value).lineSubtotal }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).taxAmount }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).lineTotal }}</code>
               </td>
               <td class="text-end">
                 <button
@@ -176,7 +245,29 @@
           </tbody>
         </table>
       </div>
-      <div class="form-text">Line totals are display-only. Backend validates quantities and prices.</div>
+      <div class="d-flex justify-content-end mb-2">
+        <table class="table table-sm table-borderless mb-0" style="max-width: 320px;">
+          <tbody>
+            <tr>
+              <td>Subtotal</td>
+              <td class="text-end"><code>{{ formTotalsPreview.subtotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Discount total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.discountTotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Tax total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.taxTotal }}</code></td>
+            </tr>
+            <tr>
+              <td><strong>Grand total</strong></td>
+              <td class="text-end"><code><strong>{{ formTotalsPreview.grandTotal }}</strong></code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">Line and document totals shown here are display-only previews. The backend computes and returns the authoritative amounts on save.</div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
@@ -202,7 +293,17 @@
       </dd>
       <dt class="col-sm-4" *ngIf="o.quotationId">From quotation</dt>
       <dd class="col-sm-8" *ngIf="o.quotationId"><code>{{ o.quotationId | slice:0:8 }}…</code></dd>
+      <dt class="col-sm-4" *ngIf="o.proformaInvoiceId">From proforma invoice</dt>
+      <dd class="col-sm-8" *ngIf="o.proformaInvoiceId"><code>{{ o.proformaInvoiceId | slice:0:8 }}…</code></dd>
       <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ o.notes || '—' }}</dd>
+      <dt class="col-sm-4">Payment terms</dt>
+      <dd class="col-sm-8">{{ paymentTermLabel(o.paymentTermId) }}</dd>
+      <dt class="col-sm-4">Salesperson</dt>
+      <dd class="col-sm-8">{{ salespersonLabel(o.salespersonId) }}</dd>
+      <dt class="col-sm-4">Delivery date</dt>
+      <dd class="col-sm-8">{{ o.deliveryDate ? (o.deliveryDate | date:'yyyy-MM-dd') : '—' }}</dd>
+      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ o.billingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Shipping address</dt><dd class="col-sm-8">{{ o.shippingAddress || '—' }}</dd>
       <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ o.subtotal }}</code></dd>
       <dt class="col-sm-4">Discount total</dt><dd class="col-sm-8"><code>{{ o.discountTotal }}</code></dd>
       <dt class="col-sm-4">Tax total</dt><dd class="col-sm-8"><code>{{ o.taxTotal }}</code></dd>
