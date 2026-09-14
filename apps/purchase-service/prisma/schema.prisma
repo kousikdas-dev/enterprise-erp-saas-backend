@@ -95,41 +95,119 @@ model SupplierAddress {
 model PurchaseOrder {
   id         String              @id @default(uuid()) @db.Uuid
   tenantId   String              @db.Uuid
+  poNumber   String
   supplierId String              @db.Uuid
   status     PurchaseOrderStatus @default(DRAFT)
-  notes      String?
-  orderDate  DateTime            @default(now())
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
+
+  // Supplier snapshot — frozen at create time, re-derived only if
+  // supplierId changes while the order is still DRAFT.
+  supplierName            String
+  supplierGstin           String?
+  supplierBillingAddress  String?
+  supplierDispatchAddress String?
+  // Master-data/Identity UUIDs intentionally have no foreign keys: that data
+  // belongs to separate services/databases (mirrors SalesOrder.paymentTermId
+  // / SalesOrder.salespersonId). paymentTermId defaults from the supplier at
+  // create time but may be explicitly overridden per order.
+  paymentTermId String? @db.Uuid
+  buyerId       String? @db.Uuid
+
+  // Optional/default receiving warehouse for this order — informational only.
+  // The operational destination for stock is always GoodsReceipt.warehouseId,
+  // which this field never overrides or replaces.
+  warehouseId String? @db.Uuid
+
+  supplierReference    String?
+  expectedDeliveryDate DateTime?
+
+  notes     String?
+  orderDate DateTime @default(now())
+
+  subtotal      Decimal @db.Decimal(19, 4)
+  discountTotal Decimal @default(0) @db.Decimal(19, 4)
+  taxTotal      Decimal @default(0) @db.Decimal(19, 4)
+  total         Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   supplier      Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   items         PurchaseOrderItem[]
   goodsReceipts GoodsReceipt[]
 
+  @@unique([tenantId, poNumber])
   @@index([tenantId])
   @@index([supplierId])
   @@index([tenantId, status])
+  @@index([tenantId, paymentTermId])
+  @@index([tenantId, buyerId])
+  @@index([tenantId, warehouseId])
   @@map("purchase_orders")
 }
 
 model PurchaseOrderItem {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @db.Uuid
-  purchaseOrderId  String   @db.Uuid
-  productId        String   @db.Uuid
-  quantity         Decimal  @db.Decimal(19, 6)
-  unitCost         Decimal  @db.Decimal(19, 4)
+  id              String @id @default(uuid()) @db.Uuid
+  tenantId        String @db.Uuid
+  purchaseOrderId String @db.Uuid
+  productId       String @db.Uuid
+
+  // Product snapshot — frozen at create/update time, never re-derived.
+  productSku  String
+  productName String
+
+  quantity Decimal @db.Decimal(19, 6)
+
+  // UOM snapshot — conversionFactor is stored for record-keeping only and
+  // never affects quantity/cost math (matches Sales precedent).
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+
+  unitCost Decimal @db.Decimal(19, 4)
+
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  taxCodeId   String? @db.Uuid
+  taxCode     String?
+  taxCodeName String?
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  lineSubtotal Decimal @db.Decimal(19, 4)
+  lineTotal    Decimal @db.Decimal(19, 4)
+
   receivedQuantity Decimal  @default(0) @db.Decimal(19, 6)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  purchaseOrder     PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder     PurchaseOrder                   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   goodsReceiptItems GoodsReceiptItem[]
+  taxComponents     PurchaseOrderItemTaxComponent[]
 
   @@index([tenantId])
   @@index([purchaseOrderId])
   @@index([productId])
   @@map("purchase_order_items")
+}
+
+model PurchaseOrderItemTaxComponent {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  purchaseOrderItemId String   @db.Uuid
+  sequence            Int
+  type                String
+  name                String?
+  rate                Decimal  @db.Decimal(7, 4)
+  componentTaxAmount  Decimal  @db.Decimal(19, 4)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([purchaseOrderItemId])
+  @@map("purchase_order_item_tax_components")
 }
 
 model GoodsReceipt {
@@ -152,13 +230,13 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptItem {
-  id                   String   @id @default(uuid()) @db.Uuid
-  tenantId             String   @db.Uuid
-  goodsReceiptId       String   @db.Uuid
-  purchaseOrderItemId  String   @db.Uuid
-  quantity             Decimal  @db.Decimal(19, 6)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  goodsReceiptId      String   @db.Uuid
+  purchaseOrderItemId String   @db.Uuid
+  quantity            Decimal  @db.Decimal(19, 6)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   goodsReceipt      GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)

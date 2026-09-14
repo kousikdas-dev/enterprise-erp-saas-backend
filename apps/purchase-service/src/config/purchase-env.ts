@@ -9,6 +9,9 @@ export class PurchaseEnvironmentVariables extends ServiceEnvironmentVariables {
   INVENTORY_SERVICE_URL!: string;
 
   @IsString()
+  ACCOUNTING_SERVICE_URL!: string;
+
+  @IsString()
   @MinLength(16)
   INTERNAL_SERVICE_SECRET!: string;
 }

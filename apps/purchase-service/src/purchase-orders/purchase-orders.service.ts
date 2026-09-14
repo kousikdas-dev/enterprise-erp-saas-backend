@@ -4,24 +4,82 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PurchaseOrderStatus } from '../../generated/prisma-client';
+import { Prisma, PurchaseOrderStatus } from '../../generated/prisma-client';
+import { AccountingTaxCodeClient } from '../accounting/accounting-tax-code.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
-import { parseMoney, parsePositiveDecimal } from '../common/decimal';
+import {
+  moneyToString,
+  parseConversionFactor,
+  parseMoney,
+  parsePercent,
+  parsePositiveDecimal,
+  roundMoney,
+} from '../common/decimal';
+import { InventoryProductClient } from '../inventory/inventory-product.client';
+import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toPurchaseOrderResponse } from './dto/purchase-order-response';
 import {
   CreatePurchaseOrderDto,
+  CreatePurchaseOrderItemDto,
   UpdatePurchaseOrderDto,
 } from './dto/purchase-order.dto';
 
-const ORDER_INCLUDE = { items: { orderBy: { createdAt: 'asc' as const } } };
+const ORDER_INCLUDE = {
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+  },
+};
+
+interface PurchaseOrderLineTaxComponent {
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: Prisma.Decimal;
+  componentTaxAmount: Prisma.Decimal;
+}
+
+interface PurchaseOrderLine {
+  tenantId: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  conversionFactor: Prisma.Decimal;
+  unitCost: Prisma.Decimal;
+  gross: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: Prisma.Decimal;
+  lineSubtotal: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  taxComponents: PurchaseOrderLineTaxComponent[];
+}
+
+interface SupplierSnapshot {
+  supplier: { id: string };
+  supplierName: string;
+  supplierGstin: string | null;
+  supplierBillingAddress: string | null;
+  supplierDispatchAddress: string | null;
+  paymentTermId: string | null;
+}
 
 @Injectable()
 export class PurchaseOrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: IdentityAuditClient,
+    private readonly inventoryProducts: InventoryProductClient,
+    private readonly accountingTaxCodes: AccountingTaxCodeClient,
   ) {}
 
   async create(
@@ -29,31 +87,62 @@ export class PurchaseOrdersService {
     dto: CreatePurchaseOrderDto,
     request?: RequestAuditMeta,
   ) {
-    await this.requireSupplier(actor, dto.supplierId);
-    const items = dto.items.map((item) => ({
-      tenantId: actor.tenantId,
-      productId: item.productId,
-      quantity: parsePositiveDecimal(item.quantity),
-      unitCost: parseMoney(item.unitCost),
-    }));
-    const row = await this.prisma.purchaseOrder.create({
-      data: {
-        tenantId: actor.tenantId,
-        supplierId: dto.supplierId,
-        notes: dto.notes?.trim() || null,
-        items: { create: items },
-      },
-      include: ORDER_INCLUDE,
-    });
-    await this.audit.record({
-      actor,
-      action: 'purchase-order.created',
-      resource: 'purchase-order',
-      resourceId: row.id,
-      metadata: { supplierId: row.supplierId, itemCount: row.items.length },
-      request,
-    });
-    return toPurchaseOrderResponse(row);
+    const snapshot = await this.snapshotSupplier(actor, dto.supplierId);
+    const lines = await this.mapLines(actor, dto.items);
+    const totals = this.sumTotals(lines);
+    const expectedDeliveryDate = dto.expectedDeliveryDate
+      ? new Date(dto.expectedDeliveryDate)
+      : null;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const poNumber = await this.nextPoNumber(actor.tenantId);
+      try {
+        const row = await this.prisma.purchaseOrder.create({
+          data: {
+            tenantId: actor.tenantId,
+            poNumber,
+            supplierId: snapshot.supplier.id,
+            supplierName: snapshot.supplierName,
+            supplierGstin: snapshot.supplierGstin,
+            supplierBillingAddress: snapshot.supplierBillingAddress,
+            supplierDispatchAddress: snapshot.supplierDispatchAddress,
+            paymentTermId: dto.paymentTermId ?? snapshot.paymentTermId,
+            buyerId: dto.buyerId ?? null,
+            warehouseId: dto.warehouseId ?? null,
+            supplierReference: dto.supplierReference?.trim() || null,
+            expectedDeliveryDate,
+            notes: dto.notes?.trim() || null,
+            subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
+            total: totals.total,
+            items: {
+              create: lines.map((line) => this.toItemCreateInput(line)),
+            },
+          },
+          include: ORDER_INCLUDE,
+        });
+        await this.audit.record({
+          actor,
+          action: 'purchase-order.created',
+          resource: 'purchase-order',
+          resourceId: row.id,
+          metadata: {
+            poNumber: row.poNumber,
+            supplierId: row.supplierId,
+            itemCount: row.items.length,
+          },
+          request,
+        });
+        return toPurchaseOrderResponse(row);
+      } catch (error) {
+        if (isUniqueConstraintError(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('Could not allocate purchase order number');
   }
 
   async list(actor: ActorContext) {
@@ -79,36 +168,101 @@ export class PurchaseOrdersService {
     if (existing.status !== PurchaseOrderStatus.DRAFT) {
       throw new ConflictException('Only DRAFT purchase orders can be updated');
     }
-    if (dto.supplierId) await this.requireSupplier(actor, dto.supplierId);
     if (
       dto.supplierId === undefined &&
+      dto.supplierReference === undefined &&
+      dto.expectedDeliveryDate === undefined &&
+      dto.buyerId === undefined &&
+      dto.paymentTermId === undefined &&
+      dto.warehouseId === undefined &&
       dto.notes === undefined &&
       dto.items === undefined
     ) {
       throw new BadRequestException('No fields to update');
     }
 
+    // Resolved (and, for items, externally-validated via HTTP) before the
+    // transaction starts — mirrors SalesOrdersService.update(), which never
+    // holds a DB transaction open across calls to inventory-service/accounting-service.
+    const snapshot = dto.supplierId
+      ? await this.snapshotSupplier(actor, dto.supplierId)
+      : null;
+    const lines = dto.items ? await this.mapLines(actor, dto.items) : null;
+
+    // paymentTermId: an explicit dto value always wins; otherwise it is
+    // re-derived from the supplier only when the supplier itself changes
+    // (mirrors SalesOrdersService.update()'s paymentTermId/salespersonId
+    // handling exactly). Other new header fields are plain pass-through —
+    // undefined means "leave untouched", never silently re-derived.
+    const paymentTermId =
+      dto.paymentTermId === undefined
+        ? (snapshot ? snapshot.paymentTermId : undefined)
+        : dto.paymentTermId;
+    const supplierReference =
+      dto.supplierReference === undefined
+        ? undefined
+        : dto.supplierReference.trim() || null;
+    const expectedDeliveryDate =
+      dto.expectedDeliveryDate === undefined
+        ? undefined
+        : dto.expectedDeliveryDate
+          ? new Date(dto.expectedDeliveryDate)
+          : null;
+    const buyerId = dto.buyerId === undefined ? undefined : dto.buyerId;
+    const warehouseId =
+      dto.warehouseId === undefined ? undefined : dto.warehouseId;
+
     const row = await this.prisma.$transaction(async (tx) => {
-      if (dto.items) {
+      if (lines) {
+        const totals = this.sumTotals(lines);
         await tx.purchaseOrderItem.deleteMany({
           where: { purchaseOrderId: id, tenantId: actor.tenantId },
         });
-        await tx.purchaseOrderItem.createMany({
-          data: dto.items.map((item) => ({
-            tenantId: actor.tenantId,
-            purchaseOrderId: id,
-            productId: item.productId,
-            quantity: parsePositiveDecimal(item.quantity),
-            unitCost: parseMoney(item.unitCost),
-          })),
+        // Per-item create (not createMany): createMany cannot create the
+        // nested taxComponents relation, which would silently drop tax rows.
+        for (const line of lines) {
+          await tx.purchaseOrderItem.create({
+            data: { purchaseOrderId: id, ...this.toItemCreateInput(line) },
+          });
+        }
+        return tx.purchaseOrder.update({
+          where: { id },
+          data: {
+            supplierId: snapshot?.supplier.id,
+            supplierName: snapshot?.supplierName,
+            supplierGstin: snapshot?.supplierGstin,
+            supplierBillingAddress: snapshot?.supplierBillingAddress,
+            supplierDispatchAddress: snapshot?.supplierDispatchAddress,
+            paymentTermId,
+            buyerId,
+            warehouseId,
+            supplierReference,
+            expectedDeliveryDate,
+            notes:
+              dto.notes === undefined ? undefined : dto.notes.trim() || null,
+            subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
+            total: totals.total,
+          },
+          include: ORDER_INCLUDE,
         });
       }
+
       return tx.purchaseOrder.update({
         where: { id },
         data: {
-          supplierId: dto.supplierId,
-          notes:
-            dto.notes === undefined ? undefined : dto.notes.trim() || null,
+          supplierId: snapshot?.supplier.id,
+          supplierName: snapshot?.supplierName,
+          supplierGstin: snapshot?.supplierGstin,
+          supplierBillingAddress: snapshot?.supplierBillingAddress,
+          supplierDispatchAddress: snapshot?.supplierDispatchAddress,
+          paymentTermId,
+          buyerId,
+          warehouseId,
+          supplierReference,
+          expectedDeliveryDate,
+          notes: dto.notes === undefined ? undefined : dto.notes.trim() || null,
         },
         include: ORDER_INCLUDE,
       });
@@ -122,6 +276,7 @@ export class PurchaseOrdersService {
       metadata: {
         supplierId: row.supplierId,
         itemCount: row.items.length,
+        total: moneyToString(row.total),
       },
       request,
     });
@@ -204,6 +359,20 @@ export class PurchaseOrdersService {
     return row;
   }
 
+  /**
+   * Tenant-scoped, human-readable business document number — separate from
+   * the database UUID and never supplied by the client as authoritative.
+   * Mirrors ProformaInvoice/SalesInvoice's count-based numbering exactly
+   * (`PO-00000001`); create() retries on a unique-constraint collision so
+   * concurrent creation cannot produce a duplicate number.
+   */
+  private async nextPoNumber(tenantId: string): Promise<string> {
+    const count = await this.prisma.purchaseOrder.count({
+      where: { tenantId },
+    });
+    return `PO-${String(count + 1).padStart(8, '0')}`;
+  }
+
   private async requireOrder(actor: ActorContext, id: string) {
     const row = await this.prisma.purchaseOrder.findFirst({
       where: { id, tenantId: actor.tenantId },
@@ -211,5 +380,226 @@ export class PurchaseOrdersService {
     });
     if (!row) throw new NotFoundException('Purchase order not found');
     return row;
+  }
+
+  /**
+   * Snapshots supplier name/GSTIN/payment-term and the supplier's default
+   * BILLING/DISPATCH address (formatted to text) at order create/update
+   * time. Never re-derived afterward unless supplierId itself changes.
+   * DISPATCH here is purely informational (the supplier's own shipping
+   * origin) — it is never written to GoodsReceipt.warehouseId, which
+   * remains our destination warehouse.
+   */
+  private async snapshotSupplier(
+    actor: ActorContext,
+    supplierId: string,
+  ): Promise<SupplierSnapshot> {
+    const supplier = await this.requireSupplier(actor, supplierId);
+    const addresses = await this.prisma.supplierAddress.findMany({
+      where: { tenantId: actor.tenantId, supplierId, isActive: true },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    });
+    const billing = addresses.find((a) => a.type === 'BILLING') ?? null;
+    const dispatch = addresses.find((a) => a.type === 'DISPATCH') ?? null;
+    return {
+      supplier,
+      supplierName: supplier.name,
+      supplierGstin: supplier.gstin,
+      supplierBillingAddress: this.formatSupplierAddress(billing),
+      supplierDispatchAddress: this.formatSupplierAddress(dispatch),
+      paymentTermId: supplier.paymentTermId,
+    };
+  }
+
+  private formatSupplierAddress(
+    address: {
+      addressLine1: string;
+      addressLine2: string | null;
+      city: string;
+      state: string | null;
+      postalCode: string | null;
+      country: string;
+    } | null,
+  ): string | null {
+    if (!address) return null;
+    return (
+      [
+        address.addressLine1,
+        address.addressLine2,
+        address.city,
+        address.state,
+        address.postalCode,
+        address.country,
+      ]
+        .filter(Boolean)
+        .join(', ') || null
+    );
+  }
+
+  private toItemCreateInput(line: PurchaseOrderLine) {
+    return {
+      tenantId: line.tenantId,
+      productId: line.productId,
+      productSku: line.productSku,
+      productName: line.productName,
+      quantity: line.quantity,
+      unitOfMeasureId: line.unitOfMeasureId,
+      uomCode: line.uomCode,
+      uomName: line.uomName,
+      conversionFactor: line.conversionFactor,
+      unitCost: line.unitCost,
+      discountPercent: line.discountPercent,
+      discountAmount: line.discountAmount,
+      taxCodeId: line.taxCodeId,
+      taxCode: line.taxCode,
+      taxCodeName: line.taxCodeName,
+      taxAmount: line.taxAmount,
+      lineSubtotal: line.lineSubtotal,
+      lineTotal: line.lineTotal,
+      taxComponents: {
+        create: line.taxComponents.map((component) => ({
+          tenantId: line.tenantId,
+          sequence: component.sequence,
+          type: component.type,
+          name: component.name,
+          rate: component.rate,
+          componentTaxAmount: component.componentTaxAmount,
+        })),
+      },
+    };
+  }
+
+  /**
+   * Mirrors SalesOrdersService.mapLines() exactly: gross → UOM resolution
+   * (base vs. alternative, validated against the product via
+   * InventoryProductClient) → discountAmount → lineSubtotal → each tax
+   * component independently (via AccountingTaxCodeClient) → taxAmount →
+   * lineTotal. All client-supplied amounts are recomputed server-side —
+   * nothing from the request is trusted as a calculated value.
+   */
+  private async mapLines(
+    actor: ActorContext,
+    items: CreatePurchaseOrderItemDto[],
+  ): Promise<PurchaseOrderLine[]> {
+    return Promise.all(
+      items.map(async (item) => {
+        const quantity = parsePositiveDecimal(item.quantity);
+        const unitCost = parseMoney(item.unitCost);
+        const gross = roundMoney(quantity.mul(unitCost));
+
+        const uomOptions = await this.inventoryProducts.getUomOptions(
+          actor,
+          item.productId,
+        );
+        let uomCode: string;
+        let uomName: string;
+        let conversionFactor: Prisma.Decimal;
+        if (item.unitOfMeasureId === uomOptions.base.unitOfMeasureId) {
+          uomCode = uomOptions.base.code;
+          uomName = uomOptions.base.name;
+          conversionFactor = new Prisma.Decimal(1);
+        } else {
+          const alternative = uomOptions.alternatives.find(
+            (candidate) => candidate.unitOfMeasureId === item.unitOfMeasureId,
+          );
+          if (!alternative) {
+            throw new BadRequestException(
+              'Selected unit of measure is not valid for this product',
+            );
+          }
+          uomCode = alternative.code;
+          uomName = alternative.name;
+          // Alternate-UOM conversion factor must be present and a valid
+          // positive decimal — it is never defaulted to 1 for a non-base
+          // unit, since that would silently misrepresent the commercial
+          // quantity actually ordered (Section 19.4's validation rule).
+          conversionFactor = parseConversionFactor(alternative.conversionFactor);
+        }
+
+        const discountPercent = parsePercent(item.discountPercent ?? '0');
+        const discountAmount = roundMoney(
+          gross.mul(discountPercent).div(100),
+        );
+        const lineSubtotal = gross.minus(discountAmount);
+
+        let taxCode: string | null = null;
+        let taxCodeName: string | null = null;
+        let taxComponents: PurchaseOrderLineTaxComponent[] = [];
+        let taxAmount = new Prisma.Decimal(0);
+
+        if (item.taxCodeId) {
+          const taxCodeResponse = await this.accountingTaxCodes.getById(
+            actor,
+            item.taxCodeId,
+          );
+          taxCode = taxCodeResponse.code;
+          taxCodeName = taxCodeResponse.name;
+          taxComponents = taxCodeResponse.components.map((component) => {
+            const rate = new Prisma.Decimal(component.rate);
+            const componentTaxAmount = roundMoney(
+              lineSubtotal.mul(rate).div(100),
+            );
+            return {
+              sequence: component.sequence,
+              type: component.type,
+              name: component.name,
+              rate,
+              componentTaxAmount,
+            };
+          });
+          taxAmount = taxComponents.reduce(
+            (sum, component) => sum.plus(component.componentTaxAmount),
+            new Prisma.Decimal(0),
+          );
+        }
+
+        const lineTotal = lineSubtotal.plus(taxAmount);
+
+        return {
+          tenantId: actor.tenantId,
+          productId: item.productId,
+          productSku: item.productSku.trim(),
+          productName: item.productName.trim(),
+          quantity,
+          unitOfMeasureId: item.unitOfMeasureId,
+          uomCode,
+          uomName,
+          conversionFactor,
+          unitCost,
+          gross,
+          discountPercent,
+          discountAmount,
+          taxCodeId: item.taxCodeId ?? null,
+          taxCode,
+          taxCodeName,
+          taxAmount,
+          lineSubtotal,
+          lineTotal,
+          taxComponents,
+        };
+      }),
+    );
+  }
+
+  private sumTotals(lines: PurchaseOrderLine[]): {
+    subtotal: Prisma.Decimal;
+    discountTotal: Prisma.Decimal;
+    taxTotal: Prisma.Decimal;
+    total: Prisma.Decimal;
+  } {
+    const subtotal = lines.reduce(
+      (sum, line) => sum.plus(line.gross),
+      new Prisma.Decimal(0),
+    );
+    const discountTotal = lines.reduce(
+      (sum, line) => sum.plus(line.discountAmount),
+      new Prisma.Decimal(0),
+    );
+    const taxTotal = lines.reduce(
+      (sum, line) => sum.plus(line.taxAmount),
+      new Prisma.Decimal(0),
+    );
+    const total = subtotal.minus(discountTotal).plus(taxTotal);
+    return { subtotal, discountTotal, taxTotal, total };
   }
 }

@@ -28,22 +28,24 @@
         <table class="align-middle mb-0 table table-borderless table-striped table-hover">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>PO Number</th>
               <th>Supplier</th>
               <th class="text-center">Status</th>
               <th class="text-center">Lines</th>
+              <th class="text-end">Total</th>
               <th>Notes</th>
               <th class="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let item of filtered">
-              <td><code>{{ item.id | slice:0:8 }}…</code></td>
-              <td>{{ supplierLabel(item.supplierId) }}</td>
+              <td><code>{{ item.poNumber }}</code></td>
+              <td>{{ item.supplierName }}</td>
               <td class="text-center">
                 <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
               </td>
               <td class="text-center">{{ item.items?.length || 0 }}</td>
+              <td class="text-end"><code>{{ item.total }}</code></td>
               <td class="text-muted">{{ item.notes || '—' }}</td>
               <td class="text-end text-nowrap">
                 <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
@@ -86,6 +88,7 @@
   </div>
   <form [formGroup]="form" (ngSubmit)="save()">
     <div class="modal-body">
+      <h6 class="mb-2" *ngIf="editing">PO Number: <code>{{ editing.poNumber }}</code></h6>
       <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="poSupplier">Supplier</label>
@@ -95,9 +98,53 @@
           </select>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="poNotes">Notes</label>
+          <label class="form-label" for="poSupplierReference">Supplier Reference</label>
+          <input
+            id="poSupplierReference"
+            class="form-control"
+            formControlName="supplierReference"
+            maxlength="120"
+            placeholder="Supplier quote / reference number" />
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="poExpectedDeliveryDate">Expected Delivery Date</label>
+          <input
+            id="poExpectedDeliveryDate"
+            type="date"
+            class="form-control"
+            formControlName="expectedDeliveryDate" />
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="poBuyer">Buyer / Purchaser</label>
+          <select id="poBuyer" class="form-select" formControlName="buyerId">
+            <option value="">Unassigned</option>
+            <option *ngFor="let u of buyers" [value]="u.id">{{ u.firstName }} {{ u.lastName }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="poPaymentTerm">Payment Terms</label>
+          <select id="poPaymentTerm" class="form-select" formControlName="paymentTermId">
+            <option value="">Use supplier default</option>
+            <option *ngFor="let p of paymentTerms" [value]="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="poWarehouse">Receiving Warehouse</label>
+          <select id="poWarehouse" class="form-select" formControlName="warehouseId">
+            <option value="">Not set</option>
+            <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="poNotes">Notes / Terms &amp; Conditions</label>
           <input id="poNotes" class="form-control" formControlName="notes" maxlength="500" />
         </div>
+      </div>
+      <div class="form-text mb-3">
+        Supplier name, GSTIN, payment terms (unless overridden above) and billing/dispatch addresses
+        are snapshotted from the selected supplier automatically and shown on the order detail view.
+        Receiving Warehouse here is informational only — the actual Goods Receipt still selects its
+        own destination warehouse.
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -109,9 +156,14 @@
         <table class="table table-sm align-middle">
           <thead>
             <tr>
-              <th style="min-width: 220px;">Product</th>
-              <th style="min-width: 120px;">Quantity</th>
-              <th style="min-width: 120px;">Unit cost</th>
+              <th style="min-width: 200px;">Product</th>
+              <th style="min-width: 110px;">Quantity</th>
+              <th style="min-width: 140px;">UOM</th>
+              <th style="min-width: 110px;">Unit cost</th>
+              <th style="min-width: 90px;">Discount %</th>
+              <th style="min-width: 160px;">Tax</th>
+              <th class="text-end">Line subtotal</th>
+              <th class="text-end">Tax amount</th>
               <th class="text-end">Line total</th>
               <th></th>
             </tr>
@@ -131,13 +183,37 @@
                 </div>
               </td>
               <td>
+                <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                  <option value="">Select UOM…</option>
+                  <option *ngFor="let u of uomOptionsFor(line.value.productId)" [value]="u.id">{{ u.label }}</option>
+                </select>
+              </td>
+              <td>
                 <input class="form-control form-control-sm" formControlName="unitCost" placeholder="5.0000" />
                 <div class="text-danger small" *ngIf="line.get('unitCost')?.touched && line.get('unitCost')?.invalid">
                   Max 4 decimal places.
                 </div>
               </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="discountPercent" placeholder="0.00" />
+                <div class="text-danger small" *ngIf="line.get('discountPercent')?.touched && line.get('discountPercent')?.invalid">
+                  Max 2 decimal places.
+                </div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="taxCodeId">
+                  <option value="">No tax</option>
+                  <option *ngFor="let t of taxCodes" [value]="t.id">{{ t.code }} — {{ t.name }}</option>
+                </select>
+              </td>
               <td class="text-end">
-                <code>{{ lineTotal(line.value.quantity, line.value.unitCost) }}</code>
+                <code>{{ linePreview(line.value).lineSubtotal }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).taxAmount }}</code>
+              </td>
+              <td class="text-end">
+                <code>{{ linePreview(line.value).lineTotal }}</code>
               </td>
               <td class="text-end">
                 <button
@@ -152,7 +228,29 @@
           </tbody>
         </table>
       </div>
-      <div class="form-text">Line totals are display-only. Backend validates quantities and costs.</div>
+      <div class="d-flex justify-content-end mb-2">
+        <table class="table table-sm table-borderless mb-0" style="max-width: 320px;">
+          <tbody>
+            <tr>
+              <td>Subtotal</td>
+              <td class="text-end"><code>{{ formTotalsPreview.subtotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Discount total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.discountTotal }}</code></td>
+            </tr>
+            <tr>
+              <td>Tax total</td>
+              <td class="text-end"><code>{{ formTotalsPreview.taxTotal }}</code></td>
+            </tr>
+            <tr>
+              <td><strong>Grand total</strong></td>
+              <td class="text-end"><code><strong>{{ formTotalsPreview.grandTotal }}</strong></code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">Line and document totals shown here are display-only previews. The backend computes and returns the authoritative amounts on save.</div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
@@ -170,14 +268,27 @@
   </div>
   <div class="modal-body" *ngIf="viewing as o">
     <dl class="row">
-      <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>{{ o.id }}</code></dd>
-      <dt class="col-sm-4">Supplier</dt><dd class="col-sm-8">{{ supplierLabel(o.supplierId) }}</dd>
+      <dt class="col-sm-4">PO Number</dt><dd class="col-sm-8"><code>{{ o.poNumber }}</code></dd>
+      <dt class="col-sm-4">Supplier</dt><dd class="col-sm-8">{{ o.supplierName }}</dd>
+      <dt class="col-sm-4">Supplier Reference</dt><dd class="col-sm-8">{{ o.supplierReference || '—' }}</dd>
       <dt class="col-sm-4">Status</dt>
       <dd class="col-sm-8">
         <span class="badge" [ngClass]="statusBadgeClass(o.status)">{{ o.status }}</span>
       </dd>
+      <dt class="col-sm-4">Expected Delivery</dt><dd class="col-sm-8">{{ o.expectedDeliveryDate ? (o.expectedDeliveryDate | slice:0:10) : '—' }}</dd>
+      <dt class="col-sm-4">Buyer / Purchaser</dt><dd class="col-sm-8">{{ buyerLabel(o.buyerId) }}</dd>
+      <dt class="col-sm-4">Payment Terms</dt><dd class="col-sm-8">{{ paymentTermLabel(o.paymentTermId) }}</dd>
+      <dt class="col-sm-4">Receiving Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(o.warehouseId) }}</dd>
+      <dt class="col-sm-4">GSTIN</dt><dd class="col-sm-8">{{ o.supplierGstin || '—' }}</dd>
+      <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ o.supplierBillingAddress || '—' }}</dd>
+      <dt class="col-sm-4">Dispatch address</dt><dd class="col-sm-8">{{ o.supplierDispatchAddress || '—' }}</dd>
       <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ o.notes || '—' }}</dd>
+      <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ o.subtotal }}</code></dd>
+      <dt class="col-sm-4">Discount total</dt><dd class="col-sm-8"><code>{{ o.discountTotal }}</code></dd>
+      <dt class="col-sm-4">Tax total</dt><dd class="col-sm-8"><code>{{ o.taxTotal }}</code></dd>
+      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ o.total }}</code></dd>
     </dl>
+    <div class="form-text mb-2">Dispatch address is the supplier's own shipping origin — not our receiving warehouse.</div>
     <div class="table-responsive">
       <table class="table table-sm">
         <thead>
@@ -186,18 +297,28 @@
             <th class="text-end">Ordered</th>
             <th class="text-end">Received</th>
             <th class="text-end">Remaining</th>
+            <th>UOM</th>
             <th class="text-end">Unit cost</th>
+            <th class="text-end">Discount %</th>
+            <th>Tax</th>
+            <th class="text-end">Line subtotal</th>
+            <th class="text-end">Tax amount</th>
             <th class="text-end">Line total</th>
           </tr>
         </thead>
         <tbody>
           <tr *ngFor="let line of o.items">
-            <td>{{ productLabel(line.productId) }}</td>
-            <td class="text-end"><code>{{ line.quantity | qty }}</code></td>
-            <td class="text-end"><code>{{ line.receivedQuantity | qty }}</code></td>
+            <td>{{ line.productSku }} — {{ line.productName }}</td>
+            <td class="text-end"><code>{{ line.quantity }}</code></td>
+            <td class="text-end"><code>{{ line.receivedQuantity }}</code></td>
             <td class="text-end"><code>{{ remainingQty(line) }}</code></td>
-            <td class="text-end"><code>{{ line.unitCost | decimalText }}</code></td>
-            <td class="text-end"><code>{{ lineTotal(line.quantity, line.unitCost) }}</code></td>
+            <td>{{ line.uomCode || '—' }}</td>
+            <td class="text-end"><code>{{ line.unitCost }}</code></td>
+            <td class="text-end"><code>{{ line.discountPercent }}</code></td>
+            <td>{{ line.taxCode || '—' }}</td>
+            <td class="text-end"><code>{{ line.lineSubtotal }}</code></td>
+            <td class="text-end"><code>{{ line.taxAmount }}</code></td>
+            <td class="text-end"><code>{{ line.lineTotal }}</code></td>
           </tr>
         </tbody>
       </table>
