@@ -1,26 +1,108 @@
 /** Matches Gateway purchase DTOs — do not invent fields. */
 
-export interface Supplier {
+export type SupplierAddressType = 'BILLING' | 'DISPATCH';
+
+export interface SupplierAddress {
   id: string;
-  tenantId: string;
-  code: string;
+  supplierId: string;
+  type: SupplierAddressType;
   name: string;
-  address: string | null;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  state: string | null;
+  postalCode: string | null;
+  country: string;
+  phone: string | null;
+  isDefault: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface CreateSupplierAddressRequest {
+  type: SupplierAddressType;
+  name: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state?: string;
+  postalCode?: string;
+  country: string;
+  phone?: string;
+  isDefault?: boolean;
+}
+
+export interface UpdateSupplierAddressRequest {
+  type?: SupplierAddressType;
+  name?: string;
+  addressLine1?: string;
+  addressLine2?: string | null;
+  city?: string;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string;
+  phone?: string | null;
+  isDefault?: boolean;
+  isActive?: boolean;
+}
+
+export interface Supplier {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  jobPosition: string | null;
+  website: string | null;
+  gstin: string | null;
+  tags: string[];
+  paymentTermId: string | null;
+  fiscalPositionId: string | null;
+  industryId: string | null;
+  notes: string | null;
+  /** Legacy free-text address field, retained for compatibility. */
+  address: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  addresses?: SupplierAddress[];
+}
+
 export interface CreateSupplierRequest {
   code: string;
   name: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  jobPosition?: string;
+  website?: string;
+  gstin?: string;
+  tags?: string[];
+  paymentTermId?: string;
+  fiscalPositionId?: string;
+  industryId?: string;
+  notes?: string;
   address?: string;
 }
 
 export interface UpdateSupplierRequest {
   code?: string;
   name?: string;
-  address?: string;
+  company?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  jobPosition?: string | null;
+  website?: string | null;
+  gstin?: string | null;
+  tags?: string[];
+  paymentTermId?: string | null;
+  fiscalPositionId?: string | null;
+  industryId?: string | null;
+  notes?: string | null;
+  address?: string | null;
   isActive?: boolean;
 }
 

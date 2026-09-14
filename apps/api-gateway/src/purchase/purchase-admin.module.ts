@@ -5,6 +5,7 @@ import { RbacModule } from '../rbac/rbac.module';
 import { GoodsReceiptsController } from './goods-receipts.controller';
 import { PurchaseForwardService } from './purchase-forward.service';
 import { PurchaseOrdersController } from './purchase-orders.controller';
+import { SupplierAddressesController } from './supplier-addresses.controller';
 import { SuppliersController } from './suppliers.controller';
 
 @Module({
@@ -18,6 +19,7 @@ import { SuppliersController } from './suppliers.controller';
   ],
   controllers: [
     SuppliersController,
+    SupplierAddressesController,
     PurchaseOrdersController,
     GoodsReceiptsController,
   ],
