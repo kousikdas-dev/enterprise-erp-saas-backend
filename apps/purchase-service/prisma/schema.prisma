@@ -109,8 +109,8 @@ model PurchaseOrder {
   // belongs to separate services/databases (mirrors SalesOrder.paymentTermId
   // / SalesOrder.salespersonId). paymentTermId defaults from the supplier at
   // create time but may be explicitly overridden per order.
-  paymentTermId String? @db.Uuid
-  buyerId       String? @db.Uuid
+  paymentTermId           String? @db.Uuid
+  buyerId                 String? @db.Uuid
 
   // Optional/default receiving warehouse for this order — informational only.
   // The operational destination for stock is always GoodsReceipt.warehouseId,
@@ -131,9 +131,10 @@ model PurchaseOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  supplier      Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  items         PurchaseOrderItem[]
-  goodsReceipts GoodsReceipt[]
+  supplier         Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items            PurchaseOrderItem[]
+  goodsReceipts    GoodsReceipt[]
+  purchaseInvoices PurchaseInvoice[]
 
   @@unique([tenantId, poNumber])
   @@index([tenantId])
@@ -178,12 +179,18 @@ model PurchaseOrderItem {
   lineTotal    Decimal @db.Decimal(19, 4)
 
   receivedQuantity Decimal  @default(0) @db.Decimal(19, 6)
+  // Commercial-UOM quantity billed so far across CONFIRMED PurchaseInvoices
+  // for this line (Purchase Invoice V1). Never mixed with baseQuantity.
+  // Accumulated only at PurchaseInvoice CONFIRM time, reversed on CONFIRMED
+  // invoice cancellation — DRAFT invoices never touch this column.
+  invoicedQuantity Decimal  @default(0) @db.Decimal(19, 6)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  purchaseOrder     PurchaseOrder                   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  goodsReceiptItems GoodsReceiptItem[]
-  taxComponents     PurchaseOrderItemTaxComponent[]
+  purchaseOrder        PurchaseOrder                   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  goodsReceiptItems    GoodsReceiptItem[]
+  taxComponents        PurchaseOrderItemTaxComponent[]
+  purchaseInvoiceItems PurchaseInvoiceItem[]
 
   @@index([tenantId])
   @@index([purchaseOrderId])
@@ -230,19 +237,214 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptItem {
-  id                  String   @id @default(uuid()) @db.Uuid
-  tenantId            String   @db.Uuid
-  goodsReceiptId      String   @db.Uuid
-  purchaseOrderItemId String   @db.Uuid
-  quantity            Decimal  @db.Decimal(19, 6)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                  String  @id @default(uuid()) @db.Uuid
+  tenantId            String  @db.Uuid
+  goodsReceiptId      String  @db.Uuid
+  purchaseOrderItemId String  @db.Uuid
+  quantity            Decimal @db.Decimal(19, 6) // commercial/PO UOM receiving quantity — never converted
 
-  goodsReceipt      GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  // Product snapshot — copied verbatim from the parent PurchaseOrderItem at
+  // receipt-creation time, never re-fetched from Product/inventory-service
+  // (Section 19.3.1/19.7). NOT NULL: the parent PurchaseOrderItem columns are
+  // themselves NOT NULL and every row has a required FK parent (migration
+  // 20260917120000_gr_v1_uom_snapshot adds these nullable, backfills, then
+  // tightens to NOT NULL once every row is proven populated).
+  productId   String @db.Uuid
+  productSku  String
+  productName String
+
+  // UOM snapshot — copied verbatim from the parent PurchaseOrderItem, never
+  // re-resolved from current ProductUnit/master data (Section 19.3.1/19.3.4).
+  // Nullable, mirroring PurchaseOrderItem's own nullable UOM columns.
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+
+  // Derived once at creation: quantity × conversionFactor. The ONLY value
+  // ever sent to Inventory (Section 19.3.3). Nullable at the DB level only
+  // for legacy pre-migration rows that could not be safely backfilled
+  // (Section 19.8.3, D12) — the service never writes NULL for a new row;
+  // post()/retry rejects a NULL baseQuantity rather than guessing.
+  baseQuantity Decimal? @db.Decimal(19, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  goodsReceipt         GoodsReceipt          @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem    PurchaseOrderItem     @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  purchaseInvoiceItems PurchaseInvoiceItem[]
 
   @@index([tenantId])
   @@index([goodsReceiptId])
   @@index([purchaseOrderItemId])
   @@map("goods_receipt_items")
+}
+
+// ============================================================================
+// Purchase Invoice V1 (PURCHASE_MODULE_PLAN.md Section 22, Phase A) and
+// Supplier Payment V1 (Section 22.9-22.10, Phase B).
+// Operational-only: no accounting/journal posting, no AP, no currency, no
+// payment reversal/cancellation. See Section 22 for the full architecture.
+// ============================================================================
+
+enum PurchaseInvoiceStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+enum PurchaseInvoicePaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+model PurchaseInvoice {
+  id                    String                @id @default(uuid()) @db.Uuid
+  tenantId              String                @db.Uuid
+  invoiceNumber         String
+  supplierInvoiceNumber String?
+  purchaseOrderId       String                @db.Uuid
+  status                PurchaseInvoiceStatus @default(DRAFT)
+
+  supplierId             String  @db.Uuid
+  // Supplier snapshot — copied from the referenced PurchaseOrder's own
+  // already-frozen header snapshot, never re-fetched from live Supplier.
+  supplierName           String
+  supplierGstin          String?
+  supplierBillingAddress String?
+  // Master-data UUID intentionally has no foreign key: mirrors
+  // PurchaseOrder.paymentTermId (that data belongs to a separate service).
+  paymentTermId          String? @db.Uuid
+
+  invoiceDate DateTime
+  dueDate     DateTime?
+  notes       String?
+
+  subtotal      Decimal                      @db.Decimal(19, 4)
+  discountTotal Decimal                      @default(0) @db.Decimal(19, 4)
+  taxTotal      Decimal                      @default(0) @db.Decimal(19, 4)
+  total         Decimal                      @db.Decimal(19, 4)
+  // balanceDue is intentionally not persisted: it is always total - amountPaid
+  // (mirrors SalesInvoice). amountPaid/paymentStatus are written by the future
+  // Supplier Payment phase (Phase B); Phase A leaves them at their defaults.
+  amountPaid    Decimal                      @default(0) @db.Decimal(19, 4)
+  paymentStatus PurchaseInvoicePaymentStatus @default(UNPAID)
+
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  items         PurchaseInvoiceItem[]
+  payments      SupplierPayment[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId])
+  @@index([purchaseOrderId])
+  @@index([tenantId, status])
+  @@index([tenantId, paymentTermId])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceItem {
+  id                  String  @id @default(uuid()) @db.Uuid
+  tenantId            String  @db.Uuid
+  purchaseInvoiceId   String  @db.Uuid
+  purchaseOrderItemId String  @db.Uuid
+  // Optional — when present, ties this invoice line to a specific physical
+  // receipt for traceability; quantity validation always stays at the
+  // purchaseOrderItemId aggregate level regardless (Section 22 Decision B).
+  goodsReceiptItemId  String? @db.Uuid
+
+  // Product/UOM snapshot — copied from GoodsReceiptItem when
+  // goodsReceiptItemId is supplied, otherwise from PurchaseOrderItem.
+  // Never re-fetched from Product/inventory-service.
+  productId        String   @db.Uuid
+  productSku       String
+  productName      String
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+
+  // Commercial UOM quantity actually billed — never a base-UOM quantity.
+  // May legitimately differ from the PO line's quantity/unitCost/discount
+  // (that difference is matching information, never silently overwritten).
+  quantity        Decimal @db.Decimal(19, 6)
+  unitCost        Decimal @db.Decimal(19, 4)
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  // Tax code/rate structure copied from the parent PurchaseOrderItem, never
+  // re-resolved via AccountingTaxCodeClient; amounts are still computed
+  // against this line's own lineSubtotal, not copied verbatim.
+  taxCodeId   String? @db.Uuid
+  taxCode     String?
+  taxCodeName String?
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  lineSubtotal Decimal @db.Decimal(19, 4)
+  lineTotal    Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchaseInvoice   PurchaseInvoice                   @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  purchaseOrderItem PurchaseOrderItem                 @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  goodsReceiptItem  GoodsReceiptItem?                 @relation(fields: [goodsReceiptItemId], references: [id], onDelete: Restrict)
+  taxComponents     PurchaseInvoiceItemTaxComponent[]
+
+  @@index([tenantId])
+  @@index([purchaseInvoiceId])
+  @@index([purchaseOrderItemId])
+  @@index([goodsReceiptItemId])
+  @@map("purchase_invoice_items")
+}
+
+model PurchaseInvoiceItemTaxComponent {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @db.Uuid
+  purchaseInvoiceItemId String   @db.Uuid
+  sequence              Int
+  type                  String
+  name                  String?
+  rate                  Decimal  @db.Decimal(7, 4)
+  componentTaxAmount    Decimal  @db.Decimal(19, 4)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  purchaseInvoiceItem PurchaseInvoiceItem @relation(fields: [purchaseInvoiceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([purchaseInvoiceItemId])
+  @@map("purchase_invoice_item_tax_components")
+}
+
+// Supplier Payment V1 (Section 22.9-22.10, Phase B) — a payment recorded
+// against a CONFIRMED PurchaseInvoice's balance. Child resource of
+// PurchaseInvoice (mirrors SalesPayment's relationship to SalesInvoice
+// exactly); no reversal/cancellation endpoint, no AP, no accounting posting.
+model SupplierPayment {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @db.Uuid
+  purchaseInvoiceId String   @db.Uuid
+  amount            Decimal  @db.Decimal(19, 4)
+  paymentDate       DateTime
+  // Master-data UUID intentionally has no foreign key: mirrors
+  // PurchaseInvoice.paymentTermId / SalesPayment.paymentMethodId (that data
+  // belongs to a separate service/database). Reuses the single, existing
+  // Payment Method concept shared with Sales — no Purchase-specific master.
+  paymentMethodId   String?  @db.Uuid
+  reference         String?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([purchaseInvoiceId])
+  @@map("supplier_payments")
 }

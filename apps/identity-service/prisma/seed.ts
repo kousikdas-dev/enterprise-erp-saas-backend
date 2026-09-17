@@ -216,6 +216,36 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'read',
     description: 'Read goods receipts',
   },
+  {
+    resource: 'purchase-invoices',
+    action: 'create',
+    description: 'Create purchase invoices',
+  },
+  {
+    resource: 'purchase-invoices',
+    action: 'read',
+    description: 'Read purchase invoices',
+  },
+  {
+    resource: 'purchase-invoices',
+    action: 'update',
+    description: 'Update purchase invoices',
+  },
+  {
+    resource: 'purchase-invoices',
+    action: 'confirm',
+    description: 'Confirm purchase invoices',
+  },
+  {
+    resource: 'purchase-invoices',
+    action: 'cancel',
+    description: 'Cancel purchase invoices',
+  },
+  {
+    resource: 'purchase-invoices',
+    action: 'record-payment',
+    description: 'Record supplier payments against purchase invoices',
+  },
   { resource: 'customers', action: 'create', description: 'Create customers' },
   { resource: 'customers', action: 'read', description: 'Read customers' },
   { resource: 'customers', action: 'update', description: 'Update customers' },

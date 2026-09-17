@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -6,6 +6,9 @@ import {
   IsString,
   IsUUID,
   ValidateNested,
+  ValidationArguments,
+  ValidationOptions,
+  registerDecorator,
 } from 'class-validator';
 
 export class CreateGoodsReceiptLineDto {
@@ -17,6 +20,39 @@ export class CreateGoodsReceiptLineDto {
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   quantity!: string;
+}
+
+// Mirrors purchase-service's identical validator (goods-receipts.service's
+// D13 requirement) — the gateway is a validating proxy, so a duplicate line
+// is rejected here too rather than only downstream.
+function NoDuplicatePurchaseOrderItems(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'noDuplicatePurchaseOrderItems',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown, _args: ValidationArguments) {
+          if (!Array.isArray(value)) {
+            return true;
+          }
+          const ids = value
+            .map((line) =>
+              line && typeof line === 'object'
+                ? (line as { purchaseOrderItemId?: unknown })
+                    .purchaseOrderItemId
+                : undefined,
+            )
+            .filter((id): id is string => typeof id === 'string');
+          return new Set(ids).size === ids.length;
+        },
+        defaultMessage() {
+          return 'Duplicate purchaseOrderItemId values are not allowed within one goods receipt';
+        },
+      },
+    });
+  };
 }
 
 export class CreateGoodsReceiptDto {
@@ -33,6 +69,7 @@ export class CreateGoodsReceiptDto {
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateGoodsReceiptLineDto)
+  @NoDuplicatePurchaseOrderItems()
   items!: CreateGoodsReceiptLineDto[];
 }
 
@@ -45,6 +82,38 @@ export class GoodsReceiptItemDto {
 
   @ApiProperty()
   quantity!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  productId!: string;
+
+  @ApiProperty()
+  productSku!: string;
+
+  @ApiProperty()
+  productName!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  unitOfMeasureId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  uomCode!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  uomName!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Historical conversion factor frozen from the parent Purchase Order line at receipt-creation time. Never re-resolved from current master data.',
+  })
+  conversionFactor!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'quantity × conversionFactor, computed once at creation. The only value ever sent to Inventory.',
+  })
+  baseQuantity!: string | null;
 }
 
 export class GoodsReceiptDto {

@@ -20,6 +20,14 @@ type ReceiptWithItems = {
     goodsReceiptId: string;
     purchaseOrderItemId: string;
     quantity: Prisma.Decimal;
+    productId: string;
+    productSku: string;
+    productName: string;
+    unitOfMeasureId: string | null;
+    uomCode: string | null;
+    uomName: string | null;
+    conversionFactor: Prisma.Decimal | null;
+    baseQuantity: Prisma.Decimal | null;
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -41,6 +49,18 @@ export function toGoodsReceiptResponse(row: ReceiptWithItems) {
       goodsReceiptId: item.goodsReceiptId,
       purchaseOrderItemId: item.purchaseOrderItemId,
       quantity: quantityToString(item.quantity),
+      productId: item.productId,
+      productSku: item.productSku,
+      productName: item.productName,
+      unitOfMeasureId: item.unitOfMeasureId,
+      uomCode: item.uomCode,
+      uomName: item.uomName,
+      conversionFactor: item.conversionFactor
+        ? quantityToString(item.conversionFactor)
+        : null,
+      baseQuantity: item.baseQuantity
+        ? quantityToString(item.baseQuantity)
+        : null,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     })),

@@ -114,6 +114,7 @@
               <tr>
                 <th>Receive</th>
                 <th>Product</th>
+                <th>UOM</th>
                 <th class="text-end">Ordered</th>
                 <th class="text-end">Already received</th>
                 <th class="text-end">Remaining</th>
@@ -126,6 +127,7 @@
                   <input class="form-check-input" type="checkbox" formControlName="include" />
                 </td>
                 <td>{{ productLabel(line.value.productId) }}</td>
+                <td>{{ order.items.find(x => x.id === line.value.purchaseOrderItemId)?.uomCode || '—' }}</td>
                 <td class="text-end">
                   <code>{{ order.items[i] ? (order.items.find(x => x.id === line.value.purchaseOrderItemId)?.quantity | qty) : '—' }}</code>
                 </td>
@@ -134,7 +136,10 @@
                 </td>
                 <td class="text-end"><code>{{ line.value.maxRemaining }}</code></td>
                 <td>
-                  <input class="form-control form-control-sm" formControlName="quantity" />
+                  <div class="input-group input-group-sm">
+                    <input class="form-control form-control-sm" formControlName="quantity" />
+                    <span class="input-group-text" *ngIf="order.items.find(x => x.id === line.value.purchaseOrderItemId)?.uomCode as uom">{{ uom }}</span>
+                  </div>
                   <div class="text-danger small" *ngIf="line.get('quantity')?.touched && line.get('quantity')?.invalid">
                     Max 6 decimal places.
                   </div>
@@ -179,17 +184,29 @@
       <table class="table table-sm">
         <thead>
           <tr>
-            <th>Product / PO line</th>
-            <th class="text-end">Quantity</th>
+            <th>Product</th>
+            <th>UOM</th>
+            <th class="text-end">Received qty</th>
+            <th class="text-end">Base qty (to Inventory)</th>
           </tr>
         </thead>
         <tbody>
           <tr *ngFor="let line of r.items">
-            <td>{{ poItemProduct(line.purchaseOrderItemId) }}</td>
+            <td>{{ line.productSku }} — {{ line.productName }}</td>
+            <td>{{ line.uomCode || '—' }}</td>
             <td class="text-end"><code>{{ line.quantity | qty }}</code></td>
+            <td class="text-end">
+              <code *ngIf="line.baseQuantity">{{ line.baseQuantity | qty }}</code>
+              <span class="text-danger small" *ngIf="!line.baseQuantity">missing — post blocked</span>
+            </td>
           </tr>
         </tbody>
       </table>
+      <p class="text-muted small mb-0">
+        Received qty is entered in the purchase order line's own unit of measure. Base qty is the
+        quantity actually sent to Inventory (received qty × the order line's conversion factor) —
+        informational only, never entered directly.
+      </p>
     </div>
   </div>
   <div class="modal-footer">

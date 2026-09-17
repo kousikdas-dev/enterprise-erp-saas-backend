@@ -232,6 +232,12 @@ export class PurchaseOrderItemDto {
   @ApiProperty()
   receivedQuantity!: string;
 
+  @ApiProperty({
+    description:
+      'Purchase Invoice V1 accumulator — commercial-UOM quantity billed so far across CONFIRMED purchase invoices for this line.',
+  })
+  invoicedQuantity!: string;
+
   @ApiProperty({ type: [PurchaseOrderItemTaxComponentDto] })
   taxComponents!: PurchaseOrderItemTaxComponentDto[];
 }

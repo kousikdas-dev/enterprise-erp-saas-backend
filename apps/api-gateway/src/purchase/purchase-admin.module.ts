@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
 import { GoodsReceiptsController } from './goods-receipts.controller';
 import { PurchaseForwardService } from './purchase-forward.service';
+import { PurchaseInvoicesController } from './purchase-invoices.controller';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { SupplierAddressesController } from './supplier-addresses.controller';
 import { SuppliersController } from './suppliers.controller';
@@ -22,6 +23,7 @@ import { SuppliersController } from './suppliers.controller';
     SupplierAddressesController,
     PurchaseOrdersController,
     GoodsReceiptsController,
+    PurchaseInvoicesController,
   ],
   providers: [PurchaseForwardService],
 })

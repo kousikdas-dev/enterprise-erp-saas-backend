@@ -7,6 +7,7 @@ import { PurchaseEnvironmentVariables } from './config/purchase-env';
 import { PrismaModule } from './prisma/prisma.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
+import { PurchaseInvoicesModule } from './purchase-invoices/purchase-invoices.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
@@ -23,6 +24,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     SuppliersModule,
     PurchaseOrdersModule,
     GoodsReceiptsModule,
+    PurchaseInvoicesModule,
     MessagingModule.register(),
   ],
 })

@@ -142,6 +142,8 @@ export interface PurchaseOrderItem {
   lineSubtotal: string;
   lineTotal: string;
   receivedQuantity: string;
+  /** Purchase Invoice V1 accumulator — commercial-UOM quantity billed so far. */
+  invoicedQuantity: string;
   taxComponents: PurchaseOrderItemTaxComponent[];
 }
 
@@ -208,7 +210,18 @@ export type GoodsReceiptStatus = 'PENDING_STOCK' | 'POSTED';
 export interface GoodsReceiptItem {
   id: string;
   purchaseOrderItemId: string;
+  /** Commercial/PO UOM receiving quantity — never a base-UOM quantity. */
   quantity: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  /** Historical PO-line conversion factor, frozen at receipt-creation time. */
+  conversionFactor: string | null;
+  /** quantity × conversionFactor — the value sent to Inventory. Read-only/informational. */
+  baseQuantity: string | null;
 }
 
 export interface GoodsReceipt {
@@ -233,4 +246,126 @@ export interface CreateGoodsReceiptRequest {
 
 export interface ItemList<T> {
   items: T[];
+}
+
+export type PurchaseInvoiceStatus = 'DRAFT' | 'CONFIRMED' | 'CANCELLED';
+export type PurchaseInvoicePaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+
+export interface PurchaseInvoiceItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
+export interface PurchaseInvoiceItem {
+  id: string;
+  purchaseInvoiceId: string;
+  purchaseOrderItemId: string;
+  /** Optional — ties this line to a specific physical receipt for traceability. */
+  goodsReceiptItemId: string | null;
+  productId: string;
+  productSku: string;
+  productName: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: string | null;
+  /** Commercial UOM quantity actually billed — never a base-UOM quantity. */
+  quantity: string;
+  unitCost: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
+  lineTotal: string;
+  taxComponents: PurchaseInvoiceItemTaxComponent[];
+  /** Three-way matching (flag-only, zero tolerance) — computed on read, never blocks. */
+  costMismatch: boolean;
+  discountMismatch: boolean;
+  taxMismatch: boolean;
+}
+
+export interface PurchaseInvoice {
+  id: string;
+  tenantId: string;
+  invoiceNumber: string;
+  supplierInvoiceNumber: string | null;
+  purchaseOrderId: string;
+  status: PurchaseInvoiceStatus | string;
+  supplierId: string;
+  supplierName: string;
+  supplierGstin: string | null;
+  supplierBillingAddress: string | null;
+  paymentTermId: string | null;
+  invoiceDate: string;
+  dueDate: string | null;
+  notes: string | null;
+  subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
+  total: string;
+  amountPaid: string;
+  /** Never entered directly — always total - amountPaid, computed server-side. */
+  balanceDue: string;
+  paymentStatus: PurchaseInvoicePaymentStatus | string;
+  confirmedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: PurchaseInvoiceItem[];
+}
+
+export interface CreatePurchaseInvoiceLineRequest {
+  purchaseOrderItemId: string;
+  goodsReceiptItemId?: string;
+  quantity: string;
+  unitCost: string;
+  discountPercent?: string;
+}
+
+export interface CreatePurchaseInvoiceRequest {
+  purchaseOrderId: string;
+  supplierInvoiceNumber?: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string;
+  items: CreatePurchaseInvoiceLineRequest[];
+}
+
+export interface UpdatePurchaseInvoiceRequest {
+  supplierInvoiceNumber?: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string;
+  items?: CreatePurchaseInvoiceLineRequest[];
+}
+
+export interface SupplierPayment {
+  id: string;
+  purchaseInvoiceId: string;
+  amount: string;
+  paymentDate: string;
+  paymentMethodId: string | null;
+  reference: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSupplierPaymentRequest {
+  amount: string;
+  paymentDate: string;
+  paymentMethodId?: string;
+  reference?: string;
+  notes?: string;
+}
+
+export interface RecordSupplierPaymentResult {
+  payment: SupplierPayment;
+  invoice: PurchaseInvoice;
 }

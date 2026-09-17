@@ -55,6 +55,7 @@ type OrderWithItems = {
     lineSubtotal: Prisma.Decimal;
     lineTotal: Prisma.Decimal;
     receivedQuantity: Prisma.Decimal;
+    invoicedQuantity: Prisma.Decimal;
     createdAt: Date;
     updatedAt: Date;
     taxComponents: PurchaseOrderItemTaxComponentRow[];
@@ -120,6 +121,10 @@ export function toPurchaseOrderResponse(row: OrderWithItems) {
       lineSubtotal: moneyToString(item.lineSubtotal),
       lineTotal: moneyToString(item.lineTotal),
       receivedQuantity: quantityToString(item.receivedQuantity),
+      // Purchase Invoice V1 (Section 22) accumulator — commercial-UOM
+      // quantity billed so far across CONFIRMED PurchaseInvoices for this
+      // line. Read-only here; only purchase-invoices.service.ts writes it.
+      invoicedQuantity: quantityToString(item.invoicedQuantity),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       taxComponents: item.taxComponents.map(toTaxComponentResponse),

@@ -1,0 +1,395 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Purchase Invoices</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Invoice
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Flow: Purchase Order → Goods Receipt → Purchase Invoice <code>DRAFT</code> →
+      <code>CONFIRMED</code> (billed quantity locked against the order line) → Supplier Payment.
+      Operational only — no accounting/journal posting, no Accounts Payable yet.
+    </p>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No purchase invoices yet."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Invoice</th>
+              <th>Supplier ref</th>
+              <th>Purchase order</th>
+              <th>Supplier</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Total</th>
+              <th class="text-end">Balance due</th>
+              <th class="text-center">Payment</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let inv of filtered">
+              <td><code>{{ inv.invoiceNumber }}</code></td>
+              <td>{{ inv.supplierInvoiceNumber || '—' }}</td>
+              <td>{{ orderLabel(inv.purchaseOrderId) }}</td>
+              <td>{{ inv.supplierName }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(inv.status)">{{ inv.status }}</span>
+              </td>
+              <td class="text-end"><code>{{ inv.total }}</code></td>
+              <td class="text-end"><code>{{ inv.balanceDue }}</code></td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="paymentStatusBadgeClass(inv.paymentStatus)">{{ inv.paymentStatus }}</span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(inv)">
+                  View
+                </button>
+                <button
+                  *ngIf="canConfirm && inv.status === 'DRAFT'"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  [disabled]="actionId === inv.id"
+                  (click)="confirmInvoice(inv)">
+                  {{ actionId === inv.id ? 'Confirming…' : 'Confirm' }}
+                </button>
+                <button
+                  *ngIf="canRecordPaymentFor(inv)"
+                  type="button"
+                  class="btn btn-sm btn-outline-info me-1"
+                  (click)="openRecordPayment(inv)">
+                  Record Payment
+                </button>
+                <button
+                  *ngIf="canCancelInvoice(inv)"
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  [disabled]="actionId === inv.id"
+                  (click)="cancelInvoice(inv)">
+                  {{ actionId === inv.id ? 'Cancelling…' : 'Cancel' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Create Purchase Invoice</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="piPo">Purchase order</label>
+          <select
+            id="piPo"
+            class="form-select"
+            formControlName="purchaseOrderId"
+            (change)="onPurchaseOrderChange(form.controls.purchaseOrderId.value || '')">
+            <option value="">Select purchase order…</option>
+            <option *ngFor="let o of invoiceableOrders" [value]="o.id">
+              {{ o.poNumber }} — {{ o.status }} — {{ o.supplierName }}
+            </option>
+          </select>
+          <div class="form-text">Only lines with received-but-not-yet-invoiced quantity are shown.</div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="piSupplierRef">Supplier invoice #</label>
+          <input id="piSupplierRef" class="form-control" formControlName="supplierInvoiceNumber" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="piInvoiceDate">Invoice date</label>
+          <input id="piInvoiceDate" type="date" class="form-control" formControlName="invoiceDate" />
+        </div>
+      </div>
+
+      <div *ngIf="selectedOrder as order" class="mb-2">
+        <div class="table-responsive" formArrayName="items">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Bill</th>
+                <th>Product</th>
+                <th>UOM</th>
+                <th class="text-end">Received</th>
+                <th class="text-end">Already invoiced</th>
+                <th class="text-end">Remaining</th>
+                <th style="min-width: 110px;">Qty to bill</th>
+                <th style="min-width: 110px;">Unit cost</th>
+                <th style="min-width: 90px;">Disc %</th>
+                <th>Receipt line (optional)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+                <td>
+                  <input class="form-check-input" type="checkbox" formControlName="include" />
+                </td>
+                <td>
+                  {{ order.items.find(x => x.id === line.value.purchaseOrderItemId)?.productSku }} —
+                  {{ order.items.find(x => x.id === line.value.purchaseOrderItemId)?.productName }}
+                </td>
+                <td>{{ order.items.find(x => x.id === line.value.purchaseOrderItemId)?.uomCode || '—' }}</td>
+                <td class="text-end">
+                  <code>{{ order.items.find(x => x.id === line.value.purchaseOrderItemId)?.receivedQuantity | qty }}</code>
+                </td>
+                <td class="text-end">
+                  <code>{{ order.items.find(x => x.id === line.value.purchaseOrderItemId)?.invoicedQuantity | qty }}</code>
+                </td>
+                <td class="text-end"><code>{{ line.value.maxRemaining }}</code></td>
+                <td>
+                  <input class="form-control form-control-sm" formControlName="quantity" />
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" formControlName="unitCost" />
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" formControlName="discountPercent" />
+                </td>
+                <td>
+                  <select class="form-select form-select-sm" formControlName="goodsReceiptItemId">
+                    <option value="">Not tied to one receipt</option>
+                    <option
+                      *ngFor="let r of receiptLinesFor(line.value.purchaseOrderItemId)"
+                      [value]="r.id">
+                      {{ r.label }}
+                    </option>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="form-text" *ngIf="lines.length === 0">
+          No received-but-unbilled quantity on this purchase order.
+        </div>
+        <div class="alert alert-info small mb-0">
+          Quantities are entered in each line's own unit of measure. Cost/tax/discount that differ
+          from the purchase order line are matching information only — they are never silently
+          overwritten, and totals are always recomputed server-side.
+        </div>
+      </div>
+
+      <div class="mb-3 mt-2">
+        <label class="form-label" for="piNotes">Notes</label>
+        <textarea id="piNotes" class="form-control" rows="2" formControlName="notes"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid || lines.length === 0">
+        {{ saving ? 'Creating…' : 'Create invoice (DRAFT)' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Purchase invoice details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as inv">
+    <dl class="row">
+      <dt class="col-sm-4">Invoice #</dt><dd class="col-sm-8"><code>{{ inv.invoiceNumber }}</code></dd>
+      <dt class="col-sm-4">Supplier invoice #</dt><dd class="col-sm-8">{{ inv.supplierInvoiceNumber || '—' }}</dd>
+      <dt class="col-sm-4">Purchase order</dt><dd class="col-sm-8">{{ orderLabel(inv.purchaseOrderId) }}</dd>
+      <dt class="col-sm-4">Supplier</dt>
+      <dd class="col-sm-8">{{ inv.supplierName }} <span *ngIf="inv.supplierGstin">({{ inv.supplierGstin }})</span></dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8"><span class="badge" [ngClass]="statusBadgeClass(inv.status)">{{ inv.status }}</span></dd>
+      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ inv.total }}</code></dd>
+      <dt class="col-sm-4">Amount paid</dt><dd class="col-sm-8"><code>{{ inv.amountPaid }}</code></dd>
+      <dt class="col-sm-4">Balance due</dt><dd class="col-sm-8"><code>{{ inv.balanceDue }}</code></dd>
+      <dt class="col-sm-4">Payment status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="paymentStatusBadgeClass(inv.paymentStatus)">{{ inv.paymentStatus }}</span>
+      </dd>
+    </dl>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>UOM</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Unit cost</th>
+            <th class="text-end">Disc %</th>
+            <th class="text-end">Tax</th>
+            <th class="text-end">Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of inv.items">
+            <td>{{ line.productSku }} — {{ line.productName }}</td>
+            <td>{{ line.uomCode || '—' }}</td>
+            <td class="text-end"><code>{{ line.quantity | qty }}</code></td>
+            <td class="text-end">
+              <code>{{ line.unitCost }}</code>
+              <span *ngIf="line.costMismatch" class="badge bg-warning text-dark ms-1" title="Differs from the purchase order line">cost≠PO</span>
+            </td>
+            <td class="text-end">
+              <code>{{ line.discountPercent }}</code>
+              <span *ngIf="line.discountMismatch" class="badge bg-warning text-dark ms-1" title="Differs from the purchase order line">disc≠PO</span>
+            </td>
+            <td class="text-end">
+              <code>{{ line.taxAmount }}</code>
+              <span *ngIf="line.taxMismatch" class="badge bg-warning text-dark ms-1" title="Differs from the purchase order line">tax≠PO</span>
+            </td>
+            <td class="text-end"><code>{{ line.lineTotal }}</code></td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="6" class="text-end">Subtotal</td>
+            <td class="text-end"><code>{{ inv.subtotal }}</code></td>
+          </tr>
+          <tr>
+            <td colspan="6" class="text-end">Discount</td>
+            <td class="text-end"><code>{{ inv.discountTotal }}</code></td>
+          </tr>
+          <tr>
+            <td colspan="6" class="text-end">Tax</td>
+            <td class="text-end"><code>{{ inv.taxTotal }}</code></td>
+          </tr>
+          <tr class="fw-bold">
+            <td colspan="6" class="text-end">Total</td>
+            <td class="text-end"><code>{{ inv.total }}</code></td>
+          </tr>
+          <tr>
+            <td colspan="6" class="text-end">Balance due</td>
+            <td class="text-end"><code>{{ inv.balanceDue }}</code></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <h6 class="mt-3 mb-2">Payments</h6>
+    <div class="table-responsive" *ngIf="payments.length; else noPurchasePayments">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="text-end">Amount</th>
+            <th>Method</th>
+            <th>Reference</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let p of payments">
+            <td>{{ p.paymentDate | date:'yyyy-MM-dd' }}</td>
+            <td class="text-end"><code>{{ p.amount }}</code></td>
+            <td>{{ paymentMethodLabel(p.paymentMethodId) }}</td>
+            <td>{{ p.reference || '—' }}</td>
+            <td>{{ p.notes || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <ng-template #noPurchasePayments>
+      <p class="text-muted small mb-0">No payments recorded yet.</p>
+    </ng-template>
+  </div>
+  <div class="modal-footer">
+    <button
+      *ngIf="canConfirm && viewing?.status === 'DRAFT'"
+      type="button"
+      class="btn btn-success me-auto"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && confirmInvoice(viewing)">
+      {{ actionId === viewing?.id ? 'Confirming…' : 'Confirm' }}
+    </button>
+    <button
+      *ngIf="viewing && canRecordPaymentFor(viewing)"
+      type="button"
+      class="btn btn-outline-info"
+      (click)="modal.close(); openRecordPayment(viewing!)">
+      Record Payment
+    </button>
+    <button
+      *ngIf="viewing && canCancelInvoice(viewing)"
+      type="button"
+      class="btn btn-outline-danger"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && cancelInvoice(viewing)">
+      {{ actionId === viewing?.id ? 'Cancelling…' : 'Cancel' }}
+    </button>
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
+
+<ng-template #paymentModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Record Payment</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="paymentForm" (ngSubmit)="submitPayment()">
+    <div class="modal-body">
+      <p class="text-muted small mb-3" *ngIf="payingInvoice">
+        Invoice <code>{{ payingInvoice.invoiceNumber }}</code> — balance due <code>{{ payingInvoice.balanceDue }}</code>
+      </p>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="ppAmount">Amount</label>
+          <input id="ppAmount" class="form-control" formControlName="amount" placeholder="500.0000" />
+          <div class="text-danger small" *ngIf="paymentForm.get('amount')?.touched && paymentForm.get('amount')?.invalid">
+            Enter a positive amount with up to 4 decimal places.
+          </div>
+          <div class="text-danger small" *ngIf="paymentForm.get('amount')?.touched && !paymentForm.get('amount')?.invalid && paymentExceedsBalance">
+            Amount cannot exceed the balance due ({{ payingInvoice?.balanceDue }}).
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="ppDate">Payment date</label>
+          <input id="ppDate" type="date" class="form-control" formControlName="paymentDate" />
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="ppMethod">Payment method</label>
+        <select id="ppMethod" class="form-select" formControlName="paymentMethodId">
+          <option value="">None</option>
+          <option *ngFor="let m of paymentMethods" [value]="m.id">{{ m.code }} — {{ m.name }}</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="ppReference">Reference</label>
+        <input id="ppReference" class="form-control" formControlName="reference" maxlength="120" />
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="ppNotes">Notes</label>
+        <input id="ppNotes" class="form-control" formControlName="notes" maxlength="500" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="paymentSaving || paymentForm.invalid || paymentExceedsBalance">
+        {{ paymentSaving ? 'Saving…' : 'Record Payment' }}
+      </button>
+    </div>
+  </form>
+</ng-template>

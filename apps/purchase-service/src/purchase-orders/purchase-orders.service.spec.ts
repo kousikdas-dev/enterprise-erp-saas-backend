@@ -170,6 +170,9 @@ describe('PurchaseOrdersService', () => {
       lineSubtotal: decimal('50'),
       lineTotal: decimal('50'),
       receivedQuantity: decimal('0'),
+      // Purchase Invoice V1 accumulator (Section 22) — added to the response
+      // alongside receivedQuantity; defaulted here like every other field.
+      invoicedQuantity: decimal('0'),
       createdAt: new Date(),
       updatedAt: new Date(),
       taxComponents: [],
