@@ -19,8 +19,7 @@ import { AppPermissions } from '../../../core/permissions/permissions.constants'
 import { PermissionService } from '../../../core/permissions/permission.service';
 import { ProductService } from '../../inventory/products/product.service';
 import { UnitService } from '../../inventory/units/unit.service';
-import { WarehouseService } from '../../inventory/warehouses/warehouse.service';
-import { Product, ProductUnit, Unit, Warehouse } from '../../inventory/models/inventory.models';
+import { Product, ProductUnit, Unit } from '../../inventory/models/inventory.models';
 import { User } from '../../administration/models/administration.models';
 import { UserService } from '../../administration/users/user.service';
 import { MasterDataOption } from '../../../shared/master-data/master-data.models';
@@ -39,6 +38,7 @@ import {
   PurchaseOrder,
   PurchaseOrderLineInput,
   Supplier,
+  SupplierAddress,
 } from '../models/purchase.models';
 import { SupplierService } from '../suppliers/supplier.service';
 import { PurchaseOrderService } from './purchase-order.service';
@@ -61,7 +61,6 @@ export class PurchaseOrderListComponent implements OnInit {
   private readonly productService = inject(ProductService);
   private readonly unitService = inject(UnitService);
   private readonly taxCodeService = inject(TaxCodeService);
-  private readonly warehouseService = inject(WarehouseService);
   private readonly userService = inject(UserService);
   private readonly masterData = inject(MasterDataService);
   private readonly fb = inject(FormBuilder);
@@ -77,10 +76,10 @@ export class PurchaseOrderListComponent implements OnInit {
 
   items: PurchaseOrder[] = [];
   suppliers: Supplier[] = [];
+  supplierAddresses: SupplierAddress[] = [];
   products: Product[] = [];
   units: Unit[] = [];
   taxCodes: TaxCode[] = [];
-  warehouses: Warehouse[] = [];
   buyers: User[] = [];
   paymentTerms: MasterDataOption[] = [];
   private readonly productUnitsByProduct = new Map<string, ProductUnit[]>();
@@ -94,6 +93,10 @@ export class PurchaseOrderListComponent implements OnInit {
   viewing: PurchaseOrder | null = null;
   pendingAction: { type: 'confirm' | 'cancel'; order: PurchaseOrder } | null = null;
   private modalRef?: NgbModalRef;
+  private pendingAddressPreselect: {
+    billingAddressId: string | null;
+    dispatchAddressId: string | null;
+  } | null = null;
 
   form = this.fb.group({
     supplierId: ['', Validators.required],
@@ -101,7 +104,8 @@ export class PurchaseOrderListComponent implements OnInit {
     expectedDeliveryDate: [''],
     buyerId: [''],
     paymentTermId: [''],
-    warehouseId: [''],
+    billingAddressId: [''],
+    dispatchAddressId: [''],
     notes: ['', Validators.maxLength(500)],
     items: this.fb.array([this.createLineGroup()]),
   });
@@ -109,6 +113,25 @@ export class PurchaseOrderListComponent implements OnInit {
   ngOnInit(): void {
     this.loadLookups();
     this.load();
+    this.form.get('supplierId')!.valueChanges.subscribe((supplierId) => {
+      const preselect = this.pendingAddressPreselect;
+      this.pendingAddressPreselect = null;
+      this.loadSupplierAddresses(supplierId ?? '', preselect ?? undefined);
+    });
+  }
+
+  /** Active BILLING addresses for the currently selected supplier, for the Billing Address dropdown. */
+  get billingAddressOptions(): SupplierAddress[] {
+    return this.supplierAddresses.filter(
+      (a) => a.type === 'BILLING' && a.isActive,
+    );
+  }
+
+  /** Active DISPATCH addresses for the currently selected supplier, for the Dispatch Address dropdown. */
+  get dispatchAddressOptions(): SupplierAddress[] {
+    return this.supplierAddresses.filter(
+      (a) => a.type === 'DISPATCH' && a.isActive,
+    );
   }
 
   get lines(): FormArray {
@@ -223,6 +246,70 @@ export class PurchaseOrderListComponent implements OnInit {
     });
   }
 
+  /**
+   * Reloads the Billing/Dispatch Address dropdowns for the given supplier.
+   * With no supplier selected, both dropdowns are cleared. `preselect` (used
+   * only when opening an existing order for edit) keeps that order's saved
+   * address ids if they're still present among the loaded addresses;
+   * otherwise — including every genuine supplier change — each dropdown
+   * falls back to that supplier's default address of the matching type.
+   */
+  private loadSupplierAddresses(
+    supplierId: string,
+    preselect?: { billingAddressId: string | null; dispatchAddressId: string | null },
+  ): void {
+    if (!supplierId) {
+      this.supplierAddresses = [];
+      this.form.patchValue(
+        { billingAddressId: '', dispatchAddressId: '' },
+        { emitEvent: false },
+      );
+      this.cdr.detectChanges();
+      return;
+    }
+    this.supplierService.listAddresses(supplierId).subscribe({
+      next: (res) => {
+        this.supplierAddresses = res.items ?? [];
+        this.applyAddressDefaults(preselect);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.supplierAddresses = [];
+        this.toast.error(apiErrorMessage(err, 'Failed to load supplier addresses'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  private applyAddressDefaults(preselect?: {
+    billingAddressId: string | null;
+    dispatchAddressId: string | null;
+  }): void {
+    const billingId = this.resolveAddressId(
+      this.billingAddressOptions,
+      preselect?.billingAddressId,
+    );
+    const dispatchId = this.resolveAddressId(
+      this.dispatchAddressOptions,
+      preselect?.dispatchAddressId,
+    );
+    this.form.patchValue(
+      { billingAddressId: billingId, dispatchAddressId: dispatchId },
+      { emitEvent: false },
+    );
+  }
+
+  private resolveAddressId(
+    options: SupplierAddress[],
+    preferredId?: string | null,
+  ): string {
+    if (preferredId && options.some((a) => a.id === preferredId)) {
+      return preferredId;
+    }
+    const fallback = options.find((a) => a.isDefault) ?? options[0];
+    return fallback?.id ?? '';
+  }
+
   /** UOM select options for a line's chosen product: base unit + active alternative units. */
   uomOptionsFor(productId: string): Array<{ id: string; label: string }> {
     const product = this.products.find((p) => p.id === productId);
@@ -258,14 +345,6 @@ export class PurchaseOrderListComponent implements OnInit {
     }
     const u = this.buyers.find((x) => x.id === id);
     return u ? `${u.firstName} ${u.lastName}`.trim() || u.email : id.slice(0, 8);
-  }
-
-  warehouseLabel(id: string | null): string {
-    if (!id) {
-      return '—';
-    }
-    const w = this.warehouses.find((x) => x.id === id);
-    return w ? `${w.code} — ${w.name}` : id.slice(0, 8);
   }
 
   paymentTermLabel(id: string | null): string {
@@ -424,16 +503,14 @@ export class PurchaseOrderListComponent implements OnInit {
       products: this.productService.list(),
       units: this.unitService.list(),
       taxCodes: this.taxCodeService.list(),
-      warehouses: this.warehouseService.list(),
       buyers: this.userService.list(),
       paymentTerms: this.masterData.paymentTerms(),
     }).subscribe({
-      next: ({ suppliers, products, units, taxCodes, warehouses, buyers, paymentTerms }) => {
+      next: ({ suppliers, products, units, taxCodes, buyers, paymentTerms }) => {
         this.suppliers = suppliers.items ?? [];
         this.products = products.items ?? [];
         this.units = units.items ?? [];
         this.taxCodes = (taxCodes.items ?? []).filter((t) => t.isActive);
-        this.warehouses = (warehouses.items ?? []).filter((w) => w.isActive);
         this.buyers = buyers.items ?? [];
         this.paymentTerms = paymentTerms.items ?? [];
         this.cdr.detectChanges();
@@ -479,13 +556,15 @@ export class PurchaseOrderListComponent implements OnInit {
       return;
     }
     this.editing = null;
+    this.pendingAddressPreselect = null;
     this.form.reset({
       supplierId: '',
       supplierReference: '',
       expectedDeliveryDate: '',
       buyerId: '',
       paymentTermId: '',
-      warehouseId: '',
+      billingAddressId: '',
+      dispatchAddressId: '',
       notes: '',
     });
     this.lines.clear();
@@ -501,6 +580,10 @@ export class PurchaseOrderListComponent implements OnInit {
       return;
     }
     this.editing = order;
+    this.pendingAddressPreselect = {
+      billingAddressId: order.supplierBillingAddressId,
+      dispatchAddressId: order.supplierDispatchAddressId,
+    };
     this.form.reset({
       supplierId: order.supplierId,
       supplierReference: order.supplierReference ?? '',
@@ -509,7 +592,8 @@ export class PurchaseOrderListComponent implements OnInit {
         : '',
       buyerId: order.buyerId ?? '',
       paymentTermId: order.paymentTermId ?? '',
-      warehouseId: order.warehouseId ?? '',
+      billingAddressId: '',
+      dispatchAddressId: '',
       notes: order.notes ?? '',
     });
     this.lines.clear();
@@ -630,7 +714,8 @@ export class PurchaseOrderListComponent implements OnInit {
     const expectedDeliveryDate = value.expectedDeliveryDate?.trim() || undefined;
     const buyerId = value.buyerId?.trim() || undefined;
     const paymentTermId = value.paymentTermId?.trim() || undefined;
-    const warehouseId = value.warehouseId?.trim() || undefined;
+    const billingAddressId = value.billingAddressId?.trim() || undefined;
+    const dispatchAddressId = value.dispatchAddressId?.trim() || undefined;
     const items: PurchaseOrderLineInput[] = rawLines.map((line) => {
       const product = this.products.find((p) => p.id === line.productId)!;
       const discountPercent = line.discountPercent?.trim() || undefined;
@@ -657,7 +742,8 @@ export class PurchaseOrderListComponent implements OnInit {
           expectedDeliveryDate,
           buyerId,
           paymentTermId,
-          warehouseId,
+          billingAddressId,
+          dispatchAddressId,
           notes,
           items,
         })
@@ -667,7 +753,8 @@ export class PurchaseOrderListComponent implements OnInit {
           expectedDeliveryDate,
           buyerId,
           paymentTermId,
-          warehouseId,
+          billingAddressId,
+          dispatchAddressId,
           notes,
           items,
         });

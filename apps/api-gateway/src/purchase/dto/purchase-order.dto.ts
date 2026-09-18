@@ -87,11 +87,21 @@ export class CreatePurchaseOrderDto {
 
   @ApiPropertyOptional({
     format: 'uuid',
-    description: 'Optional/default receiving warehouse for this order.',
+    description:
+      'Overrides the supplier default BILLING address when supplied.',
   })
   @IsOptional()
   @IsUUID()
-  warehouseId?: string;
+  billingAddressId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Overrides the supplier default DISPATCH address when supplied.',
+  })
+  @IsOptional()
+  @IsUUID()
+  dispatchAddressId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -134,10 +144,23 @@ export class UpdatePurchaseOrderDto {
   @IsUUID()
   paymentTermId?: string | null;
 
-  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Overrides the supplier default BILLING address when supplied.',
+  })
   @IsOptional()
   @IsUUID()
-  warehouseId?: string | null;
+  billingAddressId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Overrides the supplier default DISPATCH address when supplied.',
+  })
+  @IsOptional()
+  @IsUUID()
+  dispatchAddressId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -271,6 +294,12 @@ export class PurchaseOrderDto {
   supplierDispatchAddress!: string | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  supplierBillingAddressId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  supplierDispatchAddressId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
   paymentTermId!: string | null;
 
   @ApiPropertyOptional({
@@ -279,9 +308,6 @@ export class PurchaseOrderDto {
     description: 'Identity user reference — not a Master Data entity.',
   })
   buyerId!: string | null;
-
-  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
-  warehouseId!: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   supplierReference!: string | null;

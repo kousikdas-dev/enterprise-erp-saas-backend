@@ -20,9 +20,10 @@ type OrderWithItems = {
   supplierGstin: string | null;
   supplierBillingAddress: string | null;
   supplierDispatchAddress: string | null;
+  supplierBillingAddressId: string | null;
+  supplierDispatchAddressId: string | null;
   paymentTermId: string | null;
   buyerId: string | null;
-  warehouseId: string | null;
   supplierReference: string | null;
   expectedDeliveryDate: Date | null;
   notes: string | null;
@@ -84,9 +85,10 @@ export function toPurchaseOrderResponse(row: OrderWithItems) {
     supplierGstin: row.supplierGstin,
     supplierBillingAddress: row.supplierBillingAddress,
     supplierDispatchAddress: row.supplierDispatchAddress,
+    supplierBillingAddressId: row.supplierBillingAddressId,
+    supplierDispatchAddressId: row.supplierDispatchAddressId,
     paymentTermId: row.paymentTermId,
     buyerId: row.buyerId,
-    warehouseId: row.warehouseId,
     supplierReference: row.supplierReference,
     expectedDeliveryDate: row.expectedDeliveryDate,
     notes: row.notes,

@@ -69,11 +69,16 @@ export class CreatePurchaseOrderDto {
   @IsUUID()
   paymentTermId?: string;
 
-  // Optional/default receiving warehouse — informational only. The
-  // operational destination for stock remains GoodsReceipt.warehouseId.
+  // Overrides the supplier's default BILLING/DISPATCH SupplierAddress when
+  // supplied; otherwise defaults from the selected supplier's default
+  // address of that type (existing snapshotSupplier() fallback behavior).
   @IsOptional()
   @IsUUID()
-  warehouseId?: string;
+  billingAddressId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  dispatchAddressId?: string;
 
   @IsOptional()
   @IsString()
@@ -111,7 +116,11 @@ export class UpdatePurchaseOrderDto {
 
   @IsOptional()
   @IsUUID()
-  warehouseId?: string | null;
+  billingAddressId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  dispatchAddressId?: string;
 
   @IsOptional()
   @IsString()

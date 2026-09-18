@@ -21,7 +21,10 @@ import { ToastService } from '../../../shared/toast/toast.service';
 import {
   formatQuantity,
   isPositiveDecimal,
+  multiplyDecimals,
+  percentageOfDecimal,
   subtractDecimals,
+  sumDecimals,
 } from '../../../shared/utils/decimal.util';
 import { apiErrorMessage } from '../../../shared/utils/api-error.util';
 import {
@@ -163,6 +166,126 @@ export class PurchaseInvoiceListComponent implements OnInit {
     return formatQuantity(
       subtractDecimals(item.receivedQuantity, item.invoicedQuantity ?? '0'),
     );
+  }
+
+  /**
+   * Mirrors the backend formula exactly (PurchaseInvoicesService.resolveLines()):
+   * gross → discountAmount → lineSubtotal → each PO-line tax component
+   * independently → taxAmount → lineTotal. Tax structure (rate/code) is
+   * read from the backing PO line's already-resolved taxComponents, never
+   * re-resolved via AccountingTaxCodeClient and never user-selected —
+   * matches lineTaxPreview()'s own tax source exactly. Display-only — the
+   * saved invoice's response from the server is always authoritative.
+   */
+  private computeLineFinancials(line: {
+    purchaseOrderItemId: string;
+    quantity: string;
+    unitCost: string;
+    discountPercent: string;
+  }): {
+    gross: string;
+    discountAmount: string;
+    lineSubtotal: string;
+    taxAmount: string;
+    lineTotal: string;
+  } | null {
+    if (!isPositiveDecimal(line.quantity) || !isPositiveDecimal(line.unitCost)) {
+      return null;
+    }
+    const poItem = this.selectedOrder?.items.find(
+      (x) => x.id === line.purchaseOrderItemId,
+    );
+    const gross = multiplyDecimals(line.quantity, line.unitCost, 4);
+    const discountPercent = line.discountPercent?.trim() || '0';
+    const discountAmount = percentageOfDecimal(gross, discountPercent, 4);
+    const lineSubtotal = subtractDecimals(gross, discountAmount, 4);
+    const taxComponents = poItem?.taxComponents ?? [];
+    const taxAmount = sumDecimals(
+      taxComponents.map((component) =>
+        percentageOfDecimal(lineSubtotal, component.rate, 4),
+      ),
+      4,
+    );
+    const lineTotal = sumDecimals([lineSubtotal, taxAmount], 4);
+    return { gross, discountAmount, lineSubtotal, taxAmount, lineTotal };
+  }
+
+  /**
+   * Read-only tax preview for a create-form line — display only, never
+   * editable and never a source of truth. Tax is inherited exclusively from
+   * the PO line's already-resolved taxCode/taxComponents (mirrors
+   * PurchaseInvoicesService.resolveLines()'s "copied forward, never
+   * re-resolved" rule); this never calls AccountingTaxCodeClient or offers
+   * a tax selector. The amount comes from computeLineFinancials() above —
+   * the saved invoice's response is always authoritative regardless of
+   * what this preview shows.
+   */
+  lineTaxPreview(line: {
+    purchaseOrderItemId: string;
+    quantity: string;
+    unitCost: string;
+    discountPercent: string;
+  }): { hasTax: boolean; label: string; rate: string; amount: string } {
+    const poItem = this.selectedOrder?.items.find(
+      (x) => x.id === line.purchaseOrderItemId,
+    );
+    if (!poItem || !poItem.taxCodeId || poItem.taxComponents.length === 0) {
+      return { hasTax: false, label: 'No tax', rate: '', amount: '' };
+    }
+
+    const label = poItem.taxCodeName || poItem.taxCode || 'Tax';
+    const rate = sumDecimals(
+      poItem.taxComponents.map((component) => component.rate),
+      4,
+    );
+    const amounts = this.computeLineFinancials(line);
+    return { hasTax: true, label, rate, amount: amounts ? amounts.taxAmount : '—' };
+  }
+
+  /**
+   * Document-level totals preview for the create form, summed only from
+   * checked ("include") lines with a valid quantity/unit cost — mirrors
+   * PurchaseOrderListComponent.formTotalsPreview exactly (same per-line
+   * formula via computeLineFinancials() above, same sum/grand-total
+   * convention). Display-only — the saved invoice's response from the
+   * server is always authoritative.
+   */
+  get formTotalsPreview(): {
+    subtotal: string;
+    discountTotal: string;
+    taxTotal: string;
+    grandTotal: string;
+  } {
+    const grossAmounts: string[] = [];
+    const discountAmounts: string[] = [];
+    const taxAmounts: string[] = [];
+    for (const control of this.lines.controls) {
+      const v = control.value as {
+        purchaseOrderItemId: string;
+        include: boolean;
+        quantity: string;
+        unitCost: string;
+        discountPercent: string;
+      };
+      if (!v.include) {
+        continue;
+      }
+      const amounts = this.computeLineFinancials(v);
+      if (!amounts) {
+        continue;
+      }
+      grossAmounts.push(amounts.gross);
+      discountAmounts.push(amounts.discountAmount);
+      taxAmounts.push(amounts.taxAmount);
+    }
+    const subtotal = sumDecimals(grossAmounts, 4);
+    const discountTotal = sumDecimals(discountAmounts, 4);
+    const taxTotal = sumDecimals(taxAmounts, 4);
+    const grandTotal = sumDecimals(
+      [subtractDecimals(subtotal, discountTotal, 4), taxTotal],
+      4,
+    );
+    return { subtotal, discountTotal, taxTotal, grandTotal };
   }
 
   statusBadgeClass(status: string): string {

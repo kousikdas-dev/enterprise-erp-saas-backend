@@ -70,7 +70,14 @@ interface SupplierSnapshot {
   supplierGstin: string | null;
   supplierBillingAddress: string | null;
   supplierDispatchAddress: string | null;
+  supplierBillingAddressId: string | null;
+  supplierDispatchAddressId: string | null;
   paymentTermId: string | null;
+}
+
+interface ResolvedAddress {
+  id: string | null;
+  text: string | null;
 }
 
 @Injectable()
@@ -87,7 +94,12 @@ export class PurchaseOrdersService {
     dto: CreatePurchaseOrderDto,
     request?: RequestAuditMeta,
   ) {
-    const snapshot = await this.snapshotSupplier(actor, dto.supplierId);
+    const snapshot = await this.snapshotSupplier(
+      actor,
+      dto.supplierId,
+      dto.billingAddressId,
+      dto.dispatchAddressId,
+    );
     const lines = await this.mapLines(actor, dto.items);
     const totals = this.sumTotals(lines);
     const expectedDeliveryDate = dto.expectedDeliveryDate
@@ -106,9 +118,10 @@ export class PurchaseOrdersService {
             supplierGstin: snapshot.supplierGstin,
             supplierBillingAddress: snapshot.supplierBillingAddress,
             supplierDispatchAddress: snapshot.supplierDispatchAddress,
+            supplierBillingAddressId: snapshot.supplierBillingAddressId,
+            supplierDispatchAddressId: snapshot.supplierDispatchAddressId,
             paymentTermId: dto.paymentTermId ?? snapshot.paymentTermId,
             buyerId: dto.buyerId ?? null,
-            warehouseId: dto.warehouseId ?? null,
             supplierReference: dto.supplierReference?.trim() || null,
             expectedDeliveryDate,
             notes: dto.notes?.trim() || null,
@@ -174,7 +187,8 @@ export class PurchaseOrdersService {
       dto.expectedDeliveryDate === undefined &&
       dto.buyerId === undefined &&
       dto.paymentTermId === undefined &&
-      dto.warehouseId === undefined &&
+      dto.billingAddressId === undefined &&
+      dto.dispatchAddressId === undefined &&
       dto.notes === undefined &&
       dto.items === undefined
     ) {
@@ -185,8 +199,41 @@ export class PurchaseOrdersService {
     // transaction starts — mirrors SalesOrdersService.update(), which never
     // holds a DB transaction open across calls to inventory-service/accounting-service.
     const snapshot = dto.supplierId
-      ? await this.snapshotSupplier(actor, dto.supplierId)
+      ? await this.snapshotSupplier(
+          actor,
+          dto.supplierId,
+          dto.billingAddressId,
+          dto.dispatchAddressId,
+        )
       : null;
+    // Supplier not changing: an explicit address id is still resolved (and
+    // validated) against the order's existing supplier, independently per
+    // type — selecting a new billing address never touches dispatch, and
+    // vice versa. Omitted ids leave their column untouched (existing
+    // "undefined = don't update" convention), never silently re-defaulted.
+    const needsAddressLookup =
+      !snapshot &&
+      (dto.billingAddressId !== undefined ||
+        dto.dispatchAddressId !== undefined);
+    const activeAddresses = needsAddressLookup
+      ? await this.loadActiveAddresses(actor, existing.supplierId)
+      : null;
+    const billingAddress: ResolvedAddress | undefined =
+      activeAddresses && dto.billingAddressId !== undefined
+        ? this.resolveSupplierAddress(
+            activeAddresses,
+            'BILLING',
+            dto.billingAddressId,
+          )
+        : undefined;
+    const dispatchAddress: ResolvedAddress | undefined =
+      activeAddresses && dto.dispatchAddressId !== undefined
+        ? this.resolveSupplierAddress(
+            activeAddresses,
+            'DISPATCH',
+            dto.dispatchAddressId,
+          )
+        : undefined;
     const lines = dto.items ? await this.mapLines(actor, dto.items) : null;
 
     // paymentTermId: an explicit dto value always wins; otherwise it is
@@ -209,8 +256,18 @@ export class PurchaseOrdersService {
           ? new Date(dto.expectedDeliveryDate)
           : null;
     const buyerId = dto.buyerId === undefined ? undefined : dto.buyerId;
-    const warehouseId =
-      dto.warehouseId === undefined ? undefined : dto.warehouseId;
+    const supplierBillingAddress = snapshot
+      ? snapshot.supplierBillingAddress
+      : billingAddress?.text;
+    const supplierDispatchAddress = snapshot
+      ? snapshot.supplierDispatchAddress
+      : dispatchAddress?.text;
+    const supplierBillingAddressId = snapshot
+      ? snapshot.supplierBillingAddressId
+      : billingAddress?.id;
+    const supplierDispatchAddressId = snapshot
+      ? snapshot.supplierDispatchAddressId
+      : dispatchAddress?.id;
 
     const row = await this.prisma.$transaction(async (tx) => {
       if (lines) {
@@ -231,11 +288,12 @@ export class PurchaseOrdersService {
             supplierId: snapshot?.supplier.id,
             supplierName: snapshot?.supplierName,
             supplierGstin: snapshot?.supplierGstin,
-            supplierBillingAddress: snapshot?.supplierBillingAddress,
-            supplierDispatchAddress: snapshot?.supplierDispatchAddress,
+            supplierBillingAddress,
+            supplierDispatchAddress,
+            supplierBillingAddressId,
+            supplierDispatchAddressId,
             paymentTermId,
             buyerId,
-            warehouseId,
             supplierReference,
             expectedDeliveryDate,
             notes:
@@ -255,11 +313,12 @@ export class PurchaseOrdersService {
           supplierId: snapshot?.supplier.id,
           supplierName: snapshot?.supplierName,
           supplierGstin: snapshot?.supplierGstin,
-          supplierBillingAddress: snapshot?.supplierBillingAddress,
-          supplierDispatchAddress: snapshot?.supplierDispatchAddress,
+          supplierBillingAddress,
+          supplierDispatchAddress,
+          supplierBillingAddressId,
+          supplierDispatchAddressId,
           paymentTermId,
           buyerId,
-          warehouseId,
           supplierReference,
           expectedDeliveryDate,
           notes: dto.notes === undefined ? undefined : dto.notes.trim() || null,
@@ -383,32 +442,92 @@ export class PurchaseOrdersService {
   }
 
   /**
-   * Snapshots supplier name/GSTIN/payment-term and the supplier's default
-   * BILLING/DISPATCH address (formatted to text) at order create/update
-   * time. Never re-derived afterward unless supplierId itself changes.
-   * DISPATCH here is purely informational (the supplier's own shipping
-   * origin) — it is never written to GoodsReceipt.warehouseId, which
-   * remains our destination warehouse.
+   * Snapshots supplier name/GSTIN/payment-term and the BILLING/DISPATCH
+   * address (formatted to text) at order create/update time. Never
+   * re-derived afterward unless supplierId itself changes. An explicit
+   * billingAddressId/dispatchAddressId pins a specific SupplierAddress;
+   * omitted, it falls back to the supplier's default address of that type
+   * (existing behavior, unchanged). DISPATCH here is purely informational
+   * (the supplier's own shipping origin) — it is never written to
+   * GoodsReceipt.warehouseId, which remains our destination warehouse.
    */
   private async snapshotSupplier(
     actor: ActorContext,
     supplierId: string,
+    billingAddressId?: string,
+    dispatchAddressId?: string,
   ): Promise<SupplierSnapshot> {
     const supplier = await this.requireSupplier(actor, supplierId);
-    const addresses = await this.prisma.supplierAddress.findMany({
-      where: { tenantId: actor.tenantId, supplierId, isActive: true },
-      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-    });
-    const billing = addresses.find((a) => a.type === 'BILLING') ?? null;
-    const dispatch = addresses.find((a) => a.type === 'DISPATCH') ?? null;
+    const addresses = await this.loadActiveAddresses(actor, supplierId);
+    const billing = this.resolveSupplierAddress(
+      addresses,
+      'BILLING',
+      billingAddressId,
+    );
+    const dispatch = this.resolveSupplierAddress(
+      addresses,
+      'DISPATCH',
+      dispatchAddressId,
+    );
     return {
       supplier,
       supplierName: supplier.name,
       supplierGstin: supplier.gstin,
-      supplierBillingAddress: this.formatSupplierAddress(billing),
-      supplierDispatchAddress: this.formatSupplierAddress(dispatch),
+      supplierBillingAddress: billing.text,
+      supplierDispatchAddress: dispatch.text,
+      supplierBillingAddressId: billing.id,
+      supplierDispatchAddressId: dispatch.id,
       paymentTermId: supplier.paymentTermId,
     };
+  }
+
+  private async loadActiveAddresses(actor: ActorContext, supplierId: string) {
+    return this.prisma.supplierAddress.findMany({
+      where: { tenantId: actor.tenantId, supplierId, isActive: true },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  /**
+   * Resolves the SupplierAddress to snapshot for one type, from the
+   * supplier's active addresses (already tenant/supplier-scoped by
+   * loadActiveAddresses). An explicit addressId must be present in that
+   * list and match the requested type, or the request is rejected outright
+   * — it never silently falls back to a different address. With no
+   * explicit id, preserves the existing default-address behavior (the list
+   * is pre-sorted isDefault-first, then oldest; null if none exists).
+   */
+  private resolveSupplierAddress(
+    addresses: Array<{
+      id: string;
+      type: string;
+      addressLine1: string;
+      addressLine2: string | null;
+      city: string;
+      state: string | null;
+      postalCode: string | null;
+      country: string;
+    }>,
+    type: 'BILLING' | 'DISPATCH',
+    addressId?: string,
+  ): ResolvedAddress {
+    if (addressId) {
+      const match = addresses.find((a) => a.id === addressId);
+      if (!match) {
+        throw new BadRequestException(
+          `Selected ${type.toLowerCase()} address was not found for this supplier`,
+        );
+      }
+      if (match.type !== type) {
+        throw new BadRequestException(
+          `Selected address is not a ${type.toLowerCase()} address`,
+        );
+      }
+      return { id: match.id, text: this.formatSupplierAddress(match) };
+    }
+
+    const match = addresses.find((a) => a.type === type) ?? null;
+    return { id: match?.id ?? null, text: this.formatSupplierAddress(match) };
   }
 
   private formatSupplierAddress(

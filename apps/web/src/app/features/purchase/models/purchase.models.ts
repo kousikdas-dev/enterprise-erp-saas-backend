@@ -157,11 +157,11 @@ export interface PurchaseOrder {
   supplierGstin: string | null;
   supplierBillingAddress: string | null;
   supplierDispatchAddress: string | null;
+  supplierBillingAddressId: string | null;
+  supplierDispatchAddressId: string | null;
   paymentTermId: string | null;
   /** Identity user reference — not a Master Data entity. */
   buyerId: string | null;
-  /** Optional/default receiving warehouse. GoodsReceipt.warehouseId remains the operational destination. */
-  warehouseId: string | null;
   supplierReference: string | null;
   expectedDeliveryDate: string | null;
   notes: string | null;
@@ -189,7 +189,8 @@ export interface CreatePurchaseOrderRequest {
   expectedDeliveryDate?: string;
   buyerId?: string;
   paymentTermId?: string;
-  warehouseId?: string;
+  billingAddressId?: string;
+  dispatchAddressId?: string;
   notes?: string;
   items: PurchaseOrderLineInput[];
 }
@@ -200,7 +201,8 @@ export interface UpdatePurchaseOrderRequest {
   expectedDeliveryDate?: string | null;
   buyerId?: string | null;
   paymentTermId?: string | null;
-  warehouseId?: string | null;
+  billingAddressId?: string;
+  dispatchAddressId?: string;
   notes?: string;
   items?: PurchaseOrderLineInput[];
 }

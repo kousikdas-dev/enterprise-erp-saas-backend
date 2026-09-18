@@ -86,6 +86,9 @@ model SupplierAddress {
 
   supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
+  purchaseOrdersAsBilling  PurchaseOrder[] @relation("PurchaseOrderBillingAddress")
+  purchaseOrdersAsDispatch PurchaseOrder[] @relation("PurchaseOrderDispatchAddress")
+
   @@index([tenantId])
   @@index([supplierId])
   @@index([tenantId, supplierId, type])
@@ -105,17 +108,19 @@ model PurchaseOrder {
   supplierGstin           String?
   supplierBillingAddress  String?
   supplierDispatchAddress String?
+  // References to the specific SupplierAddress rows the snapshot text above
+  // was formatted from. Same-database FKs (unlike paymentTermId/buyerId
+  // below), so onDelete: SetNull keeps the frozen text intact even if the
+  // address is later removed — deleting a supplier address must never be
+  // blocked by, or corrupt, an existing purchase order.
+  supplierBillingAddressId  String? @db.Uuid
+  supplierDispatchAddressId String? @db.Uuid
   // Master-data/Identity UUIDs intentionally have no foreign keys: that data
   // belongs to separate services/databases (mirrors SalesOrder.paymentTermId
   // / SalesOrder.salespersonId). paymentTermId defaults from the supplier at
   // create time but may be explicitly overridden per order.
   paymentTermId           String? @db.Uuid
   buyerId                 String? @db.Uuid
-
-  // Optional/default receiving warehouse for this order — informational only.
-  // The operational destination for stock is always GoodsReceipt.warehouseId,
-  // which this field never overrides or replaces.
-  warehouseId String? @db.Uuid
 
   supplierReference    String?
   expectedDeliveryDate DateTime?
@@ -132,6 +137,8 @@ model PurchaseOrder {
   updatedAt DateTime @updatedAt
 
   supplier         Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  billingAddress   SupplierAddress?    @relation("PurchaseOrderBillingAddress", fields: [supplierBillingAddressId], references: [id], onDelete: SetNull)
+  dispatchAddress  SupplierAddress?    @relation("PurchaseOrderDispatchAddress", fields: [supplierDispatchAddressId], references: [id], onDelete: SetNull)
   items            PurchaseOrderItem[]
   goodsReceipts    GoodsReceipt[]
   purchaseInvoices PurchaseInvoice[]
@@ -142,7 +149,8 @@ model PurchaseOrder {
   @@index([tenantId, status])
   @@index([tenantId, paymentTermId])
   @@index([tenantId, buyerId])
-  @@index([tenantId, warehouseId])
+  @@index([tenantId, supplierBillingAddressId])
+  @@index([tenantId, supplierDispatchAddressId])
   @@map("purchase_orders")
 }
 

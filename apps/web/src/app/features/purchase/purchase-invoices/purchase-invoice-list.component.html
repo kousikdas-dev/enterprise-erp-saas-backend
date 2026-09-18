@@ -141,6 +141,7 @@
                 <th style="min-width: 110px;">Qty to bill</th>
                 <th style="min-width: 110px;">Unit cost</th>
                 <th style="min-width: 90px;">Disc %</th>
+                <th style="min-width: 130px;">Tax</th>
                 <th>Receipt line (optional)</th>
               </tr>
             </thead>
@@ -171,6 +172,15 @@
                   <input class="form-control form-control-sm" formControlName="discountPercent" />
                 </td>
                 <td>
+                  <ng-container *ngIf="lineTaxPreview(line.value) as tax">
+                    <span *ngIf="!tax.hasTax" class="text-muted">No tax</span>
+                    <div *ngIf="tax.hasTax">
+                      <div class="small text-muted">{{ tax.label }} ({{ tax.rate }}%)</div>
+                      <code>{{ tax.amount }}</code>
+                    </div>
+                  </ng-container>
+                </td>
+                <td>
                   <select class="form-select form-select-sm" formControlName="goodsReceiptItemId">
                     <option value="">Not tied to one receipt</option>
                     <option
@@ -187,10 +197,33 @@
         <div class="form-text" *ngIf="lines.length === 0">
           No received-but-unbilled quantity on this purchase order.
         </div>
+        <div class="d-flex justify-content-end mb-2" *ngIf="lines.length">
+          <table class="table table-sm table-borderless mb-0" style="max-width: 320px;">
+            <tbody>
+              <tr>
+                <td>Subtotal</td>
+                <td class="text-end"><code>{{ formTotalsPreview.subtotal }}</code></td>
+              </tr>
+              <tr>
+                <td>Discount total</td>
+                <td class="text-end"><code>{{ formTotalsPreview.discountTotal }}</code></td>
+              </tr>
+              <tr>
+                <td>Tax total</td>
+                <td class="text-end"><code>{{ formTotalsPreview.taxTotal }}</code></td>
+              </tr>
+              <tr>
+                <td><strong>Grand total</strong></td>
+                <td class="text-end"><code><strong>{{ formTotalsPreview.grandTotal }}</strong></code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div class="alert alert-info small mb-0">
           Quantities are entered in each line's own unit of measure. Cost/tax/discount that differ
           from the purchase order line are matching information only — they are never silently
-          overwritten, and totals are always recomputed server-side.
+          overwritten, and totals shown above are display-only previews; the backend computes and
+          returns the authoritative amounts on save.
         </div>
       </div>
 

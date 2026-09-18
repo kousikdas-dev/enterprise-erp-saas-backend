@@ -34,10 +34,15 @@ describe('PurchaseOrdersService', () => {
     };
   }
 
+  const billingAddressId = '44444444-4444-4444-8444-444444444444';
+  const dispatchAddressId = '55555555-5555-4555-8555-555555555555';
+  const altBillingAddressId = '66666666-6666-4666-8aaa-666666666666';
+
   function mockSupplierAddresses(overrides: Array<Record<string, unknown>> = []) {
     if (overrides.length > 0) return overrides;
     return [
       {
+        id: billingAddressId,
         type: 'BILLING',
         addressLine1: '1 Bill St',
         addressLine2: null,
@@ -48,6 +53,7 @@ describe('PurchaseOrdersService', () => {
         isDefault: true,
       },
       {
+        id: dispatchAddressId,
         type: 'DISPATCH',
         addressLine1: '2 Dispatch Rd',
         addressLine2: null,
@@ -56,6 +62,17 @@ describe('PurchaseOrdersService', () => {
         postalCode: '60601',
         country: 'US',
         isDefault: true,
+      },
+      {
+        id: altBillingAddressId,
+        type: 'BILLING',
+        addressLine1: '9 Alt Ave',
+        addressLine2: null,
+        city: 'Metropolis',
+        state: 'NY',
+        postalCode: '20002',
+        country: 'US',
+        isDefault: false,
       },
     ];
   }
@@ -191,9 +208,10 @@ describe('PurchaseOrdersService', () => {
       supplierGstin: '22AAAAA0000A1Z5',
       supplierBillingAddress: '1 Bill St, Springfield, IL, 10001, US',
       supplierDispatchAddress: '2 Dispatch Rd, Chicago, IL, 60601, US',
+      supplierBillingAddressId: billingAddressId,
+      supplierDispatchAddressId: dispatchAddressId,
       paymentTermId: '66666666-6666-4666-8666-666666666666',
       buyerId: null,
-      warehouseId: null,
       supplierReference: null,
       expectedDeliveryDate: null,
       notes: null,
@@ -530,9 +548,8 @@ describe('PurchaseOrdersService', () => {
       expect(create).toHaveBeenCalledTimes(5);
     });
 
-    it('persists supplierReference, expectedDeliveryDate, buyerId and warehouseId', async () => {
+    it('persists supplierReference, expectedDeliveryDate and buyerId', async () => {
       const buyerId = 'f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1';
-      const warehouseId = 'a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2';
       const prisma = basePrisma({
         purchaseOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
       });
@@ -543,7 +560,6 @@ describe('PurchaseOrdersService', () => {
         supplierReference: ' Quote #123 ',
         expectedDeliveryDate: '2026-10-01',
         buyerId,
-        warehouseId,
         items: [baseItemInput()],
       });
 
@@ -552,7 +568,6 @@ describe('PurchaseOrdersService', () => {
       expect(data.supplierReference).toBe('Quote #123');
       expect(data.expectedDeliveryDate).toEqual(new Date('2026-10-01'));
       expect(data.buyerId).toBe(buyerId);
-      expect(data.warehouseId).toBe(warehouseId);
     });
 
     it('defaults paymentTermId from the supplier when not explicitly provided', async () => {
@@ -623,7 +638,6 @@ describe('PurchaseOrdersService', () => {
       const data = updateMock.mock.calls[0][0].data;
       expect(data.supplierReference).toBeUndefined();
       expect(data.buyerId).toBeUndefined();
-      expect(data.warehouseId).toBeUndefined();
       expect(data.expectedDeliveryDate).toBeUndefined();
     });
 
@@ -647,6 +661,170 @@ describe('PurchaseOrdersService', () => {
       const data = updateMock.mock.calls[0][0].data;
       expect(data.buyerId).toBeNull();
       expect(data.expectedDeliveryDate).toBeNull();
+    });
+  });
+
+  describe('billing/dispatch address selection', () => {
+    it('persists an explicitly selected billing/dispatch address id and its formatted text snapshot', async () => {
+      const prisma = basePrisma({
+        purchaseOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+      });
+      const service = createService({ prisma });
+
+      await service.create(actor, {
+        supplierId,
+        billingAddressId: altBillingAddressId,
+        dispatchAddressId,
+        items: [baseItemInput()],
+      });
+
+      const data = (prisma.purchaseOrder.create as jest.Mock).mock.calls[0][0]
+        .data;
+      expect(data.supplierBillingAddressId).toBe(altBillingAddressId);
+      expect(data.supplierBillingAddress).toBe(
+        '9 Alt Ave, Metropolis, NY, 20002, US',
+      );
+      expect(data.supplierDispatchAddressId).toBe(dispatchAddressId);
+      expect(data.supplierDispatchAddress).toBe(
+        '2 Dispatch Rd, Chicago, IL, 60601, US',
+      );
+    });
+
+    it('falls back to the supplier default address when no id is supplied', async () => {
+      const prisma = basePrisma({
+        purchaseOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+      });
+      const service = createService({ prisma });
+
+      await service.create(actor, { supplierId, items: [baseItemInput()] });
+
+      const data = (prisma.purchaseOrder.create as jest.Mock).mock.calls[0][0]
+        .data;
+      expect(data.supplierBillingAddressId).toBe(billingAddressId);
+      expect(data.supplierDispatchAddressId).toBe(dispatchAddressId);
+    });
+
+    it('rejects an address id that does not belong to the selected supplier', async () => {
+      const prisma = basePrisma({
+        purchaseOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+      });
+      const service = createService({ prisma });
+
+      await expect(
+        service.create(actor, {
+          supplierId,
+          billingAddressId: '77777777-7777-4777-8777-777777777777',
+          items: [baseItemInput()],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects an address id whose type does not match the requested slot', async () => {
+      const prisma = basePrisma({
+        purchaseOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+      });
+      const service = createService({ prisma });
+
+      await expect(
+        service.create(actor, {
+          supplierId,
+          // billingAddressId is a real address for this supplier, but it's
+          // a DISPATCH address, not BILLING.
+          billingAddressId: dispatchAddressId,
+          items: [baseItemInput()],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('on update, an explicit billingAddressId is validated against the existing supplier and leaves dispatch untouched', async () => {
+      const updateMock = jest.fn().mockResolvedValue(orderRow());
+      const tx = { purchaseOrder: { update: updateMock } };
+      const prisma = basePrisma({
+        purchaseOrder: {
+          findFirst: jest.fn().mockResolvedValue(orderRow()),
+          update: updateMock,
+        },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      });
+      const service = createService({ prisma });
+
+      await service.update(actor, 'po1', {
+        billingAddressId: altBillingAddressId,
+      });
+
+      const data = updateMock.mock.calls[0][0].data;
+      expect(data.supplierBillingAddressId).toBe(altBillingAddressId);
+      expect(data.supplierBillingAddress).toBe(
+        '9 Alt Ave, Metropolis, NY, 20002, US',
+      );
+      expect(data.supplierDispatchAddressId).toBeUndefined();
+      expect(data.supplierDispatchAddress).toBeUndefined();
+      expect(prisma.supplierAddress.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ supplierId }),
+        }),
+      );
+    });
+
+    it('on update, both addresses are re-derived from the new supplier when supplierId changes and no explicit id is given', async () => {
+      const newSupplierId = 'e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2';
+      const updateMock = jest.fn().mockResolvedValue(orderRow());
+      const tx = { purchaseOrder: { update: updateMock } };
+      const prisma = basePrisma({
+        supplier: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue(mockSupplier({ id: newSupplierId, name: 'New Co' })),
+        },
+        purchaseOrder: {
+          findFirst: jest.fn().mockResolvedValue(orderRow()),
+          update: updateMock,
+        },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      });
+      const service = createService({ prisma });
+
+      await service.update(actor, 'po1', { supplierId: newSupplierId });
+
+      const data = updateMock.mock.calls[0][0].data;
+      expect(data.supplierBillingAddressId).toBe(billingAddressId);
+      expect(data.supplierDispatchAddressId).toBe(dispatchAddressId);
+    });
+
+    it('on update, an untouched address field is left alone when only notes change', async () => {
+      const updateMock = jest.fn().mockResolvedValue(orderRow());
+      const tx = { purchaseOrder: { update: updateMock } };
+      const prisma = basePrisma({
+        purchaseOrder: {
+          findFirst: jest.fn().mockResolvedValue(orderRow()),
+          update: updateMock,
+        },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      });
+      const service = createService({ prisma });
+
+      await service.update(actor, 'po1', { notes: 'updated' });
+
+      const data = updateMock.mock.calls[0][0].data;
+      expect(data.supplierBillingAddressId).toBeUndefined();
+      expect(data.supplierDispatchAddressId).toBeUndefined();
+      expect(data.supplierBillingAddress).toBeUndefined();
+      expect(data.supplierDispatchAddress).toBeUndefined();
+    });
+
+    it('rejects an update address id that does not belong to the order supplier', async () => {
+      const prisma = basePrisma({
+        purchaseOrder: {
+          findFirst: jest.fn().mockResolvedValue(orderRow()),
+        },
+      });
+      const service = createService({ prisma });
+
+      await expect(
+        service.update(actor, 'po1', {
+          dispatchAddressId: '77777777-7777-4777-8777-777777777777',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

@@ -129,10 +129,29 @@
           </select>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="poWarehouse">Receiving Warehouse</label>
-          <select id="poWarehouse" class="form-select" formControlName="warehouseId">
-            <option value="">Not set</option>
-            <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+          <label class="form-label" for="poBillingAddress">Billing Address</label>
+          <select
+            id="poBillingAddress"
+            class="form-select"
+            formControlName="billingAddressId"
+            [disabled]="!billingAddressOptions.length">
+            <option value="">{{ billingAddressOptions.length ? 'Select billing address…' : 'No billing address on file' }}</option>
+            <option *ngFor="let a of billingAddressOptions" [value]="a.id">
+              {{ a.name }} — {{ a.addressLine1 }}, {{ a.city }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="poDispatchAddress">Dispatch Address</label>
+          <select
+            id="poDispatchAddress"
+            class="form-select"
+            formControlName="dispatchAddressId"
+            [disabled]="!dispatchAddressOptions.length">
+            <option value="">{{ dispatchAddressOptions.length ? 'Select dispatch address…' : 'No dispatch address on file' }}</option>
+            <option *ngFor="let a of dispatchAddressOptions" [value]="a.id">
+              {{ a.name }} — {{ a.addressLine1 }}, {{ a.city }}{{ a.isDefault ? ' (Default)' : '' }}
+            </option>
           </select>
         </div>
         <div class="col-md-6 mb-3">
@@ -141,10 +160,10 @@
         </div>
       </div>
       <div class="form-text mb-3">
-        Supplier name, GSTIN, payment terms (unless overridden above) and billing/dispatch addresses
-        are snapshotted from the selected supplier automatically and shown on the order detail view.
-        Receiving Warehouse here is informational only — the actual Goods Receipt still selects its
-        own destination warehouse.
+        Supplier name, GSTIN and payment terms (unless overridden above) are snapshotted from the
+        selected supplier automatically. Billing/Dispatch Address default to the supplier's default
+        address of each type but can be overridden above; the chosen address is frozen as text on
+        the order and shown on the order detail view.
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -278,7 +297,6 @@
       <dt class="col-sm-4">Expected Delivery</dt><dd class="col-sm-8">{{ o.expectedDeliveryDate ? (o.expectedDeliveryDate | slice:0:10) : '—' }}</dd>
       <dt class="col-sm-4">Buyer / Purchaser</dt><dd class="col-sm-8">{{ buyerLabel(o.buyerId) }}</dd>
       <dt class="col-sm-4">Payment Terms</dt><dd class="col-sm-8">{{ paymentTermLabel(o.paymentTermId) }}</dd>
-      <dt class="col-sm-4">Receiving Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(o.warehouseId) }}</dd>
       <dt class="col-sm-4">GSTIN</dt><dd class="col-sm-8">{{ o.supplierGstin || '—' }}</dd>
       <dt class="col-sm-4">Billing address</dt><dd class="col-sm-8">{{ o.supplierBillingAddress || '—' }}</dd>
       <dt class="col-sm-4">Dispatch address</dt><dd class="col-sm-8">{{ o.supplierDispatchAddress || '—' }}</dd>
