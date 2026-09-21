@@ -19,7 +19,11 @@ import { ActorContext } from '../auth/actor-context';
 import { SalesEnvironmentVariables } from '../config/sales-env';
 
 export type JournalPostingRole =
-  'SALES_REVENUE' | 'ACCOUNTS_RECEIVABLE' | 'OUTPUT_TAX' | 'PAYMENT_METHOD';
+  | 'SALES_REVENUE'
+  | 'ACCOUNTS_RECEIVABLE'
+  | 'OUTPUT_TAX'
+  | 'PAYMENT_METHOD'
+  | 'SALES_DISCOUNT';
 
 export interface JournalPostingLineRequest {
   role: JournalPostingRole;

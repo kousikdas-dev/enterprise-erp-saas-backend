@@ -176,7 +176,8 @@ export type AccountMappingPurpose =
   | 'PAYMENT_METHOD'
   | 'SALES_REVENUE'
   | 'ACCOUNTS_RECEIVABLE'
-  | 'OUTPUT_TAX';
+  | 'OUTPUT_TAX'
+  | 'SALES_DISCOUNT';
 
 export interface AccountMapping {
   id: string;

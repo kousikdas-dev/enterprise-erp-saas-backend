@@ -8,6 +8,7 @@ const PURPOSES = [
   'SALES_REVENUE',
   'ACCOUNTS_RECEIVABLE',
   'OUTPUT_TAX',
+  'SALES_DISCOUNT',
 ] as const;
 
 export type AccountMappingPurposeInput = (typeof PURPOSES)[number];
@@ -20,8 +21,8 @@ export class CreateAccountMappingDto {
   // per-entity PAYMENT_METHOD purpose — the id of the master-data
   // PaymentMethod this mapping is for. Must be omitted for every tenant-wide
   // singleton purpose (PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX/
-  // SALES_REVENUE/ACCOUNTS_RECEIVABLE/OUTPUT_TAX), which always resolve at
-  // externalRefId = "".
+  // SALES_REVENUE/ACCOUNTS_RECEIVABLE/OUTPUT_TAX/SALES_DISCOUNT), which
+  // always resolve at externalRefId = "".
   @IsOptional()
   @IsString()
   @MaxLength(64)

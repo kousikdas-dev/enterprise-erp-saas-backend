@@ -900,6 +900,16 @@ export class SalesInvoicesService {
     return toSalesInvoiceResponse(invoice);
   }
 
+  /**
+   * SALES_REVENUE is credited at the gross subtotal; any invoice-level
+   * discount is tracked separately as its own contra-revenue line
+   * (SALES_DISCOUNT, debited) rather than netted directly into
+   * SALES_REVENUE — approved ERP/accounting convention (Sales Accounting
+   * Integration follow-up). Balance holds regardless of which optional
+   * lines fire: total = subtotal - discountTotal + taxTotal, so
+   * discountTotal + total (debits) always equals subtotal + taxTotal
+   * (credits).
+   */
   private buildInvoicePostingRequest(
     invoice: InvoicePostingSource,
   ): CreateJournalPostingRequest {
@@ -907,9 +917,16 @@ export class SalesInvoicesService {
       {
         role: 'SALES_REVENUE',
         side: 'CREDIT',
-        amount: moneyToString(invoice.subtotal.minus(invoice.discountTotal)),
+        amount: moneyToString(invoice.subtotal),
       },
     ];
+    if (invoice.discountTotal.gt(0)) {
+      lines.push({
+        role: 'SALES_DISCOUNT',
+        side: 'DEBIT',
+        amount: moneyToString(invoice.discountTotal),
+      });
+    }
     if (invoice.taxTotal.gt(0)) {
       lines.push({
         role: 'OUTPUT_TAX',

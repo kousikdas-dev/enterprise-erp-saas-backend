@@ -30,6 +30,7 @@ const SINGLETON_PURPOSES: ReadonlySet<AccountMappingPurpose> = new Set([
   AccountMappingPurpose.SALES_REVENUE,
   AccountMappingPurpose.ACCOUNTS_RECEIVABLE,
   AccountMappingPurpose.OUTPUT_TAX,
+  AccountMappingPurpose.SALES_DISCOUNT,
 ]);
 
 export interface ResolvedMappingAccount {

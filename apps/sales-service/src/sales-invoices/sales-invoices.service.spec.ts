@@ -1699,7 +1699,7 @@ describe('SalesInvoicesService', () => {
       expect(result.journalEntryId).toBe('je-1');
     });
 
-    it('S2. send() credits Sales Revenue net of discount (subtotal - discountTotal), not the gross subtotal', async () => {
+    it('S2. send() with a discount posts Cr Sales Revenue at the gross subtotal and a separate Dr Sales Discount line (contra-revenue), never netted into Sales Revenue', async () => {
       const draftRow = fullInvoiceHeader({
         status: SalesInvoiceStatus.DRAFT,
         items: [{ id: 'item1' }],
@@ -1726,11 +1726,85 @@ describe('SalesInvoicesService', () => {
         actor,
         expect.objectContaining({
           lines: [
-            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '90.0000' }),
+            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' }),
+            expect.objectContaining({ role: 'SALES_DISCOUNT', side: 'DEBIT', amount: '10.0000' }),
             expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '90.0000' }),
           ],
         }),
       );
+    });
+
+    it('S2b. send() with discount AND tax posts four balanced lines: Cr Sales Revenue (gross) + Dr Sales Discount + Cr Output Tax = Dr Accounts Receivable', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(100),
+        discountTotal: new Prisma.Decimal(10),
+        taxTotal: new Prisma.Decimal(18),
+        total: new Prisma.Decimal(108),
+      });
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(draftRow),
+          update: jest.fn().mockResolvedValue({ ...draftRow, status: SalesInvoiceStatus.SENT, items: [] }),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-2b', entryNumber: 'JE-00000002', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '108.0000', totalCredit: '108.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      await service.send(actor, 'inv1');
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' }),
+            expect.objectContaining({ role: 'SALES_DISCOUNT', side: 'DEBIT', amount: '10.0000' }),
+            expect.objectContaining({ role: 'OUTPUT_TAX', side: 'CREDIT', amount: '18.0000' }),
+            expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '108.0000' }),
+          ],
+        }),
+      );
+
+      const lines = postMock.mock.calls[0][1].lines as Array<{ side: string; amount: string }>;
+      expect(lines).toHaveLength(4);
+      const debitTotal = lines
+        .filter((l) => l.side === 'DEBIT')
+        .reduce((sum, l) => sum + Number(l.amount), 0);
+      const creditTotal = lines
+        .filter((l) => l.side === 'CREDIT')
+        .reduce((sum, l) => sum + Number(l.amount), 0);
+      expect(debitTotal).toBe(creditTotal);
+    });
+
+    it('S2c. send() omits the SALES_DISCOUNT line entirely when discountTotal is zero (no zero-value discount line)', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(100),
+        total: new Prisma.Decimal(100),
+      });
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(draftRow),
+          update: jest.fn().mockResolvedValue({ ...draftRow, status: SalesInvoiceStatus.SENT, items: [] }),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-2c', entryNumber: 'JE-00000002', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '100.0000', totalCredit: '100.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      await service.send(actor, 'inv1');
+
+      const lines = postMock.mock.calls[0][1].lines as Array<{ role: string }>;
+      expect(lines.some((l) => l.role === 'SALES_DISCOUNT')).toBe(false);
     });
 
     it('S3. send() omits the OUTPUT_TAX line entirely when taxTotal is zero', async () => {
@@ -1864,6 +1938,44 @@ describe('SalesInvoicesService', () => {
       expect(result.journalEntryId).toBe('je-retry');
     });
 
+    it('S7b. retryAccountingPosting() on a FAILED invoice that has a discount still includes the SALES_DISCOUNT line in the retried posting request', async () => {
+      const discountInvoice = fullInvoiceHeader({
+        accountingPostingStatus: SalesInvoicePostingStatus.FAILED,
+        subtotal: new Prisma.Decimal(100),
+        discountTotal: new Prisma.Decimal(10),
+        total: new Prisma.Decimal(90),
+      });
+      const existingPrisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(discountInvoice),
+          update: jest.fn(({ data }: any) =>
+            Promise.resolve({ ...discountInvoice, ...data }),
+          ),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-retry-discount', entryNumber: 'JE-00000021', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '90.0000', totalCredit: '90.0000',
+      });
+      const service = buildSendService(existingPrisma, makeAccountingJournal({ post: postMock }));
+
+      const result = await service.retryAccountingPosting(actor, 'inv1');
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' }),
+            expect.objectContaining({ role: 'SALES_DISCOUNT', side: 'DEBIT', amount: '10.0000' }),
+            expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '90.0000' }),
+          ],
+        }),
+      );
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('je-retry-discount');
+    });
+
     it('S8. calling retryAccountingPosting() on an already-POSTED invoice never calls accounting-service again (idempotent)', async () => {
       const alreadyPosted = fullInvoiceHeader({
         accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
@@ -1941,6 +2053,40 @@ describe('SalesInvoicesService', () => {
       expect(result.status).toBe(SalesInvoiceStatus.CANCELLED);
       expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.REVERSED);
       expect(result.reversalJournalEntryId).toBe('je-reversal');
+    });
+
+    it('S9b. cancel() on a POSTED invoice that had a discount reverses correctly — the reversal call carries no line detail at all, since accounting-service mirrors whatever lines (including SALES_DISCOUNT) were actually persisted on the original journal, not whatever Sales resends', async () => {
+      const sentRow = fullInvoiceHeader({
+        accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
+        journalEntryId: 'je-original-with-discount',
+        subtotal: new Prisma.Decimal(100),
+        discountTotal: new Prisma.Decimal(10),
+        total: new Prisma.Decimal(90),
+      });
+      const cancelledRow = { ...sentRow, status: SalesInvoiceStatus.CANCELLED };
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(sentRow),
+          update: jest.fn(({ data }: any) => Promise.resolve({ ...cancelledRow, ...data })),
+        },
+      };
+      const reverseMock = jest.fn().mockResolvedValue({
+        id: 'je-reversal-discount', entryNumber: 'JE-00000012', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE_CANCELLATION', sourceId: 'inv1',
+        reversesJournalEntryId: 'je-original-with-discount', idempotentReplay: false, totalDebit: '5.0000', totalCredit: '5.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+      const result = await service.cancel(actor, 'inv1');
+
+      // No `lines` in the reversal request at all — attemptInvoiceReversal()
+      // never rebuilds/resends line content; accounting-service reverses
+      // whatever lines the ORIGINAL journal actually has (including
+      // SALES_DISCOUNT), read back from its own persisted JournalEntry.
+      const reverseArgs = reverseMock.mock.calls[0][1];
+      expect(reverseArgs.lines).toBeUndefined();
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.REVERSED);
+      expect(result.reversalJournalEntryId).toBe('je-reversal-discount');
     });
 
     it('S10. cancel() succeeds even when the accounting reversal fails: invoice is CANCELLED, accountingPostingStatus stays POSTED for reconciliation', async () => {

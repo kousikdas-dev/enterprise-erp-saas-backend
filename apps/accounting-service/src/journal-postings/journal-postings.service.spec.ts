@@ -12,6 +12,7 @@ describe('JournalPostingsService', () => {
   const inactiveAccount = { id: 'acc-inactive', code: '9999', name: 'Old', isActive: false };
   const revenueAccount = { id: 'acc-revenue', code: '4000', name: 'Sales Revenue', isActive: true };
   const arAccount = { id: 'acc-ar', code: '1200', name: 'Accounts Receivable', isActive: true };
+  const salesDiscountAccount = { id: 'acc-sales-discount', code: '4002', name: 'Sales Discounts', isActive: true };
 
   function decimal(value: string) {
     return new Prisma.Decimal(value);
@@ -79,6 +80,7 @@ describe('JournalPostingsService', () => {
       SALES_REVENUE: revenueAccount,
       ACCOUNTS_RECEIVABLE: arAccount,
       OUTPUT_TAX: revenueAccount,
+      SALES_DISCOUNT: salesDiscountAccount,
     };
     const mappings = {
       resolve:
@@ -386,6 +388,103 @@ describe('JournalPostingsService', () => {
         decimal('0'),
       );
       expect(totalDebit.equals(totalCredit)).toBe(true);
+    });
+
+    it('posts a balanced Sales Invoice entry with a discount using SALES_DISCOUNT (contra-revenue, debited) alongside SALES_REVENUE/OUTPUT_TAX/ACCOUNTS_RECEIVABLE, then reverses every line including SALES_DISCOUNT with debit/credit swapped', async () => {
+      const originalLines = [
+        { id: 'l1', lineNumber: 1, accountId: revenueAccount.id, account: revenueAccount, debitAmount: decimal('0'), creditAmount: decimal('100.0000'), description: null },
+        { id: 'l2', lineNumber: 2, accountId: salesDiscountAccount.id, account: salesDiscountAccount, debitAmount: decimal('10.0000'), creditAmount: decimal('0'), description: null },
+        { id: 'l3', lineNumber: 3, accountId: revenueAccount.id, account: revenueAccount, debitAmount: decimal('0'), creditAmount: decimal('18.0000'), description: null },
+        { id: 'l4', lineNumber: 4, accountId: arAccount.id, account: arAccount, debitAmount: decimal('108.0000'), creditAmount: decimal('0'), description: null },
+      ];
+      const originalEntry = makeEntryRow({
+        id: 'je-discount-original',
+        sourceService: 'sales-service',
+        sourceType: 'SALES_INVOICE',
+        sourceId: 'sinv-discount',
+        lines: originalLines,
+      });
+      const { service, prisma, mappings } = buildService({
+        journalEntry: { create: jest.fn().mockResolvedValue(originalEntry) },
+      });
+
+      const result = await service.create(actor, {
+        sourceService: 'sales-service',
+        sourceType: 'SALES_INVOICE',
+        sourceId: 'sinv-discount',
+        lines: [
+          { role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' },
+          { role: 'SALES_DISCOUNT', side: 'DEBIT', amount: '10.0000' },
+          { role: 'OUTPUT_TAX', side: 'CREDIT', amount: '18.0000' },
+          { role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '108.0000' },
+        ],
+      });
+
+      expect(result.status).toBe('POSTED');
+      expect(mappings.resolve).toHaveBeenCalledWith(actor, 'SALES_DISCOUNT', '');
+      const data = (prisma.journalEntry.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.lines.create).toHaveLength(4);
+      const totalDebit = data.lines.create.reduce(
+        (sum: Prisma.Decimal, l: { debitAmount: Prisma.Decimal }) => sum.plus(l.debitAmount),
+        decimal('0'),
+      );
+      const totalCredit = data.lines.create.reduce(
+        (sum: Prisma.Decimal, l: { creditAmount: Prisma.Decimal }) => sum.plus(l.creditAmount),
+        decimal('0'),
+      );
+      expect(totalDebit.equals(totalCredit)).toBe(true);
+
+      // Now reverse it — the generic reverse() engine (unchanged) must swap
+      // EVERY original line, including the SALES_DISCOUNT one, with no
+      // special-casing required.
+      const reversalCreate = jest.fn().mockImplementation(({ data: reversalData }) =>
+        Promise.resolve(
+          makeEntryRow({
+            id: 'je-discount-reversal',
+            sourceService: 'sales-service',
+            sourceType: 'SALES_INVOICE_CANCELLATION',
+            sourceId: 'sinv-discount',
+            reversesJournalEntryId: 'je-discount-original',
+            lines: reversalData.lines.create,
+          }),
+        ),
+      );
+      const { service: reverseService } = buildService({
+        journalEntry: {
+          // First call: look up the original (found). Second call: check
+          // for an already-existing reversal (none) — reverse() makes both
+          // lookups before deciding whether to create.
+          findFirst: jest.fn().mockResolvedValueOnce(originalEntry).mockResolvedValueOnce(null),
+          create: reversalCreate,
+        },
+      });
+
+      const reversed = await reverseService.reverse(actor, {
+        sourceService: 'sales-service',
+        sourceType: 'SALES_INVOICE',
+        sourceId: 'sinv-discount',
+        reversalSourceType: 'SALES_INVOICE_CANCELLATION',
+      });
+
+      expect(reversed.status).toBe('POSTED');
+      const reversalLines = reversalCreate.mock.calls[0][0].data.lines.create as Array<{
+        accountId: string;
+        debitAmount: Prisma.Decimal;
+        creditAmount: Prisma.Decimal;
+      }>;
+      expect(reversalLines).toHaveLength(4);
+      // Every original line comes back with debit/credit exactly swapped,
+      // on the SAME account — including the SALES_DISCOUNT line (l2:
+      // originally Dr 10 -> reversal Cr 10).
+      for (const [index, original] of originalLines.entries()) {
+        expect(reversalLines[index].accountId).toBe(original.accountId);
+        expect(reversalLines[index].debitAmount.equals(original.creditAmount)).toBe(true);
+        expect(reversalLines[index].creditAmount.equals(original.debitAmount)).toBe(true);
+      }
+      const discountReversalLine = reversalLines[1];
+      expect(discountReversalLine.accountId).toBe(salesDiscountAccount.id);
+      expect(discountReversalLine.creditAmount.equals(decimal('10.0000'))).toBe(true);
+      expect(discountReversalLine.debitAmount.equals(decimal('0'))).toBe(true);
     });
 
     it('posts a balanced Customer Payment entry: Dr PAYMENT_METHOD / Cr ACCOUNTS_RECEIVABLE', async () => {

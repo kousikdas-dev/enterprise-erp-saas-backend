@@ -300,6 +300,9 @@ describe('AccountMappingsService', () => {
       ['SALES_REVENUE', revenueAccount],
       ['ACCOUNTS_RECEIVABLE', arAccount],
       ['OUTPUT_TAX', arAccount],
+      // Contra-revenue purpose, mapped to a Revenue-type account by
+      // convention (no separate CONTRA_REVENUE AccountType).
+      ['SALES_DISCOUNT', revenueAccount],
     ] as const)(
       'accepts %s as a new tenant-wide singleton purpose, created at externalRefId = ""',
       async (purpose, account) => {
@@ -328,7 +331,7 @@ describe('AccountMappingsService', () => {
       },
     );
 
-    it.each(['SALES_REVENUE', 'ACCOUNTS_RECEIVABLE', 'OUTPUT_TAX'] as const)(
+    it.each(['SALES_REVENUE', 'ACCOUNTS_RECEIVABLE', 'OUTPUT_TAX', 'SALES_DISCOUNT'] as const)(
       'rejects %s (a singleton purpose) when externalRefId is supplied — singleton validation extends to the new Sales purposes',
       async (purpose) => {
         const { service } = buildServiceWithSalesAccounts();
@@ -349,7 +352,7 @@ describe('AccountMappingsService', () => {
       ).rejects.toBeInstanceOf(BadRequestException); // still requires externalRefId
     });
 
-    it.each(['SALES_REVENUE', 'ACCOUNTS_RECEIVABLE', 'OUTPUT_TAX'] as const)(
+    it.each(['SALES_REVENUE', 'ACCOUNTS_RECEIVABLE', 'OUTPUT_TAX', 'SALES_DISCOUNT'] as const)(
       'resolve() resolves a configured %s mapping (role resolution)',
       async (purpose) => {
         const { service, prisma } = buildServiceWithSalesAccounts({

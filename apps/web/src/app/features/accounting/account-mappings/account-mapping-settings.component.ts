@@ -56,6 +56,11 @@ const SINGLETON_PURPOSES: Array<{
     label: 'Output tax',
     hint: 'Credited for the tax portion of a posted sales invoice.',
   },
+  {
+    purpose: 'SALES_DISCOUNT',
+    label: 'Sales discount',
+    hint: 'Debited for the invoice-level discount of a posted sales invoice (contra-revenue; use a Revenue-type account).',
+  },
 ];
 
 interface SingletonRow {
