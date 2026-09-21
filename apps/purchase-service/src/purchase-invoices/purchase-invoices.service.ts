@@ -2,14 +2,21 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   Prisma,
   PurchaseInvoicePaymentStatus,
+  PurchaseInvoicePostingStatus,
   PurchaseInvoiceStatus,
   PurchaseOrderStatus,
+  SupplierPaymentPostingStatus,
 } from '../../generated/prisma-client';
+import {
+  AccountingJournalClient,
+  CreateJournalPostingRequest,
+} from '../accounting/accounting-journal.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
 import {
@@ -121,11 +128,34 @@ const RECEIVABLE_PO_STATUSES: PurchaseOrderStatus[] = [
   PurchaseOrderStatus.RECEIVED,
 ];
 
+const ACCOUNTING_SOURCE_SERVICE = 'purchase-service';
+
+/** Minimal shape needed to build a Purchase Invoice's accounting posting request. */
+interface InvoicePostingSource {
+  id: string;
+  invoiceNumber: string;
+  supplierName: string;
+  subtotal: Prisma.Decimal;
+  discountTotal: Prisma.Decimal;
+  taxTotal: Prisma.Decimal;
+  total: Prisma.Decimal;
+}
+
+/** Minimal shape needed to build a Supplier Payment's accounting posting request. */
+interface PaymentPostingSource {
+  id: string;
+  amount: Prisma.Decimal;
+  paymentMethodId: string | null;
+}
+
 @Injectable()
 export class PurchaseInvoicesService {
+  private readonly logger = new Logger(PurchaseInvoicesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: IdentityAuditClient,
+    private readonly accountingJournal: AccountingJournalClient,
   ) {}
 
   async create(
@@ -447,7 +477,15 @@ export class PurchaseInvoicesService {
       },
       request,
     });
-    return this.toResponse(actor, posted);
+
+    // Post-commit, best-effort (Phase C1/C2): accounting-service is a
+    // separate database, so this is never attempted inside the transaction
+    // above. A failure here never fails confirm() itself — the invoice is
+    // already, correctly, CONFIRMED regardless of accounting's availability;
+    // only accountingPostingStatus reflects the outcome, retryable via
+    // retryAccountingPosting().
+    const { invoice: finalRow } = await this.attemptInvoicePosting(actor, posted, request);
+    return this.toResponse(actor, finalRow);
   }
 
   /**
@@ -563,7 +601,32 @@ export class PurchaseInvoicesService {
       metadata: { purchaseOrderId: posted.purchaseOrderId, previousStatus },
       request,
     });
-    return this.toResponse(actor, posted);
+
+    // Cancellation itself is already committed and correct at this point,
+    // independent of everything below (approved Phase C1/C2 design).
+    //
+    // - accountingPostingStatus POSTED (a journal really was posted): the
+    //   only case with anything to reverse — attempt it, post-commit,
+    //   best-effort (a failure here never fails cancel(); it just leaves
+    //   accountingPostingStatus at POSTED for later manual reconciliation).
+    // - NOT_POSTED or FAILED: there is no posted journal to reverse — do
+    //   nothing accounting-side, leave the status exactly as it was. This
+    //   is the explicit branch correction 3 requires: never attempt a
+    //   reversal against a journal that was never successfully created.
+    let finalRow = posted;
+    if (
+      posted.accountingPostingStatus === PurchaseInvoicePostingStatus.POSTED &&
+      posted.journalEntryId
+    ) {
+      const { invoice: reversed } = await this.attemptInvoiceReversal(
+        actor,
+        posted,
+        request,
+      );
+      finalRow = reversed;
+    }
+
+    return this.toResponse(actor, finalRow);
   }
 
   /**
@@ -659,8 +722,18 @@ export class PurchaseInvoicesService {
       request,
     });
 
+    // Post-commit, best-effort — identical rationale to confirm() above.
+    // SupplierPayment has no retry endpoint of its own in this phase (it
+    // simply stays FAILED, matching its existing "no reversal/cancellation"
+    // limitation) — this is its one and only posting attempt.
+    const { payment: finalPayment } = await this.attemptPaymentPosting(
+      actor,
+      payment,
+      request,
+    );
+
     return {
-      payment: toSupplierPaymentResponse(payment),
+      payment: toSupplierPaymentResponse(finalPayment),
       invoice: await this.toResponse(actor, invoice),
     };
   }
@@ -674,6 +747,114 @@ export class PurchaseInvoicesService {
     return { items: rows.map(toSupplierPaymentResponse) };
   }
 
+  /**
+   * Manual retry for a purchase invoice whose accounting posting is
+   * currently FAILED (or was never attempted). Rejected once the invoice is
+   * CANCELLED — posting a fresh journal for a cancelled invoice would create
+   * a real payable for a document the business no longer considers open,
+   * closing the race where a stale/queued retry lands after cancellation.
+   * Already-POSTED is a no-op (never calls accounting-service again) rather
+   * than an error — retrying an already-successful posting is harmless.
+   * Unlike confirm()'s post-commit best-effort call, a failure here is
+   * surfaced to the caller: retrying IS the primary action being requested.
+   */
+  async retryAccountingPosting(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+
+    if (existing.status === PurchaseInvoiceStatus.CANCELLED) {
+      throw new ConflictException(
+        'Cannot post accounting for a cancelled purchase invoice',
+      );
+    }
+
+    if (existing.accountingPostingStatus === PurchaseInvoicePostingStatus.POSTED) {
+      return this.toResponse(actor, existing);
+    }
+
+    const { invoice, error } = await this.attemptInvoicePosting(
+      actor,
+      existing,
+      request,
+    );
+    if (error) {
+      throw error;
+    }
+
+    await this.audit.record({
+      actor,
+      action: 'purchase-invoice.accounting-posting-retried',
+      resource: 'purchase-invoice',
+      resourceId: invoice.id,
+      metadata: { journalEntryId: invoice.journalEntryId },
+      request,
+    });
+
+    return this.toResponse(actor, invoice);
+  }
+
+  /**
+   * Manual retry for a CANCELLED purchase invoice whose accounting reversal
+   * (attempted post-commit inside cancel()) failed. Only meaningful once
+   * cancelled — rejected otherwise. Distinguishes two CANCELLED states:
+   * accountingPostingStatus POSTED (a journal really was posted and never
+   * got reversed — the only case with anything to retry) vs. FAILED/
+   * NOT_POSTED (there was never a posted journal to reverse in the first
+   * place — a 409, not a silent no-op, since retrying that would be
+   * meaningless). Already-REVERSED is a harmless no-op, never re-calling
+   * accounting-service. Like retryAccountingPosting(), a renewed failure is
+   * surfaced to the caller — retrying IS the primary action requested.
+   */
+  async retryAccountingReversal(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+
+    if (existing.status !== PurchaseInvoiceStatus.CANCELLED) {
+      throw new ConflictException(
+        'Only a CANCELLED purchase invoice can have its accounting reversal retried',
+      );
+    }
+
+    if (existing.accountingPostingStatus === PurchaseInvoicePostingStatus.REVERSED) {
+      return this.toResponse(actor, existing);
+    }
+
+    if (
+      existing.accountingPostingStatus !== PurchaseInvoicePostingStatus.POSTED ||
+      !existing.journalEntryId
+    ) {
+      throw new ConflictException(
+        'This purchase invoice has no posted accounting journal to reverse',
+      );
+    }
+
+    const { invoice, error } = await this.attemptInvoiceReversal(
+      actor,
+      existing,
+      request,
+    );
+    if (error) {
+      throw error;
+    }
+
+    await this.audit.record({
+      actor,
+      action: 'purchase-invoice.accounting-reversal-retried',
+      resource: 'purchase-invoice',
+      resourceId: invoice.id,
+      metadata: { reversalJournalEntryId: invoice.reversalJournalEntryId },
+      request,
+    });
+
+    return this.toResponse(actor, invoice);
+  }
+
   private async require(actor: ActorContext, id: string) {
     const row = await this.prisma.purchaseInvoice.findFirst({
       where: { id, tenantId: actor.tenantId },
@@ -681,6 +862,245 @@ export class PurchaseInvoicesService {
     });
     if (!row) throw new NotFoundException('Purchase invoice not found');
     return row;
+  }
+
+  private buildInvoicePostingRequest(
+    invoice: InvoicePostingSource,
+  ): CreateJournalPostingRequest {
+    const lines: CreateJournalPostingRequest['lines'] = [
+      {
+        role: 'PURCHASE_EXPENSE',
+        side: 'DEBIT',
+        amount: moneyToString(invoice.subtotal.minus(invoice.discountTotal)),
+      },
+    ];
+    if (invoice.taxTotal.gt(0)) {
+      lines.push({
+        role: 'INPUT_TAX',
+        side: 'DEBIT',
+        amount: moneyToString(invoice.taxTotal),
+      });
+    }
+    lines.push({
+      role: 'ACCOUNTS_PAYABLE',
+      side: 'CREDIT',
+      amount: moneyToString(invoice.total),
+    });
+
+    return {
+      sourceService: ACCOUNTING_SOURCE_SERVICE,
+      sourceType: 'PURCHASE_INVOICE',
+      sourceId: invoice.id,
+      description: `${invoice.invoiceNumber} — ${invoice.supplierName}`,
+      lines,
+    };
+  }
+
+  /**
+   * Attempts to post (or idempotently replay) this invoice's accounting
+   * journal and persists the outcome as a Purchase-side cache — never
+   * throws: the caller decides whether a failure should be surfaced
+   * (retryAccountingPosting does; confirm()'s post-commit call does not).
+   */
+  private async attemptInvoicePosting(
+    actor: ActorContext,
+    invoice: InvoicePostingSource,
+    request?: RequestAuditMeta,
+  ) {
+    try {
+      const result = await this.accountingJournal.post(
+        actor,
+        this.buildInvoicePostingRequest(invoice),
+      );
+      const updated = await this.prisma.purchaseInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          accountingPostingStatus: PurchaseInvoicePostingStatus.POSTED,
+          journalEntryId: result.id,
+        },
+        include: INVOICE_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'purchase-invoice.accounting-posted',
+        resource: 'purchase-invoice',
+        resourceId: invoice.id,
+        metadata: {
+          journalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { invoice: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to post accounting journal for purchase invoice ${invoice.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      try {
+        await this.prisma.purchaseInvoice.update({
+          where: { id: invoice.id },
+          data: { accountingPostingStatus: PurchaseInvoicePostingStatus.FAILED },
+        });
+      } catch (updateError) {
+        this.logger.error(
+          `Failed to record FAILED accounting posting status for purchase invoice ${invoice.id}`,
+          updateError instanceof Error ? updateError.stack : undefined,
+        );
+      }
+      const refreshed = await this.require(actor, invoice.id);
+      return { invoice: refreshed, error };
+    }
+  }
+
+  /**
+   * Attempts to reverse (or idempotently replay the reversal of) this
+   * invoice's already-POSTED accounting journal. The original journal entry
+   * is never touched by this call — it is looked up read-only inside
+   * accounting-service and stays POSTED permanently (approved design: no
+   * VOID). On failure, accountingPostingStatus is deliberately left at
+   * POSTED (nothing to update) rather than introduced a new failure state —
+   * there is no dedicated retry-reversal endpoint in this phase.
+   */
+  private async attemptInvoiceReversal(
+    actor: ActorContext,
+    invoice: { id: string; invoiceNumber: string },
+    request?: RequestAuditMeta,
+  ) {
+    try {
+      const result = await this.accountingJournal.reverse(actor, {
+        sourceService: ACCOUNTING_SOURCE_SERVICE,
+        sourceType: 'PURCHASE_INVOICE',
+        sourceId: invoice.id,
+        reversalSourceType: 'PURCHASE_INVOICE_CANCELLATION',
+        description: `Cancellation of ${invoice.invoiceNumber}`,
+      });
+      const updated = await this.prisma.purchaseInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          accountingPostingStatus: PurchaseInvoicePostingStatus.REVERSED,
+          reversalJournalEntryId: result.id,
+        },
+        include: INVOICE_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'purchase-invoice.accounting-reversed',
+        resource: 'purchase-invoice',
+        resourceId: invoice.id,
+        metadata: {
+          reversalJournalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { invoice: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse accounting journal for cancelled purchase invoice ${invoice.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      const refreshed = await this.require(actor, invoice.id);
+      return { invoice: refreshed, error };
+    }
+  }
+
+  private buildPaymentPostingRequest(
+    payment: PaymentPostingSource,
+  ): CreateJournalPostingRequest | null {
+    if (!payment.paymentMethodId) {
+      return null;
+    }
+    return {
+      sourceService: ACCOUNTING_SOURCE_SERVICE,
+      sourceType: 'SUPPLIER_PAYMENT',
+      sourceId: payment.id,
+      lines: [
+        {
+          role: 'ACCOUNTS_PAYABLE',
+          side: 'DEBIT',
+          amount: moneyToString(payment.amount),
+        },
+        {
+          role: 'PAYMENT_METHOD',
+          side: 'CREDIT',
+          amount: moneyToString(payment.amount),
+          paymentMethodId: payment.paymentMethodId,
+        },
+      ],
+    };
+  }
+
+  /**
+   * Same post-commit, never-throws contract as attemptInvoicePosting(). A
+   * payment with no paymentMethodId can never resolve a GL account (no
+   * fallback exists for PAYMENT_METHOD — approved design), so it is marked
+   * FAILED directly without even calling accounting-service.
+   */
+  private async attemptPaymentPosting(
+    actor: ActorContext,
+    payment: PaymentPostingSource,
+    request?: RequestAuditMeta,
+  ) {
+    const postingRequest = this.buildPaymentPostingRequest(payment);
+    if (!postingRequest) {
+      this.logger.warn(
+        `Supplier payment ${payment.id} has no paymentMethodId — cannot resolve a GL account; marking accounting posting FAILED without calling accounting-service`,
+      );
+      const updated = await this.prisma.supplierPayment.update({
+        where: { id: payment.id },
+        data: { accountingPostingStatus: SupplierPaymentPostingStatus.FAILED },
+      });
+      return {
+        payment: updated,
+        error: new Error(
+          'Supplier payment has no paymentMethodId — cannot resolve a GL account',
+        ) as unknown,
+      };
+    }
+
+    try {
+      const result = await this.accountingJournal.post(actor, postingRequest);
+      const updated = await this.prisma.supplierPayment.update({
+        where: { id: payment.id },
+        data: {
+          accountingPostingStatus: SupplierPaymentPostingStatus.POSTED,
+          journalEntryId: result.id,
+        },
+      });
+      await this.audit.record({
+        actor,
+        action: 'supplier-payment.accounting-posted',
+        resource: 'supplier-payment',
+        resourceId: payment.id,
+        metadata: {
+          journalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { payment: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to post accounting journal for supplier payment ${payment.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      let updated = await this.prisma.supplierPayment.findFirstOrThrow({
+        where: { id: payment.id },
+      });
+      try {
+        updated = await this.prisma.supplierPayment.update({
+          where: { id: payment.id },
+          data: { accountingPostingStatus: SupplierPaymentPostingStatus.FAILED },
+        });
+      } catch (updateError) {
+        this.logger.error(
+          `Failed to record FAILED accounting posting status for supplier payment ${payment.id}`,
+          updateError instanceof Error ? updateError.stack : undefined,
+        );
+      }
+      return { payment: updated, error };
+    }
   }
 
   /**

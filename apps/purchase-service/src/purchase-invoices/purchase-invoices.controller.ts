@@ -76,6 +76,32 @@ export class PurchaseInvoicesController {
     return this.invoices.cancel(actor, id, requestAuditMeta(request));
   }
 
+  @Post(':id/retry-accounting-posting')
+  retryAccountingPosting(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.invoices.retryAccountingPosting(
+      actor,
+      id,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  retryAccountingReversal(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.invoices.retryAccountingReversal(
+      actor,
+      id,
+      requestAuditMeta(request),
+    );
+  }
+
   @Post(':id/payments')
   recordPayment(
     @CurrentActor() actor: ActorContext,

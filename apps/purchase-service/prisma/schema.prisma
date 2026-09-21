@@ -292,8 +292,18 @@ model GoodsReceiptItem {
 // ============================================================================
 // Purchase Invoice V1 (PURCHASE_MODULE_PLAN.md Section 22, Phase A) and
 // Supplier Payment V1 (Section 22.9-22.10, Phase B).
-// Operational-only: no accounting/journal posting, no AP, no currency, no
-// payment reversal/cancellation. See Section 22 for the full architecture.
+// No currency, no payment reversal/cancellation. See Section 22 for the
+// full architecture.
+//
+// Phase C1/C2 (Purchase Accounting Integration): confirm()/recordPayment()
+// post a journal entry to accounting-service after their own transaction
+// commits (never inside it — accounting-service is a separate database, no
+// distributed transaction is attempted); cancel() reverses that journal
+// only when one was actually POSTED. accountingPostingStatus/journalEntryId
+// (/reversalJournalEntryId on PurchaseInvoice only) are Purchase-side
+// caches of accounting-service's own state — the authoritative idempotency
+// guard is accounting-service's own unique constraint on
+// (tenantId, sourceService, sourceType, sourceId), never these columns.
 // ============================================================================
 
 enum PurchaseInvoiceStatus {
@@ -306,6 +316,24 @@ enum PurchaseInvoicePaymentStatus {
   UNPAID
   PARTIALLY_PAID
   PAID
+}
+
+// PurchaseInvoice posting can additionally be REVERSED (via cancel() after
+// a POSTED journal existed) — SupplierPayment has no reversal path in this
+// phase (mirrors the existing "no payment reversal" limitation), so its own
+// posting-status enum below is deliberately narrower (no REVERSED value is
+// representable for it).
+enum PurchaseInvoicePostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
+enum SupplierPaymentPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
 }
 
 model PurchaseInvoice {
@@ -343,6 +371,14 @@ model PurchaseInvoice {
   confirmedAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  // Phase C1/C2 — Purchase-side cache of accounting-service's own posting
+  // state (see the model-group comment above). No foreign key: accounting_db
+  // is a separate database, mirrors every other cross-service soft reference
+  // in this schema (e.g. paymentTermId above).
+  accountingPostingStatus PurchaseInvoicePostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                      @db.Uuid
+  reversalJournalEntryId  String?                      @db.Uuid
 
   purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   items         PurchaseInvoiceItem[]
@@ -433,7 +469,9 @@ model PurchaseInvoiceItemTaxComponent {
 // Supplier Payment V1 (Section 22.9-22.10, Phase B) — a payment recorded
 // against a CONFIRMED PurchaseInvoice's balance. Child resource of
 // PurchaseInvoice (mirrors SalesPayment's relationship to SalesInvoice
-// exactly); no reversal/cancellation endpoint, no AP, no accounting posting.
+// exactly); no reversal/cancellation endpoint (Phase C1/C2 posting mirrors
+// that: a FAILED posting simply has no retry endpoint of its own here,
+// unlike PurchaseInvoice — see the Purchase Invoice model-group comment).
 model SupplierPayment {
   id                String   @id @default(uuid()) @db.Uuid
   tenantId          String   @db.Uuid
@@ -447,6 +485,13 @@ model SupplierPayment {
   paymentMethodId   String?  @db.Uuid
   reference         String?
   notes             String?
+
+  // Phase C1/C2 — Purchase-side cache of accounting-service's own posting
+  // state. No reversalJournalEntryId here: SupplierPayment has no reversal
+  // path in this phase (see model-group comment above PurchaseInvoice).
+  accountingPostingStatus SupplierPaymentPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                      @db.Uuid
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

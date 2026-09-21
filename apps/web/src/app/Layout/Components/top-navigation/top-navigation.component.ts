@@ -61,6 +61,7 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
         { label: 'Chart of Accounts', route: '/accounting/accounts' },
         { label: 'Journal Entries', route: '/accounting/journal-entries' },
         { label: 'Tax Master', route: '/accounting/tax-codes' },
+        { label: 'Account Mappings', route: '/accounting/account-mappings' },
       ]
     },
     {

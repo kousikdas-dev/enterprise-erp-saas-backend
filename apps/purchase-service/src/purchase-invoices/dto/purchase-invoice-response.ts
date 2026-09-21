@@ -1,6 +1,7 @@
 import {
   Prisma,
   PurchaseInvoicePaymentStatus,
+  PurchaseInvoicePostingStatus,
   PurchaseInvoiceStatus,
 } from '../../../generated/prisma-client';
 import { moneyToString, quantityToString } from '../../common/decimal';
@@ -36,6 +37,9 @@ type InvoiceWithItems = {
   amountPaid: Prisma.Decimal;
   paymentStatus: PurchaseInvoicePaymentStatus;
   confirmedAt: Date | null;
+  accountingPostingStatus: PurchaseInvoicePostingStatus;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
   createdAt: Date;
   updatedAt: Date;
   items: Array<{
@@ -115,6 +119,9 @@ export function toPurchaseInvoiceResponse(
     balanceDue: moneyToString(balanceDue),
     paymentStatus: row.paymentStatus,
     confirmedAt: row.confirmedAt,
+    accountingPostingStatus: row.accountingPostingStatus,
+    journalEntryId: row.journalEntryId,
+    reversalJournalEntryId: row.reversalJournalEntryId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     items: row.items.map((item) => {
@@ -169,4 +176,8 @@ export function toPurchaseInvoiceResponse(
   };
 }
 
-export { PurchaseInvoiceStatus, PurchaseInvoicePaymentStatus };
+export {
+  PurchaseInvoiceStatus,
+  PurchaseInvoicePaymentStatus,
+  PurchaseInvoicePostingStatus,
+};

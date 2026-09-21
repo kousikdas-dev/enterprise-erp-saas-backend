@@ -1,0 +1,98 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Account Mappings</div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+      Refresh
+    </button>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Maps purchase-invoice accounting purposes to chart-of-accounts entries. These mappings are
+      required before a purchase invoice can be posted to accounting — there is no fallback account.
+      <span *ngIf="readOnly"> You have read-only access to this screen.</span>
+    </p>
+
+    <app-list-state [loading]="loading" [error]="error" [empty]="false" (retry)="load()">
+      <h6 class="mb-2">Tenant-wide mappings</h6>
+      <div class="table-responsive mb-4">
+        <table class="align-middle mb-0 table table-borderless table-striped">
+          <thead>
+            <tr>
+              <th>Purpose</th>
+              <th>Account</th>
+              <th style="min-width: 260px;">Mapped account</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of singletonRows">
+              <td>
+                <div>{{ row.label }}</div>
+                <div class="text-muted small">{{ row.hint }}</div>
+              </td>
+              <td>
+                <span *ngIf="row.mapping; else notMappedSingleton" class="badge bg-success">
+                  {{ accountLabel(row.mapping.accountId) }}
+                </span>
+                <ng-template #notMappedSingleton>
+                  <span class="badge bg-warning text-dark">Not configured</span>
+                </ng-template>
+              </td>
+              <td>
+                <select
+                  class="form-select form-select-sm"
+                  [disabled]="!canEditRow(row.mapping) || busyKey === rowKey(row.purpose, '')"
+                  [ngModel]="row.selectedAccountId"
+                  (ngModelChange)="onSingletonAccountChange(row, $event)">
+                  <option value="">— Not mapped —</option>
+                  <option *ngFor="let a of accounts" [value]="a.id">{{ a.code }} — {{ a.name }}</option>
+                </select>
+                <div class="form-text" *ngIf="busyKey === rowKey(row.purpose, '')">Saving…</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h6 class="mb-2">Payment method mappings</h6>
+      <p class="text-muted small" *ngIf="!paymentMethodRows.length">
+        No active payment methods found. Create one under Master Data to map it here.
+      </p>
+      <div class="table-responsive" *ngIf="paymentMethodRows.length">
+        <table class="align-middle mb-0 table table-borderless table-striped">
+          <thead>
+            <tr>
+              <th>Payment method</th>
+              <th>Account</th>
+              <th style="min-width: 260px;">Mapped account</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of paymentMethodRows">
+              <td>{{ row.paymentMethod.code }} — {{ row.paymentMethod.name }}</td>
+              <td>
+                <span *ngIf="row.mapping; else notMappedPm" class="badge bg-success">
+                  {{ accountLabel(row.mapping.accountId) }}
+                </span>
+                <ng-template #notMappedPm>
+                  <span class="badge bg-warning text-dark">Not configured</span>
+                </ng-template>
+              </td>
+              <td>
+                <select
+                  class="form-select form-select-sm"
+                  [disabled]="!canEditRow(row.mapping) || busyKey === rowKey('PAYMENT_METHOD', row.paymentMethod.id)"
+                  [ngModel]="row.selectedAccountId"
+                  (ngModelChange)="onPaymentMethodAccountChange(row, $event)">
+                  <option value="">— Not mapped —</option>
+                  <option *ngFor="let a of accounts" [value]="a.id">{{ a.code }} — {{ a.name }}</option>
+                </select>
+                <div class="form-text" *ngIf="busyKey === rowKey('PAYMENT_METHOD', row.paymentMethod.id)">Saving…</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>

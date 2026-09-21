@@ -92,6 +92,10 @@ export const AppPermissions = {
   TAX_CODES_CREATE: 'tax-codes.create',
   TAX_CODES_READ: 'tax-codes.read',
   TAX_CODES_UPDATE: 'tax-codes.update',
+  ACCOUNT_MAPPINGS_CREATE: 'account-mappings.create',
+  ACCOUNT_MAPPINGS_READ: 'account-mappings.read',
+  ACCOUNT_MAPPINGS_UPDATE: 'account-mappings.update',
+  ACCOUNT_MAPPINGS_DELETE: 'account-mappings.delete',
 } as const;
 
 export type AppPermission =

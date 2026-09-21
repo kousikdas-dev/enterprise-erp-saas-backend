@@ -168,3 +168,35 @@ export interface UpdateTaxCodeRequest {
 export interface UpdateTaxCodeStatusRequest {
   isActive: boolean;
 }
+
+export type AccountMappingPurpose =
+  | 'PURCHASE_EXPENSE'
+  | 'ACCOUNTS_PAYABLE'
+  | 'INPUT_TAX'
+  | 'PAYMENT_METHOD';
+
+export interface AccountMapping {
+  id: string;
+  tenantId: string;
+  purpose: AccountMappingPurpose;
+  /** "" for the tenant-wide purposes; the master-data PaymentMethod id for PAYMENT_METHOD. */
+  externalRefId: string;
+  accountId: string;
+  account: AccountParent | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountMappingList {
+  items: AccountMapping[];
+}
+
+export interface CreateAccountMappingRequest {
+  purpose: AccountMappingPurpose;
+  externalRefId?: string;
+  accountId: string;
+}
+
+export interface UpdateAccountMappingRequest {
+  accountId: string;
+}

@@ -252,6 +252,7 @@ export interface ItemList<T> {
 
 export type PurchaseInvoiceStatus = 'DRAFT' | 'CONFIRMED' | 'CANCELLED';
 export type PurchaseInvoicePaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+export type PurchaseInvoicePostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
 
 export interface PurchaseInvoiceItemTaxComponent {
   id: string;
@@ -317,6 +318,10 @@ export interface PurchaseInvoice {
   balanceDue: string;
   paymentStatus: PurchaseInvoicePaymentStatus | string;
   confirmedAt: string | null;
+  /** Accounting journal posting state — no fallback account, so this can legitimately sit at FAILED until retried. */
+  accountingPostingStatus: PurchaseInvoicePostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
   createdAt: string;
   updatedAt: string;
   items: PurchaseInvoiceItem[];

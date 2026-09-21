@@ -39,6 +39,18 @@ export class PurchaseInvoiceService {
     return this.api.post<PurchaseInvoice>(`/api/v1/purchase-invoices/${id}/cancel`);
   }
 
+  retryAccountingPosting(id: string): Observable<PurchaseInvoice> {
+    return this.api.post<PurchaseInvoice>(
+      `/api/v1/purchase-invoices/${id}/retry-accounting-posting`,
+    );
+  }
+
+  retryAccountingReversal(id: string): Observable<PurchaseInvoice> {
+    return this.api.post<PurchaseInvoice>(
+      `/api/v1/purchase-invoices/${id}/retry-accounting-reversal`,
+    );
+  }
+
   recordPayment(
     id: string,
     body: CreateSupplierPaymentRequest,

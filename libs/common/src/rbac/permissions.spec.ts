@@ -34,6 +34,10 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.TAX_CODES_CREATE).toBe('tax-codes.create');
     expect(PERMISSIONS.TAX_CODES_READ).toBe('tax-codes.read');
     expect(PERMISSIONS.TAX_CODES_UPDATE).toBe('tax-codes.update');
+    expect(PERMISSIONS.ACCOUNT_MAPPINGS_CREATE).toBe('account-mappings.create');
+    expect(PERMISSIONS.ACCOUNT_MAPPINGS_READ).toBe('account-mappings.read');
+    expect(PERMISSIONS.ACCOUNT_MAPPINGS_UPDATE).toBe('account-mappings.update');
+    expect(PERMISSIONS.ACCOUNT_MAPPINGS_DELETE).toBe('account-mappings.delete');
   });
 
   it('allows when all required permissions are owned', () => {

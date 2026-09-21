@@ -305,6 +305,42 @@ export class PurchaseInvoiceListComponent implements OnInit {
     }
   }
 
+  postingStatusBadgeClass(status: string): string {
+    switch (status) {
+      case 'POSTED':
+        return 'bg-success';
+      case 'FAILED':
+        return 'bg-danger';
+      case 'REVERSED':
+        return 'bg-secondary';
+      default:
+        return 'bg-light text-dark border'; // NOT_POSTED
+    }
+  }
+
+  /** A failed original posting can be retried as long as the invoice hasn't been cancelled — mirrors retryAccountingPosting()'s own guard. */
+  canRetryPosting(item: PurchaseInvoice): boolean {
+    return (
+      this.canConfirm &&
+      item.status !== 'CANCELLED' &&
+      item.accountingPostingStatus === 'FAILED'
+    );
+  }
+
+  /**
+   * A cancelled invoice whose post-cancel reversal attempt failed stays at
+   * accountingPostingStatus POSTED (never FAILED — see
+   * PurchaseInvoicesService.cancel()'s reconciliation note), so that exact
+   * combination is what's retryable here — mirrors retryAccountingReversal()'s guard.
+   */
+  canRetryReversal(item: PurchaseInvoice): boolean {
+    return (
+      this.canCancel &&
+      item.status === 'CANCELLED' &&
+      item.accountingPostingStatus === 'POSTED'
+    );
+  }
+
   paymentMethodLabel(id: string | null): string {
     if (!id) {
       return '—';
@@ -565,6 +601,56 @@ export class PurchaseInvoiceListComponent implements OnInit {
       error: (err) => {
         this.actionId = null;
         this.toast.error(apiErrorMessage(err, 'Cancellation failed'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  retryAccountingPosting(invoice: PurchaseInvoice): void {
+    if (!this.canRetryPosting(invoice) || this.actionId) {
+      return;
+    }
+    this.actionId = invoice.id;
+    this.cdr.detectChanges();
+    this.invoices.retryAccountingPosting(invoice.id).subscribe({
+      next: (updated) => {
+        this.actionId = null;
+        const ok = updated.accountingPostingStatus === 'POSTED';
+        this.toast[ok ? 'success' : 'error'](
+          ok ? 'Accounting posting succeeded' : 'Accounting posting failed again',
+        );
+        this.viewing = updated;
+        this.load();
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.actionId = null;
+        this.toast.error(apiErrorMessage(err, 'Retry accounting posting failed'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  retryAccountingReversal(invoice: PurchaseInvoice): void {
+    if (!this.canRetryReversal(invoice) || this.actionId) {
+      return;
+    }
+    this.actionId = invoice.id;
+    this.cdr.detectChanges();
+    this.invoices.retryAccountingReversal(invoice.id).subscribe({
+      next: (updated) => {
+        this.actionId = null;
+        const ok = updated.accountingPostingStatus === 'REVERSED';
+        this.toast[ok ? 'success' : 'error'](
+          ok ? 'Accounting reversal succeeded' : 'Accounting reversal failed again',
+        );
+        this.viewing = updated;
+        this.load();
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.actionId = null;
+        this.toast.error(apiErrorMessage(err, 'Retry accounting reversal failed'));
         this.cdr.detectChanges();
       },
     });

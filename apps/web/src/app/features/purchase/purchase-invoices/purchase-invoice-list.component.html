@@ -42,6 +42,7 @@
               <th class="text-end">Total</th>
               <th class="text-end">Balance due</th>
               <th class="text-center">Payment</th>
+              <th class="text-center">Accounting</th>
               <th class="text-end">Actions</th>
             </tr>
           </thead>
@@ -58,6 +59,11 @@
               <td class="text-end"><code>{{ inv.balanceDue }}</code></td>
               <td class="text-center">
                 <span class="badge" [ngClass]="paymentStatusBadgeClass(inv.paymentStatus)">{{ inv.paymentStatus }}</span>
+              </td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="postingStatusBadgeClass(inv.accountingPostingStatus)">
+                  {{ inv.accountingPostingStatus }}
+                </span>
               </td>
               <td class="text-end text-nowrap">
                 <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(inv)">
@@ -81,10 +87,28 @@
                 <button
                   *ngIf="canCancelInvoice(inv)"
                   type="button"
-                  class="btn btn-sm btn-outline-danger"
+                  class="btn btn-sm btn-outline-danger me-1"
                   [disabled]="actionId === inv.id"
                   (click)="cancelInvoice(inv)">
                   {{ actionId === inv.id ? 'Cancelling…' : 'Cancel' }}
+                </button>
+                <button
+                  *ngIf="canRetryPosting(inv)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  [disabled]="actionId === inv.id"
+                  title="The original accounting posting failed — retry it"
+                  (click)="retryAccountingPosting(inv)">
+                  {{ actionId === inv.id ? 'Retrying…' : 'Retry Posting' }}
+                </button>
+                <button
+                  *ngIf="canRetryReversal(inv)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning"
+                  [disabled]="actionId === inv.id"
+                  title="The accounting reversal for this cancelled invoice failed — retry it"
+                  (click)="retryAccountingReversal(inv)">
+                  {{ actionId === inv.id ? 'Retrying…' : 'Retry Reversal' }}
                 </button>
               </td>
             </tr>
@@ -262,6 +286,12 @@
       <dd class="col-sm-8">
         <span class="badge" [ngClass]="paymentStatusBadgeClass(inv.paymentStatus)">{{ inv.paymentStatus }}</span>
       </dd>
+      <dt class="col-sm-4">Accounting</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="postingStatusBadgeClass(inv.accountingPostingStatus)">
+          {{ inv.accountingPostingStatus }}
+        </span>
+      </dd>
     </dl>
     <div class="table-responsive">
       <table class="table table-sm">
@@ -371,6 +401,22 @@
       [disabled]="actionId === viewing?.id"
       (click)="viewing && cancelInvoice(viewing)">
       {{ actionId === viewing?.id ? 'Cancelling…' : 'Cancel' }}
+    </button>
+    <button
+      *ngIf="viewing && canRetryPosting(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && retryAccountingPosting(viewing)">
+      {{ actionId === viewing?.id ? 'Retrying…' : 'Retry Posting' }}
+    </button>
+    <button
+      *ngIf="viewing && canRetryReversal(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && retryAccountingReversal(viewing)">
+      {{ actionId === viewing?.id ? 'Retrying…' : 'Retry Reversal' }}
     </button>
     <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
   </div>

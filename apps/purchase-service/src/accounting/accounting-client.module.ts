@@ -1,5 +1,6 @@
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
+import { AccountingJournalClient } from './accounting-journal.client';
 import { AccountingTaxCodeClient } from './accounting-tax-code.client';
 
 @Module({
@@ -9,7 +10,7 @@ import { AccountingTaxCodeClient } from './accounting-tax-code.client';
       maxRedirects: 0,
     }),
   ],
-  providers: [AccountingTaxCodeClient],
-  exports: [AccountingTaxCodeClient],
+  providers: [AccountingTaxCodeClient, AccountingJournalClient],
+  exports: [AccountingTaxCodeClient, AccountingJournalClient],
 })
 export class AccountingClientModule {}

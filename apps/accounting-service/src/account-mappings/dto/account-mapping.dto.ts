@@ -1,0 +1,33 @@
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+
+const PURPOSES = [
+  'PURCHASE_EXPENSE',
+  'ACCOUNTS_PAYABLE',
+  'INPUT_TAX',
+  'PAYMENT_METHOD',
+] as const;
+
+export type AccountMappingPurposeInput = (typeof PURPOSES)[number];
+
+export class CreateAccountMappingDto {
+  @IsIn(PURPOSES)
+  purpose!: AccountMappingPurposeInput;
+
+  // Required (and validated as such in the service) when purpose is the
+  // per-entity PAYMENT_METHOD purpose — the id of the master-data
+  // PaymentMethod this mapping is for. Must be omitted for every tenant-wide
+  // singleton purpose (PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX), which
+  // always resolve at externalRefId = "".
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  externalRefId?: string;
+
+  @IsUUID()
+  accountId!: string;
+}
+
+export class UpdateAccountMappingDto {
+  @IsUUID()
+  accountId!: string;
+}

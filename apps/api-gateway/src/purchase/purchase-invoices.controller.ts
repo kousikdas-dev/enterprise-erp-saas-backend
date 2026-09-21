@@ -183,6 +183,54 @@ export class PurchaseInvoicesController {
     });
   }
 
+  @Post(':id/retry-accounting-posting')
+  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_CONFIRM)
+  @ApiOperation({
+    summary: 'Retry accounting posting',
+    description:
+      'Retries the journal posting for an invoice whose original post-confirm posting attempt failed (accountingPostingStatus FAILED). A no-op returning the invoice unchanged if already POSTED. Same permission as confirm, since this retries the posting confirm() attempted. Permission: purchase-invoices.confirm.',
+  })
+  @ApiOkResponse({ type: PurchaseInvoiceDto })
+  @ApiConflictResponse({ description: 'Invoice is cancelled, or the posting attempt failed again' })
+  @ApiManagementErrors()
+  retryAccountingPosting(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<PurchaseInvoiceDto> {
+    return this.purchase.forward<PurchaseInvoiceDto>({
+      method: 'POST',
+      path: `/api/v1/purchase-invoices/${id}/retry-accounting-posting`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_CANCEL)
+  @ApiOperation({
+    summary: 'Retry accounting reversal',
+    description:
+      'Retries the journal reversal for a CANCELLED invoice whose post-cancel reversal attempt failed (still accountingPostingStatus POSTED). A no-op returning the invoice unchanged if already REVERSED. Same permission as cancel, since this retries the reversal cancel() attempted. Permission: purchase-invoices.cancel.',
+  })
+  @ApiOkResponse({ type: PurchaseInvoiceDto })
+  @ApiConflictResponse({ description: 'Invoice is not cancelled, or has no posted journal to reverse' })
+  @ApiManagementErrors()
+  retryAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<PurchaseInvoiceDto> {
+    return this.purchase.forward<PurchaseInvoiceDto>({
+      method: 'POST',
+      path: `/api/v1/purchase-invoices/${id}/retry-accounting-reversal`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
   @Post(':id/payments')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_RECORD_PAYMENT)

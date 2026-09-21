@@ -1,7 +1,9 @@
 import {
   Controller,
+  Delete,
   Get,
   INestApplication,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -18,44 +20,38 @@ import { PERMISSION_RESOLVER } from '../rbac/permission-resolver';
 import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 
-@Controller('suppliers-probe')
-class SuppliersProbeController {
+@Controller('account-mappings-probe')
+class AccountMappingsProbeController {
   @Get()
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.SUPPLIERS_READ)
+  @RequirePermissions(PERMISSIONS.ACCOUNT_MAPPINGS_READ)
   list(): { ok: true } {
     return { ok: true };
   }
-}
 
-@Controller('goods-receipts-probe')
-class GoodsReceiptsProbeController {
   @Post()
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.GOODS_RECEIPTS_CREATE)
+  @RequirePermissions(PERMISSIONS.ACCOUNT_MAPPINGS_CREATE)
   create(): { ok: true } {
     return { ok: true };
   }
-}
 
-@Controller('purchase-invoices-retry-probe')
-class PurchaseInvoicesRetryProbeController {
-  @Post('posting')
+  @Patch(':id')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_CONFIRM)
-  retryPosting(): { ok: true } {
+  @RequirePermissions(PERMISSIONS.ACCOUNT_MAPPINGS_UPDATE)
+  update(): { ok: true } {
     return { ok: true };
   }
 
-  @Post('reversal')
+  @Delete(':id')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_CANCEL)
-  retryReversal(): { ok: true } {
+  @RequirePermissions(PERMISSIONS.ACCOUNT_MAPPINGS_DELETE)
+  remove(): { ok: true } {
     return { ok: true };
   }
 }
 
-describe('purchase JWT and RBAC', () => {
+describe('account-mappings JWT and RBAC', () => {
   const secret = 'test-access-secret-change-me';
   let app: INestApplication;
   let jwtService: JwtService;
@@ -70,11 +66,7 @@ describe('purchase JWT and RBAC', () => {
         PassportModule.register({ defaultStrategy: 'jwt' }),
         JwtModule.register({ secret }),
       ],
-      controllers: [
-        SuppliersProbeController,
-        GoodsReceiptsProbeController,
-        PurchaseInvoicesRetryProbeController,
-      ],
+      controllers: [AccountMappingsProbeController],
       providers: [
         JwtStrategy,
         JwtAuthGuard,
@@ -106,59 +98,62 @@ describe('purchase JWT and RBAC', () => {
     );
   }
 
-  it('allows DEMO admin with suppliers.read', async () => {
-    getPermissionKeys.mockResolvedValue([PERMISSIONS.SUPPLIERS_READ]);
+  it('allows a user with account-mappings.read', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_MAPPINGS_READ]);
     await request(server)
-      .get('/suppliers-probe')
+      .get('/account-mappings-probe')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(200);
   });
 
-  it('denies goods-receipts.create when missing', async () => {
-    getPermissionKeys.mockResolvedValue([PERMISSIONS.SUPPLIERS_READ]);
+  it('denies account-mappings.create when missing', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_MAPPINGS_READ]);
     await request(server)
-      .post('/goods-receipts-probe')
+      .post('/account-mappings-probe')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(403);
   });
 
-  it('allows goods-receipts.create', async () => {
-    getPermissionKeys.mockResolvedValue([PERMISSIONS.GOODS_RECEIPTS_CREATE]);
+  it('allows account-mappings.create when granted', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_MAPPINGS_CREATE]);
     await request(server)
-      .post('/goods-receipts-probe')
+      .post('/account-mappings-probe')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(201);
   });
 
-  it('requires purchase-invoices.confirm to retry accounting posting', async () => {
-    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_INVOICES_CANCEL]);
-    await request(server)
-      .post('/purchase-invoices-retry-probe/posting')
-      .set('Authorization', `Bearer ${signAccess()}`)
-      .expect(403);
-
+  it('requires account-mappings.update for patch, not create/read', async () => {
     getPermissionKeys.mockResolvedValue([
-      PERMISSIONS.PURCHASE_INVOICES_CONFIRM,
+      PERMISSIONS.ACCOUNT_MAPPINGS_READ,
+      PERMISSIONS.ACCOUNT_MAPPINGS_CREATE,
     ]);
     await request(server)
-      .post('/purchase-invoices-retry-probe/posting')
-      .set('Authorization', `Bearer ${signAccess()}`)
-      .expect(201);
-  });
-
-  it('requires purchase-invoices.cancel to retry accounting reversal', async () => {
-    getPermissionKeys.mockResolvedValue([
-      PERMISSIONS.PURCHASE_INVOICES_CONFIRM,
-    ]);
-    await request(server)
-      .post('/purchase-invoices-retry-probe/reversal')
+      .patch('/account-mappings-probe/mapping-1')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(403);
 
-    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_INVOICES_CANCEL]);
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_MAPPINGS_UPDATE]);
     await request(server)
-      .post('/purchase-invoices-retry-probe/reversal')
+      .patch('/account-mappings-probe/mapping-1')
       .set('Authorization', `Bearer ${signAccess()}`)
-      .expect(201);
+      .expect(200);
+  });
+
+  it('requires account-mappings.delete for delete', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_MAPPINGS_READ]);
+    await request(server)
+      .delete('/account-mappings-probe/mapping-1')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_MAPPINGS_DELETE]);
+    await request(server)
+      .delete('/account-mappings-probe/mapping-1')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(200);
+  });
+
+  it('returns 401 without JWT', async () => {
+    await request(server).get('/account-mappings-probe').expect(401);
   });
 });

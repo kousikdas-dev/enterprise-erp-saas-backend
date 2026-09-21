@@ -34,6 +34,21 @@ enum TaxComponentType {
   OTHER
 }
 
+// Phase C1 (Accounting Foundation) — generic, tenant-scoped "business role ->
+// GL account" resolution, used by the internal journal-postings API so that
+// callers (Purchase, later Sales) never need to know a real Account id.
+// PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX are tenant-wide singletons
+// (externalRefId always ""); PAYMENT_METHOD is per-entity (externalRefId =
+// a master-data PaymentMethod id). No fallback tier exists for any purpose —
+// an unmapped purpose/externalRefId always fails posting rather than
+// guessing an account (approved design, Phase C1/C2 review).
+enum AccountMappingPurpose {
+  PURCHASE_EXPENSE
+  ACCOUNTS_PAYABLE
+  INPUT_TAX
+  PAYMENT_METHOD
+}
+
 model Account {
   id          String      @id @default(uuid()) @db.Uuid
   tenantId    String      @db.Uuid
@@ -50,11 +65,33 @@ model Account {
   children Account[] @relation("AccountHierarchy")
   lines    JournalLine[]
   taxComponents TaxComponent[]
+  accountMappings AccountMapping[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([tenantId, parentId])
   @@map("accounts")
+}
+
+model AccountMapping {
+  id            String                @id @default(uuid()) @db.Uuid
+  tenantId      String                @db.Uuid
+  purpose       AccountMappingPurpose
+  // "" for the tenant-wide singleton purposes; a foreign entity id (e.g. a
+  // PaymentMethod id) for PAYMENT_METHOD — always non-null so one unique
+  // index correctly enforces both "one singleton per tenant/purpose" and
+  // "one mapping per tenant/purpose/entity" (Postgres null-distinctness
+  // would otherwise let multiple singleton rows coexist).
+  externalRefId String                @default("")
+  accountId     String                @db.Uuid
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, purpose, externalRefId])
+  @@index([tenantId])
+  @@map("account_mappings")
 }
 
 model JournalEntry {
@@ -68,9 +105,27 @@ model JournalEntry {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
+  // Phase C1 — links a machine-posted entry back to its originating document
+  // for idempotency (@@unique below) and traceability. NULL on every entry
+  // created through the pre-existing manual create()/post() flow (Postgres
+  // treats each NULL tuple as distinct, so manual entries never collide with
+  // each other or with source-linked ones). A reversal entry gets its OWN
+  // distinct source reference (its sourceType differs from the original's,
+  // e.g. "*_CANCELLATION") — the original entry this reverses is instead
+  // named via reversesJournalEntryId, and the original is NEVER mutated:
+  // it stays POSTED permanently (approved Phase C1/C2 review — no VOID).
+  sourceService String?
+  sourceType    String?
+  sourceId      String?
+
+  reversesJournalEntryId String?        @db.Uuid
+  reversesJournalEntry   JournalEntry?  @relation("JournalEntryReversal", fields: [reversesJournalEntryId], references: [id])
+  reversedBy             JournalEntry[] @relation("JournalEntryReversal")
+
   lines JournalLine[]
 
   @@unique([tenantId, entryNumber])
+  @@unique([tenantId, sourceService, sourceType, sourceId])
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, entryDate])
