@@ -19,6 +19,14 @@ type ShipmentWithItems = {
     productSku: string;
     productName: string;
     quantity: Prisma.Decimal;
+    unitOfMeasureId: string | null;
+    uomCode: string | null;
+    uomName: string | null;
+    conversionFactor: Prisma.Decimal | null;
+    baseQuantity: Prisma.Decimal | null;
+    conversionResolvedBy: string | null;
+    conversionResolvedAt: Date | null;
+    conversionResolutionNote: string | null;
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -43,6 +51,24 @@ export function toShipmentResponse(row: ShipmentWithItems) {
       productSku: item.productSku,
       productName: item.productName,
       quantity: quantityToString(item.quantity),
+      unitOfMeasureId: item.unitOfMeasureId,
+      uomCode: item.uomCode,
+      uomName: item.uomName,
+      conversionFactor: item.conversionFactor
+        ? item.conversionFactor.toString()
+        : null,
+      baseQuantity: item.baseQuantity
+        ? quantityToString(item.baseQuantity)
+        : null,
+      // true only while the shipment is blocked AND this specific line is
+      // the reason — lets the UI target exactly the lines needing manual
+      // resolution rather than every line on a blocked shipment.
+      needsConversionResolution:
+        row.status === ShipmentStatus.UOM_RESOLUTION_REQUIRED &&
+        item.baseQuantity === null,
+      conversionResolvedBy: item.conversionResolvedBy,
+      conversionResolvedAt: item.conversionResolvedAt,
+      conversionResolutionNote: item.conversionResolutionNote,
       warehouseId: row.warehouseId,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,

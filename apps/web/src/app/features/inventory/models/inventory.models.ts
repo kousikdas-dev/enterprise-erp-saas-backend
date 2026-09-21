@@ -157,10 +157,11 @@ export interface UpdateWarehouseRequest {
   isActive?: boolean;
 }
 
-export type StockAdjustmentType =
-  | 'OPENING'
-  | 'ADJUSTMENT_IN'
-  | 'ADJUSTMENT_OUT';
+// OPENING removed from StockAdjustmentType in Inventory Design v4, Phase B —
+// opening balances are created exclusively through the dedicated Opening
+// Stock feature (see opening-stock.models.ts) now. StockMovementType keeps
+// OPENING: it remains a valid, queryable historical movement type.
+export type StockAdjustmentType = 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT';
 
 export type StockMovementType =
   | 'OPENING'
@@ -172,7 +173,6 @@ export type StockMovementType =
   | 'ADJUSTMENT_OUT';
 
 export const STOCK_ADJUSTMENT_TYPES: readonly StockAdjustmentType[] = [
-  'OPENING',
   'ADJUSTMENT_IN',
   'ADJUSTMENT_OUT',
 ] as const;

@@ -1,0 +1,214 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Opening stock</div>
+    <div class="d-flex flex-wrap gap-2">
+      <select class="form-select form-select-sm" style="min-width: 140px;" [(ngModel)]="filterStatus" (ngModelChange)="load()">
+        <option value="">All statuses</option>
+        <option value="DRAFT">Draft</option>
+        <option value="POSTED">Posted</option>
+        <option value="REVERSED">Reversed</option>
+      </select>
+      <select class="form-select form-select-sm" style="min-width: 180px;" [(ngModel)]="filterProductId" (ngModelChange)="load()">
+        <option value="">All products</option>
+        <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+      </select>
+      <select class="form-select form-select-sm" style="min-width: 180px;" [(ngModel)]="filterWarehouseId" (ngModelChange)="load()">
+        <option value="">All warehouses</option>
+        <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-primary" (click)="openCreate()" [disabled]="saving">
+        New Opening Stock
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Records a product/warehouse's starting stock balance as its own auditable document — not a Stock Adjustment.
+      A document can only be posted once per product+warehouse while active, cannot be posted over existing non-zero stock,
+      and can only be reversed if no other stock activity has happened since.
+    </p>
+
+    <app-list-state [loading]="loading" [error]="error" [empty]="!loading && !error && items.length === 0" emptyText="No opening stock documents yet.">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Document #</th>
+              <th>Status</th>
+              <th>Effective date</th>
+              <th>Lines</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of items">
+              <td>{{ row.documentNumber }}</td>
+              <td><span class="badge" [ngClass]="statusBadgeClass(row.status)">{{ row.status }}</span></td>
+              <td>{{ row.effectiveDate | date: 'mediumDate' }}</td>
+              <td>{{ row.lines.length }}</td>
+              <td>{{ row.createdAt | date: 'short' }}</td>
+              <td class="text-end">
+                <button type="button" class="btn btn-sm btn-outline-secondary" (click)="openDetail(row)">
+                  {{ row.status === 'DRAFT' ? 'Edit' : 'View' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      Opening Stock {{ current?.documentNumber }}
+      <span class="badge ms-2" [ngClass]="statusBadgeClass(current?.status ?? '')">{{ current?.status }}</span>
+    </h5>
+    <button type="button" class="btn-close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="current as doc">
+    <div class="alert alert-danger" *ngIf="conflictMessage">
+      <div class="mb-2">{{ conflictMessage }}</div>
+      <table class="table table-sm mb-0" *ngIf="conflictRows?.length">
+        <thead>
+          <tr>
+            <th *ngFor="let key of conflictRows![0] | keyvalue">{{ key.key }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of conflictRows">
+            <td *ngFor="let cell of row | keyvalue">{{ cell.value }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <form [formGroup]="headerForm" class="row g-2 mb-3">
+      <div class="col-md-4">
+        <label class="form-label small">Effective date</label>
+        <input type="date" class="form-control" formControlName="effectiveDate" [readonly]="doc.status !== 'DRAFT'" />
+      </div>
+      <div class="col-md-8">
+        <label class="form-label small">Notes</label>
+        <input type="text" class="form-control" formControlName="notes" [readonly]="doc.status !== 'DRAFT'" maxlength="500" />
+      </div>
+      <div class="col-12" *ngIf="doc.status === 'DRAFT'">
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="saveHeader()" [disabled]="headerForm.invalid || saving">
+          Save
+        </button>
+      </div>
+    </form>
+
+    <h6>Lines</h6>
+    <div class="table-responsive mb-3">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Warehouse</th>
+            <th>Quantity</th>
+            <th>UOM</th>
+            <th>Conv. factor</th>
+            <th>Base quantity</th>
+            <th *ngIf="doc.status === 'DRAFT'"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of doc.lines">
+            <td>{{ productLabel(line.productId) }}</td>
+            <td>{{ warehouseLabel(line.warehouseId) }}</td>
+            <td>{{ line.quantity }}</td>
+            <td>{{ line.uomCode }}</td>
+            <td>{{ line.conversionFactor }}</td>
+            <td>{{ line.baseQuantity }}</td>
+            <td *ngIf="doc.status === 'DRAFT'">
+              <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeLine(line)">Remove</button>
+            </td>
+          </tr>
+          <tr *ngIf="doc.lines.length === 0">
+            <td colspan="7" class="text-muted small">No lines yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <form *ngIf="doc.status === 'DRAFT'" [formGroup]="lineForm" class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label small">Product</label>
+        <select class="form-select form-select-sm" formControlName="productId" (change)="onLineProductChange(lineForm.value.productId!)">
+          <option value="">Select product</option>
+          <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Warehouse</label>
+        <select class="form-select form-select-sm" formControlName="warehouseId">
+          <option value="">Select warehouse</option>
+          <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Quantity</label>
+        <input type="text" class="form-control form-control-sm" formControlName="quantity" placeholder="0" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Unit</label>
+        <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+          <option value="">Select unit</option>
+          <option *ngFor="let u of uomOptionsFor(lineForm.value.productId ?? '')" [value]="u.id">{{ u.label }}</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-sm btn-primary w-100" (click)="addLine()" [disabled]="lineForm.invalid || addingLine">
+          Add line
+        </button>
+      </div>
+    </form>
+
+    <div *ngIf="doc.status === 'POSTED'" class="mb-2">
+      <label class="form-label small">Reversal reason (optional)</label>
+      <input type="text" class="form-control form-control-sm" [(ngModel)]="reverseReason" [ngModelOptions]="{ standalone: true }" maxlength="500" />
+    </div>
+
+    <dl class="row small text-muted mt-3 mb-0" *ngIf="doc.status !== 'DRAFT'">
+      <ng-container *ngIf="doc.postedAt">
+        <dt class="col-sm-3">Posted at</dt>
+        <dd class="col-sm-9">{{ doc.postedAt | date: 'medium' }}</dd>
+      </ng-container>
+      <ng-container *ngIf="doc.reversedAt">
+        <dt class="col-sm-3">Reversed at</dt>
+        <dd class="col-sm-9">{{ doc.reversedAt | date: 'medium' }}</dd>
+        <dt class="col-sm-3" *ngIf="doc.reversalReason">Reversal reason</dt>
+        <dd class="col-sm-9" *ngIf="doc.reversalReason">{{ doc.reversalReason }}</dd>
+      </ng-container>
+    </dl>
+  </div>
+  <div class="modal-footer" *ngIf="current as doc">
+    <button type="button" class="btn btn-secondary" (click)="modal.dismiss()">Close</button>
+    <button
+      *ngIf="doc.status === 'DRAFT' && canPost"
+      type="button"
+      class="btn btn-success"
+      (click)="post()"
+      [disabled]="saving || doc.lines.length === 0"
+    >
+      Post
+    </button>
+    <button
+      *ngIf="doc.status === 'POSTED' && canReverse"
+      type="button"
+      class="btn btn-danger"
+      (click)="reverse()"
+      [disabled]="saving"
+    >
+      Reverse
+    </button>
+  </div>
+</ng-template>

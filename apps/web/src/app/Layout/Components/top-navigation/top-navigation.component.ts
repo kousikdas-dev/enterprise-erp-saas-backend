@@ -54,6 +54,7 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
         { label: 'Warehouses', route: '/inventory/warehouses' },
         { label: 'Stock', route: '/inventory/stock' },
         { label: 'Stock Movements', route: '/inventory/stock-movements' },
+        { label: 'Opening Stock', route: '/inventory/opening-stock' },
       ]
     },
     {

@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
 import { CategoriesController } from './categories.controller';
 import { InventoryForwardService } from './inventory-forward.service';
+import { OpeningStockController } from './opening-stock.controller';
 import { ProductUnitsController } from './product-units.controller';
 import { ProductsController } from './products.controller';
 import { StockController } from './stock.controller';
@@ -26,6 +27,7 @@ import { WarehousesController } from './warehouses.controller';
     ProductsController,
     ProductUnitsController,
     StockController,
+    OpeningStockController,
   ],
   providers: [InventoryForwardService],
 })

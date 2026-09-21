@@ -8,8 +8,14 @@ import {
 } from 'class-validator';
 import { StockMovementType } from '../../../generated/prisma-client';
 
+// OPENING was removed from here in Inventory Design v4, Phase B: opening
+// balances are now created exclusively through the dedicated Opening Stock
+// document (POST /opening-stock + .../post), which brings the idempotency,
+// existing-stock and duplicate-opening safeguards this generic endpoint
+// never had. StockMovementType.OPENING itself is retained at the schema
+// level — historical rows created via this endpoint before the change
+// remain valid, unattributed, legacy movements.
 export enum ImplementedStockAdjustmentType {
-  OPENING = 'OPENING',
   ADJUSTMENT_IN = 'ADJUSTMENT_IN',
   ADJUSTMENT_OUT = 'ADJUSTMENT_OUT',
 }

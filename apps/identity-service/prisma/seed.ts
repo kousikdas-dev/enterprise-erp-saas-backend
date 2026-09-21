@@ -116,6 +116,26 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Read stock movement history',
   },
   {
+    resource: 'opening-stock',
+    action: 'read',
+    description: 'Read opening stock documents',
+  },
+  {
+    resource: 'opening-stock',
+    action: 'create',
+    description: 'Create and edit draft opening stock documents',
+  },
+  {
+    resource: 'opening-stock',
+    action: 'post',
+    description: 'Post opening stock documents',
+  },
+  {
+    resource: 'opening-stock',
+    action: 'reverse',
+    description: 'Reverse posted opening stock documents',
+  },
+  {
   resource: 'payment-terms',
   action: 'create',
   description: 'Create payment terms',
@@ -357,6 +377,11 @@ const MANAGEMENT_PERMISSIONS: Array<{
     resource: 'shipments',
     action: 'post',
     description: 'Post shipments to inventory',
+  },
+  {
+    resource: 'shipments',
+    action: 'resolve-conversion',
+    description: 'Manually resolve a legacy shipment line UOM conversion',
   },
   {
     resource: 'accounts',

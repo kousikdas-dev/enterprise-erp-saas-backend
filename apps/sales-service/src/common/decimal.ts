@@ -21,6 +21,16 @@ export function parseMoney(value: unknown): Prisma.Decimal {
   return new Prisma.Decimal(text);
 }
 
+export function parseConversionFactor(value: unknown): Prisma.Decimal {
+  const text = String(value ?? '').trim();
+  if (!POSITIVE_DECIMAL.test(text)) {
+    throw new BadRequestException(
+      'Product unit conversion factor is missing or invalid for the selected unit of measure',
+    );
+  }
+  return new Prisma.Decimal(text);
+}
+
 export function parsePercent(value: unknown): Prisma.Decimal {
   const text = String(value ?? '0').trim();
   if (!PERCENT_DECIMAL.test(text)) {

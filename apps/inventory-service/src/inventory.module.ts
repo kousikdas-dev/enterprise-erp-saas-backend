@@ -5,6 +5,7 @@ import { MessagingModule } from '@app/messaging';
 import { InventoryAuditModule } from './audit/inventory-audit.module';
 import { CategoriesModule } from './categories/categories.module';
 import { InventoryEnvironmentVariables } from './config/inventory-env';
+import { OpeningStockModule } from './opening-stock/opening-stock.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductUnitsModule } from './product-units/product-units.module';
 import { ProductsModule } from './products/products.module';
@@ -29,6 +30,7 @@ import { WarehousesModule } from './warehouses/warehouses.module';
     ProductsModule,
     ProductUnitsModule,
     StockModule,
+    OpeningStockModule,
     MessagingModule.register(),
   ],
 })

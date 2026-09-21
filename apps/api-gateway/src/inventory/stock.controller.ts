@@ -121,7 +121,7 @@ export class StockController {
   @ApiOperation({
     summary: 'Adjust stock',
     description:
-      'Creates a stock movement and updates stock atomically. Types: OPENING, ADJUSTMENT_IN, ADJUSTMENT_OUT. Quantity must be positive. Negative resulting stock is rejected. Permission: stock.adjust.',
+      'Creates a stock movement and updates stock atomically. Types: ADJUSTMENT_IN, ADJUSTMENT_OUT. Quantity must be positive. Negative resulting stock is rejected. For opening balances, use POST /opening-stock instead. Permission: stock.adjust.',
   })
   @ApiCreatedResponse({ type: StockAdjustmentResultDto })
   @ApiConflictResponse({ description: 'Insufficient stock' })

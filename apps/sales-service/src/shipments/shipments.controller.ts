@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -13,7 +14,10 @@ import { ActorContext } from '../auth/actor-context';
 import { ActorGuard } from '../auth/actor.guard';
 import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
-import { CreateShipmentDto } from './dto/shipment.dto';
+import {
+  CreateShipmentDto,
+  ResolveShipmentLineConversionDto,
+} from './dto/shipment.dto';
 import { ShipmentsService } from './shipments.service';
 
 @Controller({ path: 'shipments', version: '1' })
@@ -50,5 +54,22 @@ export class ShipmentsController {
     @Req() request: Request,
   ) {
     return this.shipments.post(actor, id, requestAuditMeta(request));
+  }
+
+  @Patch(':id/lines/:lineId/resolve-conversion')
+  resolveConversion(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineId', ParseUUIDPipe) lineId: string,
+    @Body() dto: ResolveShipmentLineConversionDto,
+    @Req() request: Request,
+  ) {
+    return this.shipments.resolveConversion(
+      actor,
+      id,
+      lineId,
+      dto,
+      requestAuditMeta(request),
+    );
   }
 }

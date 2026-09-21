@@ -79,35 +79,39 @@ describe('StockService', () => {
     expect(result.items[0].quantity).toBe('100.000000');
   });
 
-  it('creates opening stock, movement, and stock.adjusted audit', async () => {
+  it('creates a first ADJUSTMENT_IN, movement, and stock.adjusted audit', async () => {
+    // OPENING was removed from ImplementedStockAdjustmentType in Inventory
+    // Design v4, Phase B — opening balances are now created exclusively
+    // through the dedicated Opening Stock document, never through this
+    // generic adjustment endpoint. This test now exercises the same
+    // "no prior Stock row" code path using the still-supported
+    // ADJUSTMENT_IN type.
     const { service, prisma, tx, audit } = createService();
     prisma.product.findFirst.mockResolvedValue({ id: productId });
     prisma.warehouse.findFirst.mockResolvedValue({ id: warehouseId });
     tx.$queryRaw.mockResolvedValue([]);
-    tx.stockMovement.create.mockResolvedValue(
-      movement({ type: StockMovementType.OPENING }),
-    );
+    tx.stockMovement.create.mockResolvedValue(movement());
     tx.stock.create.mockResolvedValue(stockRow('100'));
 
     const result = await service.adjust(actor, {
       productId,
       warehouseId,
-      type: ImplementedStockAdjustmentType.OPENING,
+      type: ImplementedStockAdjustmentType.ADJUSTMENT_IN,
       quantity: '100',
-      reason: 'Opening stock',
+      reason: 'Initial count',
     });
 
     expect(result.stock.quantity).toBe('100.000000');
-    expect(result.movement.type).toBe(StockMovementType.OPENING);
+    expect(result.movement.type).toBe(StockMovementType.ADJUSTMENT_IN);
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'stock.adjusted',
         metadata: expect.objectContaining({
           productId,
           warehouseId,
-          type: ImplementedStockAdjustmentType.OPENING,
+          type: ImplementedStockAdjustmentType.ADJUSTMENT_IN,
           quantity: '100',
-          reason: 'Opening stock',
+          reason: 'Initial count',
           resultingQuantity: '100',
         }),
       }),
@@ -117,6 +121,12 @@ describe('StockService', () => {
     expect(JSON.stringify(metadata)).not.toMatch(
       /password|passwordHash|accessToken|refreshToken/i,
     );
+  });
+
+  it('no longer accepts OPENING as a valid adjustment type', () => {
+    expect(
+      (ImplementedStockAdjustmentType as Record<string, unknown>).OPENING,
+    ).toBeUndefined();
   });
 
   it('adds on ADJUSTMENT_IN and subtracts on ADJUSTMENT_OUT', async () => {

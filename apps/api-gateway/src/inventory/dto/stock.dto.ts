@@ -8,8 +8,11 @@ import {
   MaxLength,
 } from 'class-validator';
 
+// OPENING removed here in Inventory Design v4, Phase B — opening balances
+// are created exclusively via POST /opening-stock now. StockMovementType
+// (GatewayStockMovementType below) still includes OPENING, since it remains
+// a valid, queryable historical movement type.
 export enum GatewayStockAdjustmentType {
-  OPENING = 'OPENING',
   ADJUSTMENT_IN = 'ADJUSTMENT_IN',
   ADJUSTMENT_OUT = 'ADJUSTMENT_OUT',
 }

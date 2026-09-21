@@ -22,8 +22,9 @@
   <div class="card-body">
     <p class="text-muted small mb-3">
       Quantities are controlled by backend stock operations. Use Adjust Stock for
-      <code>OPENING</code>, <code>ADJUSTMENT_IN</code>, or <code>ADJUSTMENT_OUT</code> only.
-      There is no direct quantity edit.
+      <code>ADJUSTMENT_IN</code> or <code>ADJUSTMENT_OUT</code> physical-count corrections only.
+      For a new product/warehouse's starting balance, use
+      <a routerLink="/inventory/opening-stock">Opening Stock</a> instead. There is no direct quantity edit.
     </p>
 
     <app-list-state

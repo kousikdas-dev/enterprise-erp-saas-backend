@@ -26,6 +26,16 @@ enum StockMovementType {
   ADJUSTMENT_OUT
 }
 
+// Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is
+// freely editable; POSTED locks the lines and creates one OPENING
+// StockMovement + OpeningStockActiveLine per line; REVERSED is terminal —
+// there is no un-reversal, only a fresh corrective document.
+enum OpeningStockStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
 enum ProductType {
   GOODS
   SERVICE
@@ -168,14 +178,117 @@ model StockMovement {
   createdBy     String             @db.Uuid
   createdAt     DateTime           @default(now())
 
+  // Inventory Design v4, Phase B (Opening Stock reversal). Set only on a
+  // reversal movement, pointing back at the original movement it reverses;
+  // never set on the original itself, which is retained unmodified forever.
+  // The unique constraint is the DB-level backstop against ever creating a
+  // second reversal for the same original movement (Postgres unique indexes
+  // treat NULL as distinct from every other NULL, so ordinary movements are
+  // unaffected).
+  reversesMovementId String? @db.Uuid
+
+  // Global, strictly-monotonic, gapless-enough ordering key used to
+  // determine "subsequent stock-affecting activity" for a given
+  // product+warehouse (Phase B reversal validation) — deliberately NOT
+  // createdAt, whose millisecond precision cannot be trusted to break ties
+  // deterministically under concurrent posting. For pre-existing rows this
+  // is backfilled once, ordered by (createdAt ASC, id ASC) — id is only a
+  // deterministic tie-breaker for rows sharing a createdAt value, not a
+  // claim to have reconstructed their true real-world order. See the
+  // migration for the exact backfill procedure.
+  sequenceNumber BigInt @default(autoincrement())
+
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
+  @@unique([reversesMovementId])
+  @@unique([sequenceNumber])
   @@index([tenantId])
   @@index([tenantId, createdAt])
   @@index([productId])
   @@index([warehouseId])
+  @@index([tenantId, productId, warehouseId, sequenceNumber])
   @@map("stock_movements")
+}
+
+// Opening Stock document header (Inventory Design v4, Phase B). A distinct
+// business document — never a plain Stock Adjustment — because opening
+// balances need their own lifecycle (DRAFT review before commit, REVERSED
+// for corrections), multi-line/multi-warehouse atomicity, and a real
+// audit/reference trail back from the StockMovement it creates.
+model OpeningStock {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @db.Uuid
+  documentNumber String
+  status         OpeningStockStatus @default(DRAFT)
+  effectiveDate  DateTime
+  postedAt       DateTime?
+  postedBy       String?            @db.Uuid
+  reversedAt     DateTime?
+  reversedBy     String?            @db.Uuid
+  reversalReason String?
+  notes          String?
+  createdBy      String             @db.Uuid
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  lines OpeningStockLine[]
+
+  @@unique([tenantId, documentNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("opening_stocks")
+}
+
+model OpeningStockLine {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  openingStockId   String   @db.Uuid
+  productId        String   @db.Uuid
+  warehouseId      String   @db.Uuid
+  quantity         Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId  String   @db.Uuid
+  uomCode          String
+  uomName          String
+  // Resolved once when the line is added to the (DRAFT) document and never
+  // recomputed from current ProductUnit data afterward — post() always
+  // reuses these persisted values, exactly mirroring GoodsReceiptItem /
+  // ShipmentItem baseQuantity (Phase B §8).
+  conversionFactor Decimal  @db.Decimal(19, 6)
+  baseQuantity     Decimal  @db.Decimal(19, 6)
+  stockMovementId  String?  @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  openingStock OpeningStock @relation(fields: [openingStockId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, openingStockId, productId, warehouseId])
+  @@index([tenantId])
+  @@index([openingStockId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@map("opening_stock_lines")
+}
+
+/// Duplicate-opening guard (Inventory Design v4, Phase B). Exactly one row
+/// exists per (tenantId, productId, warehouseId) while an OpeningStock
+/// covering that combination is POSTED and not yet REVERSED — inserted
+/// atomically inside the posting transaction (so the unique constraint
+/// itself, not application logic, is what makes "no duplicate active
+/// opening" both correct and concurrency-safe) and deleted inside the
+/// reversal transaction, freeing that product+warehouse for a future
+/// corrective document.
+model OpeningStockActiveLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  productId      String   @db.Uuid
+  warehouseId    String   @db.Uuid
+  openingStockId String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  @@unique([tenantId, productId, warehouseId])
+  @@index([openingStockId])
+  @@map("opening_stock_active_lines")
 }
 
 /// Idempotency ledger for cross-service purchase goods receipts.

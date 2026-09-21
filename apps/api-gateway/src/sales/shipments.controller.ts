@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -28,6 +29,7 @@ import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import {
   CreateShipmentDto,
+  ResolveShipmentLineConversionDto,
   ShipmentDto,
   ShipmentListDto,
 } from './dto/shipment.dto';
@@ -87,6 +89,36 @@ export class ShipmentsController {
       method: 'POST',
       path: `/api/v1/shipments/${id}/post`,
       user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Patch(':id/lines/:lineId/resolve-conversion')
+  @RequirePermissions(PERMISSIONS.SHIPMENTS_RESOLVE_CONVERSION)
+  @ApiOperation({
+    summary: 'Manually resolve a legacy shipment line UOM conversion',
+    description:
+      'For a shipment blocked at UOM_RESOLUTION_REQUIRED: records the operator-selected unit of measure (validated against the current Inventory product/UOM configuration) as the historical conversion for a legacy line whose original UOM snapshot cannot be recovered. This is a manual, audited decision, not an automatic default. Permission: shipments.resolve-conversion.',
+  })
+  @ApiOkResponse({ type: ShipmentDto })
+  @ApiConflictResponse({
+    description:
+      'Shipment not awaiting resolution, line already resolved, or the selected unit of measure is invalid for this line\'s product',
+  })
+  @ApiManagementErrors()
+  resolveConversion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineId', ParseUUIDPipe) lineId: string,
+    @Body() dto: ResolveShipmentLineConversionDto,
+    @Req() request: Request,
+  ): Promise<ShipmentDto> {
+    return this.sales.forward<ShipmentDto>({
+      method: 'PATCH',
+      path: `/api/v1/shipments/${id}/lines/${lineId}/resolve-conversion`,
+      user,
+      body: { ...dto },
       ip: request.ip,
       userAgent: headerString(request.headers['user-agent']),
     });

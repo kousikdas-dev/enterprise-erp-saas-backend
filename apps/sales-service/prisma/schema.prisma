@@ -36,9 +36,18 @@ enum SalesOrderStatus {
   CANCELLED
 }
 
+// UOM_RESOLUTION_REQUIRED is reachable only from PENDING_STOCK, only for
+// pre-fix legacy ShipmentItem rows whose historical UOM/conversionFactor
+// cannot be safely recovered from their SalesOrderItem (Inventory Design v4,
+// Sales Shipment UOM Phase A, §5-C). It is never reachable for a shipment
+// created after this migration — those always carry a persisted
+// baseQuantity from creation. Leaving it requires an explicit manual
+// resolution (see ShipmentItem.conversionResolvedBy/At/Note below), never an
+// automatic default.
 enum ShipmentStatus {
   PENDING_STOCK
   POSTED
+  UOM_RESOLUTION_REQUIRED
 }
 
 enum CustomerAddressType {
@@ -450,6 +459,27 @@ model ShipmentItem {
   quantity         Decimal  @db.Decimal(19, 6)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  // UOM snapshot + baseQuantity — Inventory Design v4, Sales Shipment UOM
+  // Phase A. Snapshotted from SalesOrderItem once at line-creation time (new
+  // shipments) or lazily at post()-retry time for a legacy pre-fix row when
+  // safely resolvable (Phase A §5-B); left null forever if unresolvable
+  // (§5-C), until a human resolves it via the resolve-conversion endpoint.
+  // baseQuantity — never quantity — is the ONLY value ever sent to Inventory
+  // (mirrors GoodsReceiptItem.baseQuantity exactly); post()/retry never
+  // recomputes it from current ProductUnit data once persisted.
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+  baseQuantity     Decimal? @db.Decimal(19, 6)
+
+  // Set only when an unresolvable legacy line is manually resolved via
+  // PATCH /shipments/:id/lines/:lineId/resolve-conversion (Phase A §5-C,
+  // §11). Never set for a normally-resolved line.
+  conversionResolvedBy     String?
+  conversionResolvedAt     DateTime?
+  conversionResolutionNote String?
 
   shipment       Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
   salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id], onDelete: Restrict)

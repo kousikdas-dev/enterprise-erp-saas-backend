@@ -4,6 +4,7 @@ import { SharedModule } from '../../shared.module';
 import { ListStateComponent } from '../../shared/list-state/list-state.component';
 import { DecimalTextPipe, QuantityPipe } from '../../shared/pipes/decimal.pipes';
 import { CategoryListComponent } from './categories/category-list.component';
+import { OpeningStockListComponent } from './opening-stock/opening-stock-list.component';
 import { ProductListComponent } from './products/product-list.component';
 import { StockListComponent } from './stock/stock-list.component';
 import { StockMovementListComponent } from './stock-movements/stock-movement-list.component';
@@ -42,6 +43,11 @@ const routes: Routes = [
     component: StockMovementListComponent,
     data: { extraParameter: 'inventoryMenu' },
   },
+  {
+    path: 'opening-stock',
+    component: OpeningStockListComponent,
+    data: { extraParameter: 'inventoryMenu' },
+  },
 ];
 
 @NgModule({
@@ -52,6 +58,7 @@ const routes: Routes = [
     WarehouseListComponent,
     StockListComponent,
     StockMovementListComponent,
+    OpeningStockListComponent,
   ],
   imports: [
     SharedModule,

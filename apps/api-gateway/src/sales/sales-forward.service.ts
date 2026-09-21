@@ -104,21 +104,21 @@ export class SalesForwardService {
         this.logger.warn('Sales service unreachable');
         throw new ServiceUnavailableException('Sales service unavailable');
       }
-      const message = this.publicMessage(error, 'Sales service error');
+      const body = this.publicErrorBody(error, 'Sales service error');
       if (status === HttpStatus.BAD_REQUEST) {
-        throw new BadRequestException(message);
+        throw new BadRequestException(body);
       }
       if (status === HttpStatus.UNAUTHORIZED) {
-        throw new UnauthorizedException(message);
+        throw new UnauthorizedException(body);
       }
       if (status === HttpStatus.FORBIDDEN) {
-        throw new ForbiddenException(message);
+        throw new ForbiddenException(body);
       }
       if (status === HttpStatus.NOT_FOUND) {
-        throw new NotFoundException(message);
+        throw new NotFoundException(body);
       }
       if (status === HttpStatus.CONFLICT) {
-        throw new ConflictException(message);
+        throw new ConflictException(body);
       }
       this.logger.warn(`Sales upstream status ${String(status)}`);
       throw new BadGatewayException('Sales service error');
@@ -128,21 +128,35 @@ export class SalesForwardService {
     throw new BadGatewayException('Sales service error');
   }
 
-  private publicMessage(error: unknown, fallback: string): string | string[] {
+  /**
+   * Rebuilds the Gateway-side exception's response body from the downstream
+   * service's actual JSON error, preserving its machine-readable `code`/
+   * `details` (when present) alongside `message` — otherwise a Sales-service
+   * exception like SHIPMENT_CONVERSION_UNRESOLVED would reach API consumers
+   * as a plain string, defeating the whole point of a deterministic code.
+   */
+  private publicErrorBody(
+    error: unknown,
+    fallback: string,
+  ): string | string[] | { message: string | string[]; code?: string; details?: unknown } {
     if (!isAxiosError(error)) {
       return fallback;
     }
-    const payload = error.response?.data as { message?: unknown } | undefined;
-    const message = payload?.message;
-    if (typeof message === 'string' && message.length > 0) {
+    const payload = error.response?.data as
+      | { message?: unknown; code?: unknown; details?: unknown }
+      | undefined;
+    const rawMessage = payload?.message;
+    const message =
+      typeof rawMessage === 'string' && rawMessage.length > 0
+        ? rawMessage
+        : Array.isArray(rawMessage) &&
+            rawMessage.every((item) => typeof item === 'string')
+          ? (rawMessage as string[])
+          : fallback;
+    const code = typeof payload?.code === 'string' ? payload.code : undefined;
+    if (code === undefined && payload?.details === undefined) {
       return message;
     }
-    if (
-      Array.isArray(message) &&
-      message.every((item) => typeof item === 'string')
-    ) {
-      return message;
-    }
-    return fallback;
+    return { message, ...(code !== undefined ? { code } : {}), ...(payload?.details !== undefined ? { details: payload.details } : {}) };
   }
 }

@@ -78,7 +78,15 @@ export class ApiClient {
     if (error instanceof HttpErrorResponse) {
       const payload = error.error as ApiEnvelope<unknown> | string | null;
       const messages = this.extractMessages(payload, error.message);
-      return throwError(() => new ApiClientError(error.status || 0, messages));
+      const code =
+        payload && typeof payload === 'object' && typeof payload.code === 'string'
+          ? payload.code
+          : undefined;
+      const details =
+        payload && typeof payload === 'object' ? payload.details : undefined;
+      return throwError(
+        () => new ApiClientError(error.status || 0, messages, code, details),
+      );
     }
     return throwError(
       () => new ApiClientError(0, ['Unexpected client error']),

@@ -21,12 +21,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const status = this.resolveStatus(exception);
     const message = this.resolveMessage(exception);
     const error = this.resolveErrorName(exception, status);
+    const { code, details } = this.resolveCodeAndDetails(exception);
 
     const body: ApiErrorResponse = {
       success: false,
       statusCode: status,
       error,
       message,
+      ...(code !== undefined ? { code } : {}),
+      ...(details !== undefined ? { details } : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     };
@@ -53,6 +56,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
     return status === HttpStatus.INTERNAL_SERVER_ERROR
       ? 'InternalServerError'
       : 'Error';
+  }
+
+  /**
+   * Extracts an optional machine-readable `code`/`details` pair from an
+   * HttpException's response payload, when the thrower explicitly opted in
+   * (e.g. `new ConflictException({ code: 'X', message: 'Y', details: [...] })`).
+   * Exceptions that never set `code` are unaffected — both come back
+   * `undefined` and are omitted from the response body.
+   */
+  private resolveCodeAndDetails(
+    exception: unknown,
+  ): { code?: string; details?: unknown } {
+    if (exception instanceof HttpException) {
+      const payload = exception.getResponse();
+      if (typeof payload === 'object' && payload !== null) {
+        const { code, details } = payload as { code?: unknown; details?: unknown };
+        return {
+          code: typeof code === 'string' ? code : undefined,
+          details,
+        };
+      }
+    }
+    return {};
   }
 
   private resolveMessage(exception: unknown): string | string[] {
