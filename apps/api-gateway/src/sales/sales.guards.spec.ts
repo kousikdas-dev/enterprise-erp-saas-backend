@@ -45,6 +45,23 @@ class ShipmentsProbeController {
   }
 }
 
+@Controller('sales-invoices-retry-probe')
+class SalesInvoicesRetryProbeController {
+  @Post('posting')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_SEND)
+  retryPosting(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('reversal')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_CANCEL)
+  retryReversal(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 describe('sales JWT and RBAC', () => {
   const secret = 'test-access-secret-change-me';
   let app: INestApplication;
@@ -60,7 +77,11 @@ describe('sales JWT and RBAC', () => {
         PassportModule.register({ defaultStrategy: 'jwt' }),
         JwtModule.register({ secret }),
       ],
-      controllers: [CustomersProbeController, ShipmentsProbeController],
+      controllers: [
+        CustomersProbeController,
+        ShipmentsProbeController,
+        SalesInvoicesRetryProbeController,
+      ],
       providers: [
         JwtStrategy,
         JwtAuthGuard,
@@ -132,5 +153,47 @@ describe('sales JWT and RBAC', () => {
 
   it('returns 401 without JWT', async () => {
     await request(server).get('/customers-probe').expect(401);
+  });
+
+  it('requires sales-invoices.send to retry accounting posting', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_CANCEL]);
+    await request(server)
+      .post('/sales-invoices-retry-probe/posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_SEND]);
+    await request(server)
+      .post('/sales-invoices-retry-probe/posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires sales-invoices.cancel to retry accounting reversal', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_SEND]);
+    await request(server)
+      .post('/sales-invoices-retry-probe/reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_CANCEL]);
+    await request(server)
+      .post('/sales-invoices-retry-probe/reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('existing sales permissions (customers.read, shipments.create/post) remain unchanged by the new retry routes', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.CUSTOMERS_READ]);
+    await request(server)
+      .get('/customers-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(200);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SHIPMENTS_POST]);
+    await request(server)
+      .post('/shipments-probe/post')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
   });
 });

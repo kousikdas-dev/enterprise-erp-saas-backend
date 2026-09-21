@@ -39,6 +39,18 @@ export class SalesInvoiceService {
     return this.api.post<SalesInvoice>(`/api/v1/sales-invoices/${id}/cancel`);
   }
 
+  retryAccountingPosting(id: string): Observable<SalesInvoice> {
+    return this.api.post<SalesInvoice>(
+      `/api/v1/sales-invoices/${id}/retry-accounting-posting`,
+    );
+  }
+
+  retryAccountingReversal(id: string): Observable<SalesInvoice> {
+    return this.api.post<SalesInvoice>(
+      `/api/v1/sales-invoices/${id}/retry-accounting-reversal`,
+    );
+  }
+
   recordPayment(
     id: string,
     body: CreateSalesPaymentRequest,

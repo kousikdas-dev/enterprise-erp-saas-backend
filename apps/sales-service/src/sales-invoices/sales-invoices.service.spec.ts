@@ -4,9 +4,11 @@ import {
   Prisma,
   ProformaInvoiceStatus,
   SalesInvoicePaymentStatus,
+  SalesInvoicePostingStatus,
   SalesInvoiceSourceType,
   SalesInvoiceStatus,
   SalesOrderStatus,
+  SalesPaymentPostingStatus,
 } from '../../generated/prisma-client';
 import { SalesInvoicesService } from './sales-invoices.service';
 
@@ -74,6 +76,48 @@ describe('SalesInvoicesService', () => {
         ],
       }),
       ...overrides,
+    };
+  }
+
+  /**
+   * Default AccountingJournalClient mock: post()/reverse() both resolve
+   * successfully. Mirrors PurchaseInvoicesService's own
+   * buildAccountingJournalMock() default — most tests never care about the
+   * accounting posting outcome, only the ones exercising the Sales
+   * Accounting Integration itself override post/reverse explicitly.
+   */
+  function makeAccountingJournal(
+    overrides: Partial<{ post: jest.Mock; reverse: jest.Mock }> = {},
+  ) {
+    return {
+      post:
+        overrides.post ??
+        jest.fn().mockResolvedValue({
+          id: 'je-mock',
+          entryNumber: 'JE-00000001',
+          status: 'POSTED',
+          sourceService: 'sales-service',
+          sourceType: 'SALES_INVOICE',
+          sourceId: 'mock',
+          reversesJournalEntryId: null,
+          idempotentReplay: false,
+          totalDebit: '0.0000',
+          totalCredit: '0.0000',
+        }),
+      reverse:
+        overrides.reverse ??
+        jest.fn().mockResolvedValue({
+          id: 'je-reversal-mock',
+          entryNumber: 'JE-00000002',
+          status: 'POSTED',
+          sourceService: 'sales-service',
+          sourceType: 'SALES_INVOICE_CANCELLATION',
+          sourceId: 'mock',
+          reversesJournalEntryId: 'je-mock',
+          idempotentReplay: false,
+          totalDebit: '0.0000',
+          totalCredit: '0.0000',
+        }),
     };
   }
 
@@ -198,6 +242,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       const result = await service.create(actor, {
@@ -282,6 +327,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await service.create(actor, {
@@ -333,6 +379,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await expect(
@@ -423,6 +470,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       const result = await service.createFromSalesOrder(actor, 'so1', {});
@@ -506,6 +554,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await service.createFromSalesOrder(actor, 'so1', {});
@@ -544,6 +593,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await service.createFromSalesOrder(actor, 'so1', {});
@@ -569,6 +619,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(
         service.createFromSalesOrder(actor, 'so1', {}),
@@ -584,6 +635,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(
         service.createFromSalesOrder(actor, 'so1', {}),
@@ -656,6 +708,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       const result = await service.createFromProformaInvoice(actor, 'pf1', {});
@@ -686,6 +739,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(
         service.createFromProformaInvoice(actor, 'pf1', {}),
@@ -717,6 +771,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(
         service.update(actor, 'inv1', { notes: 'x' }),
@@ -734,6 +789,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(service.update(actor, 'inv1', {})).rejects.toBeInstanceOf(
         BadRequestException,
@@ -771,6 +827,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await service.update(actor, 'inv1', {
@@ -827,6 +884,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await service.update(actor, 'inv1', {
@@ -871,8 +929,12 @@ describe('SalesInvoicesService', () => {
         ...draftRow,
         status: SalesInvoiceStatus.SENT,
         sentAt: new Date(),
-        subtotal: { toFixed: () => '10.0000' },
-        ...zeroTotals(),
+        // Real Decimal (not the {toFixed} stand-in zeroTotals()/fake fields
+        // use elsewhere) — buildInvoicePostingRequest() calls .minus() on
+        // these once send() posts the accounting journal post-commit.
+        subtotal: new Prisma.Decimal(10),
+        discountTotal: new Prisma.Decimal(0),
+        taxTotal: new Prisma.Decimal(0),
         total: new Prisma.Decimal(10),
         ...unpaidState(),
         items: [],
@@ -895,6 +957,7 @@ describe('SalesInvoicesService', () => {
         eventBus as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       const result = await service.send(actor, 'inv1');
       expect(result.status).toBe(SalesInvoiceStatus.SENT);
@@ -932,6 +995,7 @@ describe('SalesInvoicesService', () => {
         eventBus as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(service.send(actor, 'inv1')).rejects.toBeInstanceOf(
         ConflictException,
@@ -952,6 +1016,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(service.send(actor, 'inv1')).rejects.toBeInstanceOf(
         BadRequestException,
@@ -964,8 +1029,10 @@ describe('SalesInvoicesService', () => {
         ...zeroTotalDraft,
         status: SalesInvoiceStatus.SENT,
         sentAt: new Date(),
-        subtotal: { toFixed: () => '0.0000' },
-        ...zeroTotals(),
+        // Real Decimal — see the previous test's comment.
+        subtotal: new Prisma.Decimal(0),
+        discountTotal: new Prisma.Decimal(0),
+        taxTotal: new Prisma.Decimal(0),
         items: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -985,6 +1052,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await service.send(actor, 'inv1');
       expect(updateMock.mock.calls[0][0].data.paymentStatus).toBe(
@@ -1028,6 +1096,7 @@ describe('SalesInvoicesService', () => {
           makeEventBus() as never,
           makeInventoryProducts() as never,
           makeAccountingTaxCodes() as never,
+          makeAccountingJournal() as never,
         );
         const result = await service.cancel(actor, 'inv1');
         expect(result.status).toBe(SalesInvoiceStatus.CANCELLED);
@@ -1052,6 +1121,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toBeInstanceOf(
         ConflictException,
@@ -1078,6 +1148,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toThrow(
         'Cannot cancel a sales invoice that has recorded payments',
@@ -1104,6 +1175,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
       await expect(service.cancel(actor, 'inv1')).rejects.toThrow(
         'Cannot cancel a sales invoice that has recorded payments',
@@ -1174,10 +1246,38 @@ describe('SalesInvoicesService', () => {
         },
         salesPayment: { create: createPaymentMock },
       };
+      // attemptPaymentPosting() runs post-commit against the outer
+      // this.prisma (never the transactional tx client above), so the
+      // top-level salesPayment mock needs its own update/findFirstOrThrow —
+      // defaults mirror a successful posting (accountingPostingStatus
+      // POSTED, journalEntryId set) since makeAccountingJournal()'s post()
+      // resolves successfully by default.
+      const paymentUpdateMock = jest.fn().mockImplementation(
+        (args: { data: Record<string, unknown> }) => ({
+          ...options.createdPayment,
+          ...args.data,
+        }),
+      );
+      const paymentFindFirstOrThrowMock = jest
+        .fn()
+        .mockResolvedValue(options.createdPayment);
       const prisma = {
         $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+        salesPayment: {
+          update: paymentUpdateMock,
+          findFirstOrThrow: paymentFindFirstOrThrowMock,
+        },
       };
-      return { prisma, tx, queryRawMock, findFirstOrThrowMock, createPaymentMock, updateInvoiceMock };
+      return {
+        prisma,
+        tx,
+        queryRawMock,
+        findFirstOrThrowMock,
+        createPaymentMock,
+        updateInvoiceMock,
+        paymentUpdateMock,
+        paymentFindFirstOrThrowMock,
+      };
     }
 
     function makeService(prisma: unknown, audit: { record: jest.Mock } = { record: jest.fn().mockResolvedValue(undefined) }) {
@@ -1188,6 +1288,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
     }
 
@@ -1470,6 +1571,7 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       const result = await service.listPayments(actor, 'inv1');
@@ -1493,11 +1595,666 @@ describe('SalesInvoicesService', () => {
         makeEventBus() as never,
         makeInventoryProducts() as never,
         makeAccountingTaxCodes() as never,
+        makeAccountingJournal() as never,
       );
 
       await expect(service.listPayments(actor, 'inv1')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  describe('Sales Accounting Integration', () => {
+    /** Full SalesInvoice row shape, mirrors PurchaseInvoicesService's own fullInvoiceHeader() fixture. */
+    function fullInvoiceHeader(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'inv1',
+        tenantId,
+        invoiceNumber: 'INV-00000001',
+        sourceType: null,
+        sourceId: null,
+        status: SalesInvoiceStatus.SENT,
+        customerId: 'c1',
+        customerName: 'Acme',
+        billingAddress: null,
+        shippingAddress: null,
+        paymentTermId: null,
+        salespersonId: null,
+        invoiceDate: new Date(),
+        dueDate: null,
+        notes: null,
+        subtotal: new Prisma.Decimal(0),
+        discountTotal: new Prisma.Decimal(0),
+        taxTotal: new Prisma.Decimal(0),
+        total: new Prisma.Decimal(0),
+        amountPaid: new Prisma.Decimal(0),
+        paymentStatus: SalesInvoicePaymentStatus.UNPAID,
+        sentAt: new Date(),
+        accountingPostingStatus: SalesInvoicePostingStatus.NOT_POSTED,
+        journalEntryId: null,
+        reversalJournalEntryId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        items: [],
+        ...overrides,
+      };
+    }
+
+    function buildSendService(
+      prisma: unknown,
+      accountingJournal?: unknown,
+    ) {
+      return new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+        (accountingJournal ?? makeAccountingJournal()) as never,
+      );
+    }
+
+    // ===================== posting-line construction (S1-S5) =====================
+
+    it('S1. send() posts Dr Accounts Receivable / Cr Sales Revenue for a normal invoice with no discount and no tax', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(100),
+        total: new Prisma.Decimal(100),
+      });
+      const sentRow = { ...draftRow, status: SalesInvoiceStatus.SENT, items: [] };
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(draftRow),
+          // Reflects `data` — the SENT-transition update and the later
+          // POSTED/journalEntryId update inside attemptInvoicePosting()
+          // must not silently clobber each other.
+          update: jest.fn(({ data }: any) => Promise.resolve({ ...sentRow, ...data })),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-1', entryNumber: 'JE-00000001', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '100.0000', totalCredit: '100.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      const result = await service.send(actor, 'inv1');
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceService: 'sales-service',
+          sourceType: 'SALES_INVOICE',
+          sourceId: 'inv1',
+          lines: [
+            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' }),
+            expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '100.0000' }),
+          ],
+        }),
+      );
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('je-1');
+    });
+
+    it('S2. send() credits Sales Revenue net of discount (subtotal - discountTotal), not the gross subtotal', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(100),
+        discountTotal: new Prisma.Decimal(10),
+        total: new Prisma.Decimal(90),
+      });
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(draftRow),
+          update: jest.fn().mockResolvedValue({ ...draftRow, status: SalesInvoiceStatus.SENT, items: [] }),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-2', entryNumber: 'JE-00000002', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '90.0000', totalCredit: '90.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      await service.send(actor, 'inv1');
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '90.0000' }),
+            expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '90.0000' }),
+          ],
+        }),
+      );
+    });
+
+    it('S3. send() omits the OUTPUT_TAX line entirely when taxTotal is zero', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(50),
+        total: new Prisma.Decimal(50),
+      });
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(draftRow),
+          update: jest.fn().mockResolvedValue({ ...draftRow, status: SalesInvoiceStatus.SENT, items: [] }),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-3', entryNumber: 'JE-00000003', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '50.0000', totalCredit: '50.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      await service.send(actor, 'inv1');
+
+      const lines = postMock.mock.calls[0][1].lines;
+      expect(lines).toHaveLength(2);
+      expect(lines.some((l: any) => l.role === 'OUTPUT_TAX')).toBe(false);
+    });
+
+    it('S4. send() with tax posts three balanced lines: Cr Sales Revenue + Cr Output Tax = Dr Accounts Receivable', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(100),
+        taxTotal: new Prisma.Decimal(18),
+        total: new Prisma.Decimal(118),
+      });
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(draftRow),
+          update: jest.fn().mockResolvedValue({ ...draftRow, status: SalesInvoiceStatus.SENT, items: [] }),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-4', entryNumber: 'JE-00000004', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '118.0000', totalCredit: '118.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      await service.send(actor, 'inv1');
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            expect.objectContaining({ role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' }),
+            expect.objectContaining({ role: 'OUTPUT_TAX', side: 'CREDIT', amount: '18.0000' }),
+            expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '118.0000' }),
+          ],
+        }),
+      );
+
+      // S5: balanced-journal-request check — total debits === total credits,
+      // computed generically from whatever lines were actually sent.
+      const lines = postMock.mock.calls[0][1].lines as Array<{ side: string; amount: string }>;
+      const debitTotal = lines
+        .filter((l) => l.side === 'DEBIT')
+        .reduce((sum, l) => sum + Number(l.amount), 0);
+      const creditTotal = lines
+        .filter((l) => l.side === 'CREDIT')
+        .reduce((sum, l) => sum + Number(l.amount), 0);
+      expect(debitTotal).toBe(creditTotal);
+    });
+
+    // ===================== send() accounting failure + retry (S6-S8) =====================
+
+    it('S6. send() succeeds even when accounting posting fails: invoice stays SENT, accountingPostingStatus becomes FAILED, journalEntryId stays null', async () => {
+      const draftRow = fullInvoiceHeader({
+        status: SalesInvoiceStatus.DRAFT,
+        items: [{ id: 'item1' }],
+        subtotal: new Prisma.Decimal(100),
+        total: new Prisma.Decimal(100),
+      });
+      const sentRow = { ...draftRow, status: SalesInvoiceStatus.SENT, items: [] };
+      const failedRow = { ...sentRow, accountingPostingStatus: SalesInvoicePostingStatus.FAILED };
+      const prisma: any = {
+        salesInvoice: {
+          // First call is send()'s own initial require() (must see DRAFT);
+          // the second call is require() inside attemptInvoicePosting's
+          // catch branch, reading back the final, reconciled FAILED state.
+          findFirst: jest
+            .fn()
+            .mockResolvedValueOnce(draftRow)
+            .mockResolvedValue(failedRow),
+          update: jest.fn().mockResolvedValue(sentRow),
+        },
+      };
+      const failingPost = jest.fn().mockRejectedValue(new Error('accounting service unreachable'));
+      const service = buildSendService(prisma, makeAccountingJournal({ post: failingPost }));
+
+      const result = await service.send(actor, 'inv1');
+
+      expect(result.status).toBe(SalesInvoiceStatus.SENT);
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.FAILED);
+      expect(result.journalEntryId).toBeNull();
+    });
+
+    it('S7. retryAccountingPosting() on a FAILED invoice successfully posts and transitions to POSTED', async () => {
+      const existingPrisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({ accountingPostingStatus: SalesInvoicePostingStatus.FAILED }),
+          ),
+          update: jest.fn(({ data }: any) =>
+            Promise.resolve(fullInvoiceHeader({ ...data })),
+          ),
+        },
+      };
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-retry', entryNumber: 'JE-00000020', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE', sourceId: 'inv1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '5.0000', totalCredit: '5.0000',
+      });
+      const service = buildSendService(existingPrisma, makeAccountingJournal({ post: postMock }));
+
+      const result = await service.retryAccountingPosting(actor, 'inv1');
+
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('je-retry');
+    });
+
+    it('S8. calling retryAccountingPosting() on an already-POSTED invoice never calls accounting-service again (idempotent)', async () => {
+      const alreadyPosted = fullInvoiceHeader({
+        accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
+        journalEntryId: 'je-already-posted',
+      });
+      const prisma: any = { salesInvoice: { findFirst: jest.fn().mockResolvedValue(alreadyPosted) } };
+      const postMock = jest.fn();
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      const first = await service.retryAccountingPosting(actor, 'inv1');
+      const second = await service.retryAccountingPosting(actor, 'inv1');
+
+      expect(postMock).not.toHaveBeenCalled();
+      for (const result of [first, second]) {
+        expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.POSTED);
+        expect(result.journalEntryId).toBe('je-already-posted');
+      }
+    });
+
+    it('retryAccountingPosting() on a CANCELLED invoice is rejected with 409 and never calls accounting-service', async () => {
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({
+              status: SalesInvoiceStatus.CANCELLED,
+              accountingPostingStatus: SalesInvoicePostingStatus.FAILED,
+            }),
+          ),
+        },
+      };
+      const postMock = jest.fn();
+      const service = buildSendService(prisma, makeAccountingJournal({ post: postMock }));
+
+      await expect(service.retryAccountingPosting(actor, 'inv1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(postMock).not.toHaveBeenCalled();
+    });
+
+    // ===================== cancel() + reversal (S9-S13) =====================
+
+    it('S9. cancel() on a SENT invoice whose posting is POSTED creates a reversal journal and transitions to REVERSED', async () => {
+      const sentRow = fullInvoiceHeader({
+        accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
+        journalEntryId: 'je-original',
+      });
+      const cancelledRow = { ...sentRow, status: SalesInvoiceStatus.CANCELLED };
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(sentRow),
+          // Reflects whatever `data` each call passes — the cancel-status
+          // update and the later reversal-status update inside
+          // attemptInvoiceReversal() must not silently clobber each other.
+          update: jest.fn(({ data }: any) => Promise.resolve({ ...cancelledRow, ...data })),
+        },
+      };
+      const reverseMock = jest.fn().mockResolvedValue({
+        id: 'je-reversal', entryNumber: 'JE-00000011', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE_CANCELLATION', sourceId: 'inv1',
+        reversesJournalEntryId: 'je-original', idempotentReplay: false, totalDebit: '5.0000', totalCredit: '5.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+      const result = await service.cancel(actor, 'inv1');
+
+      expect(reverseMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceService: 'sales-service',
+          sourceType: 'SALES_INVOICE',
+          sourceId: 'inv1',
+          reversalSourceType: 'SALES_INVOICE_CANCELLATION',
+        }),
+      );
+      expect(result.status).toBe(SalesInvoiceStatus.CANCELLED);
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.REVERSED);
+      expect(result.reversalJournalEntryId).toBe('je-reversal');
+    });
+
+    it('S10. cancel() succeeds even when the accounting reversal fails: invoice is CANCELLED, accountingPostingStatus stays POSTED for reconciliation', async () => {
+      const sentRow = fullInvoiceHeader({
+        accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
+        journalEntryId: 'je-original',
+      });
+      const cancelledRow = { ...sentRow, status: SalesInvoiceStatus.CANCELLED };
+      const prisma: any = {
+        salesInvoice: {
+          // Initial require() inside cancel() must see the pre-cancel SENT
+          // state; the later require() inside attemptInvoiceReversal's catch
+          // branch (after the failed reverse() call) reads back the final,
+          // already-CANCELLED-but-still-POSTED state for reconciliation.
+          findFirst: jest.fn().mockResolvedValueOnce(sentRow).mockResolvedValue(cancelledRow),
+          update: jest.fn().mockResolvedValue(cancelledRow),
+        },
+      };
+      const reverseMock = jest.fn().mockRejectedValue(new Error('accounting service unreachable'));
+      const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+      const result = await service.cancel(actor, 'inv1');
+
+      expect(result.status).toBe(SalesInvoiceStatus.CANCELLED);
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.POSTED);
+      expect(result.reversalJournalEntryId).toBeNull();
+    });
+
+    it('S11. retryAccountingReversal() on a CANCELLED invoice whose reversal previously failed succeeds and transitions to REVERSED', async () => {
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({
+              status: SalesInvoiceStatus.CANCELLED,
+              accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
+              journalEntryId: 'je-original',
+            }),
+          ),
+          update: jest.fn(({ data }: any) =>
+            Promise.resolve(
+              fullInvoiceHeader({ status: SalesInvoiceStatus.CANCELLED, ...data }),
+            ),
+          ),
+        },
+      };
+      const reverseMock = jest.fn().mockResolvedValue({
+        id: 'je-reversal-retry', entryNumber: 'JE-00000050', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'SALES_INVOICE_CANCELLATION', sourceId: 'inv1',
+        reversesJournalEntryId: 'je-original', idempotentReplay: false, totalDebit: '5.0000', totalCredit: '5.0000',
+      });
+      const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+      const result = await service.retryAccountingReversal(actor, 'inv1');
+
+      expect(reverseMock).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe(SalesInvoicePostingStatus.REVERSED);
+      expect(result.reversalJournalEntryId).toBe('je-reversal-retry');
+    });
+
+    it('S12. retryAccountingReversal() on an already-REVERSED invoice is a no-op and never calls accounting-service again', async () => {
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({
+              status: SalesInvoiceStatus.CANCELLED,
+              accountingPostingStatus: SalesInvoicePostingStatus.REVERSED,
+              journalEntryId: 'je-original',
+              reversalJournalEntryId: 'je-reversal-existing',
+            }),
+          ),
+        },
+      };
+      const reverseMock = jest.fn();
+      const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+      const result = await service.retryAccountingReversal(actor, 'inv1');
+
+      expect(reverseMock).not.toHaveBeenCalled();
+      expect(result.reversalJournalEntryId).toBe('je-reversal-existing');
+    });
+
+    it('retryAccountingReversal() on a non-CANCELLED invoice is rejected with 409 and never calls accounting-service', async () => {
+      const prisma: any = {
+        salesInvoice: {
+          findFirst: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({
+              status: SalesInvoiceStatus.SENT,
+              accountingPostingStatus: SalesInvoicePostingStatus.POSTED,
+              journalEntryId: 'je-original',
+            }),
+          ),
+        },
+      };
+      const reverseMock = jest.fn();
+      const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+      await expect(service.retryAccountingReversal(actor, 'inv1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(reverseMock).not.toHaveBeenCalled();
+    });
+
+    it('S13. cancel() on an invoice whose posting was never successful (FAILED or NOT_POSTED) never attempts a reversal, and retryAccountingReversal() rejects it with 409', async () => {
+      for (const priorStatus of [
+        SalesInvoicePostingStatus.FAILED,
+        SalesInvoicePostingStatus.NOT_POSTED,
+      ]) {
+        const sentRow = fullInvoiceHeader({ accountingPostingStatus: priorStatus });
+        const cancelledRow = { ...sentRow, status: SalesInvoiceStatus.CANCELLED };
+        const prisma: any = {
+          salesInvoice: {
+            // First call: cancel()'s own initial require() (must see SENT).
+            // Every call after that (including the later
+            // retryAccountingReversal() below) sees the already-CANCELLED row.
+            findFirst: jest.fn().mockResolvedValueOnce(sentRow).mockResolvedValue(cancelledRow),
+            update: jest.fn().mockResolvedValue(cancelledRow),
+          },
+        };
+        const reverseMock = jest.fn();
+        const service = buildSendService(prisma, makeAccountingJournal({ reverse: reverseMock }));
+
+        const result = await service.cancel(actor, 'inv1');
+        expect(reverseMock).not.toHaveBeenCalled();
+        expect(result.accountingPostingStatus).toBe(priorStatus);
+
+        await expect(service.retryAccountingReversal(actor, 'inv1')).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+      }
+    });
+
+    // ===================== tenant isolation (S14) =====================
+
+    it('S14. retryAccountingPosting() and retryAccountingReversal() return 404 for a missing/cross-tenant invoice, scoped by tenantId', async () => {
+      const findFirst = jest.fn().mockResolvedValue(null);
+      const prisma: any = { salesInvoice: { findFirst } };
+      const service = buildSendService(prisma, makeAccountingJournal());
+
+      await expect(service.retryAccountingPosting(actor, 'inv1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(service.retryAccountingReversal(actor, 'inv1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      for (const call of findFirst.mock.calls) {
+        expect(call[0].where).toEqual(
+          expect.objectContaining({ id: 'inv1', tenantId }),
+        );
+      }
+    });
+
+    // ===================== Customer Payment (P1-P4) =====================
+
+    function fullPaymentRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'pay1',
+        tenantId,
+        salesInvoiceId: 'inv1',
+        amount: new Prisma.Decimal(40),
+        paymentDate: new Date('2026-01-15'),
+        paymentMethodId: null,
+        reference: null,
+        notes: null,
+        accountingPostingStatus: SalesPaymentPostingStatus.NOT_POSTED,
+        journalEntryId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    function buildPaymentHarness(options: {
+      invoice: Record<string, unknown>;
+      createdPayment: Record<string, unknown>;
+      accountingJournal?: unknown;
+    }) {
+      const queryRawMock = jest.fn().mockResolvedValue([{ id: 'inv1' }]);
+      const findFirstOrThrowMock = jest.fn().mockResolvedValue(options.invoice);
+      const createPaymentMock = jest.fn().mockResolvedValue(options.createdPayment);
+      const updateInvoiceMock = jest.fn().mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) => ({
+          ...options.invoice,
+          items: [],
+          ...data,
+        }),
+      );
+      const tx = {
+        $queryRaw: queryRawMock,
+        salesInvoice: { findFirstOrThrow: findFirstOrThrowMock, update: updateInvoiceMock },
+        salesPayment: { create: createPaymentMock },
+      };
+      const paymentUpdateMock = jest.fn().mockImplementation((args: { data: Record<string, unknown> }) => ({
+        ...options.createdPayment,
+        ...args.data,
+      }));
+      const paymentFindFirstOrThrowMock = jest.fn().mockResolvedValue(options.createdPayment);
+      const prisma = {
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+        salesPayment: { update: paymentUpdateMock, findFirstOrThrow: paymentFindFirstOrThrowMock },
+      };
+      const service = new SalesInvoicesService(
+        prisma as never,
+        { require: jest.fn() } as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        makeEventBus() as never,
+        makeInventoryProducts() as never,
+        makeAccountingTaxCodes() as never,
+        (options.accountingJournal ?? makeAccountingJournal()) as never,
+      );
+      return { service, paymentUpdateMock };
+    }
+
+    it('P1. a Customer Payment with a paymentMethodId posts successfully: Dr Payment Method / Cr Accounts Receivable', async () => {
+      const invoice = fullInvoiceHeader({ total: new Prisma.Decimal(100), amountPaid: new Prisma.Decimal(0) });
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-payment', entryNumber: 'JE-00000040', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'CUSTOMER_PAYMENT', sourceId: 'pay1',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '40.0000', totalCredit: '40.0000',
+      });
+      const { service } = buildPaymentHarness({
+        invoice,
+        createdPayment: fullPaymentRow({ paymentMethodId: 'pm-1' }),
+        accountingJournal: makeAccountingJournal({ post: postMock }),
+      });
+
+      const result = await service.recordPayment(actor, 'inv1', {
+        amount: '40',
+        paymentDate: '2026-01-15',
+        paymentMethodId: 'pm-1',
+      });
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceService: 'sales-service',
+          sourceType: 'CUSTOMER_PAYMENT',
+          sourceId: 'pay1',
+          lines: [
+            expect.objectContaining({ role: 'PAYMENT_METHOD', side: 'DEBIT', amount: '40.0000', paymentMethodId: 'pm-1' }),
+            expect.objectContaining({ role: 'ACCOUNTS_RECEIVABLE', side: 'CREDIT', amount: '40.0000' }),
+          ],
+        }),
+      );
+      expect(result.payment.accountingPostingStatus).toBe(SalesPaymentPostingStatus.POSTED);
+      expect(result.payment.journalEntryId).toBe('je-payment');
+    });
+
+    it('P2. a Customer Payment with no paymentMethodId is marked FAILED without ever calling accounting-service', async () => {
+      const invoice = fullInvoiceHeader({ total: new Prisma.Decimal(100), amountPaid: new Prisma.Decimal(0) });
+      const postMock = jest.fn();
+      const { service } = buildPaymentHarness({
+        invoice,
+        createdPayment: fullPaymentRow({ paymentMethodId: null }),
+        accountingJournal: makeAccountingJournal({ post: postMock }),
+      });
+
+      const result = await service.recordPayment(actor, 'inv1', {
+        amount: '40',
+        paymentDate: '2026-01-15',
+      });
+
+      expect(postMock).not.toHaveBeenCalled();
+      expect(result.payment.accountingPostingStatus).toBe(SalesPaymentPostingStatus.FAILED);
+    });
+
+    it('P3. a Customer Payment whose PAYMENT_METHOD mapping cannot be resolved is marked FAILED — the already-committed payment is never rolled back', async () => {
+      const invoice = fullInvoiceHeader({ total: new Prisma.Decimal(100), amountPaid: new Prisma.Decimal(0) });
+      // Simulates accounting-service rejecting the posting because no
+      // AccountMapping exists for this PaymentMethod (BadRequestException
+      // surfaces to the client as a rethrown error, exactly like any other
+      // accounting-service failure — Sales never resolves the mapping itself).
+      const postMock = jest.fn().mockRejectedValue(new Error('No account mapping configured for PAYMENT_METHOD'));
+      const { service } = buildPaymentHarness({
+        invoice,
+        createdPayment: fullPaymentRow({ paymentMethodId: 'pm-unmapped' }),
+        accountingJournal: makeAccountingJournal({ post: postMock }),
+      });
+
+      const result = await service.recordPayment(actor, 'inv1', {
+        amount: '40',
+        paymentDate: '2026-01-15',
+        paymentMethodId: 'pm-unmapped',
+      });
+
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(result.payment.accountingPostingStatus).toBe(SalesPaymentPostingStatus.FAILED);
+      // The Sales-side payment record itself is untouched by the accounting failure.
+      expect(result.invoice.amountPaid).toBe('40.0000');
+    });
+
+    it('P4. a second payment on the same invoice posts its own independent accounting journal', async () => {
+      const invoice = fullInvoiceHeader({ total: new Prisma.Decimal(100), amountPaid: new Prisma.Decimal(40) });
+      const postMock = jest.fn().mockResolvedValue({
+        id: 'je-payment-2', entryNumber: 'JE-00000041', status: 'POSTED',
+        sourceService: 'sales-service', sourceType: 'CUSTOMER_PAYMENT', sourceId: 'pay2',
+        reversesJournalEntryId: null, idempotentReplay: false, totalDebit: '60.0000', totalCredit: '60.0000',
+      });
+      const { service } = buildPaymentHarness({
+        invoice,
+        createdPayment: fullPaymentRow({ id: 'pay2', amount: new Prisma.Decimal(60), paymentMethodId: 'pm-1' }),
+        accountingJournal: makeAccountingJournal({ post: postMock }),
+      });
+
+      const result = await service.recordPayment(actor, 'inv1', {
+        amount: '60',
+        paymentDate: '2026-01-20',
+        paymentMethodId: 'pm-1',
+      });
+
+      expect(postMock).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({ sourceId: 'pay2' }),
+      );
+      expect(result.payment.journalEntryId).toBe('je-payment-2');
     });
   });
 });

@@ -63,6 +63,26 @@ enum SalesInvoicePaymentStatus {
   PAID
 }
 
+// Sales Accounting Integration — Sales-side cache of accounting-service's
+// own posting state (mirrors PurchaseInvoicePostingStatus /
+// SupplierPaymentPostingStatus exactly). No fallback account exists for any
+// purpose, so a posting attempt can legitimately sit at FAILED until
+// retried via retryAccountingPosting()/retryAccountingReversal().
+enum SalesInvoicePostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
+// No REVERSED here: SalesPayment has no reversal path in this phase, same
+// limitation as SupplierPayment.
+enum SalesPaymentPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+}
+
 model Customer {
   id       String @id @default(uuid()) @db.Uuid
   tenantId String @db.Uuid
@@ -471,6 +491,13 @@ model SalesInvoice {
   createdAt       DateTime                  @default(now())
   updatedAt       DateTime                  @updatedAt
 
+  // Sales Accounting Integration — Sales-side cache of accounting-service's
+  // own posting state (see enum comment above). No FK to accounting_db
+  // (separate database; soft reference, mirrors paymentTermId above).
+  accountingPostingStatus SalesInvoicePostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                   @db.Uuid
+  reversalJournalEntryId  String?                   @db.Uuid
+
   customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items    SalesInvoiceItem[]
   payments SalesPayment[]
@@ -548,6 +575,13 @@ model SalesPayment {
   paymentMethodId String?  @db.Uuid
   reference       String?
   notes           String?
+
+  // Sales Accounting Integration — Sales-side cache of accounting-service's
+  // own posting state. No reversalJournalEntryId here: SalesPayment has no
+  // reversal path in this phase (mirrors SupplierPayment exactly).
+  accountingPostingStatus SalesPaymentPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                   @db.Uuid
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

@@ -37,16 +37,23 @@ enum TaxComponentType {
 // Phase C1 (Accounting Foundation) — generic, tenant-scoped "business role ->
 // GL account" resolution, used by the internal journal-postings API so that
 // callers (Purchase, later Sales) never need to know a real Account id.
-// PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX are tenant-wide singletons
-// (externalRefId always ""); PAYMENT_METHOD is per-entity (externalRefId =
-// a master-data PaymentMethod id). No fallback tier exists for any purpose —
-// an unmapped purpose/externalRefId always fails posting rather than
-// guessing an account (approved design, Phase C1/C2 review).
+// PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX/SALES_REVENUE/
+// ACCOUNTS_RECEIVABLE/OUTPUT_TAX are tenant-wide singletons (externalRefId
+// always ""); PAYMENT_METHOD is per-entity (externalRefId = a master-data
+// PaymentMethod id) and shared by both Purchase and Sales — one mapping per
+// PaymentMethod regardless of which side posts against it. No fallback tier
+// exists for any purpose — an unmapped purpose/externalRefId always fails
+// posting rather than guessing an account (approved design, Phase C1/C2
+// review; Sales purposes added under the same design in the Sales
+// Accounting Integration phase).
 enum AccountMappingPurpose {
   PURCHASE_EXPENSE
   ACCOUNTS_PAYABLE
   INPUT_TAX
   PAYMENT_METHOD
+  SALES_REVENUE
+  ACCOUNTS_RECEIVABLE
+  OUTPUT_TAX
 }
 
 model Account {

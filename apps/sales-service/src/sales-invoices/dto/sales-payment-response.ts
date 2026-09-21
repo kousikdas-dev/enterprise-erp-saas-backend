@@ -1,4 +1,7 @@
-import { Prisma } from '../../../generated/prisma-client';
+import {
+  Prisma,
+  SalesPaymentPostingStatus,
+} from '../../../generated/prisma-client';
 import { moneyToString } from '../../common/decimal';
 
 type SalesPaymentRow = {
@@ -10,6 +13,8 @@ type SalesPaymentRow = {
   paymentMethodId: string | null;
   reference: string | null;
   notes: string | null;
+  accountingPostingStatus: SalesPaymentPostingStatus;
+  journalEntryId: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -23,7 +28,11 @@ export function toSalesPaymentResponse(row: SalesPaymentRow) {
     paymentMethodId: row.paymentMethodId,
     reference: row.reference,
     notes: row.notes,
+    accountingPostingStatus: row.accountingPostingStatus,
+    journalEntryId: row.journalEntryId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
+
+export { SalesPaymentPostingStatus };

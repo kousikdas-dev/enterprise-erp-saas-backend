@@ -7,6 +7,9 @@ const ACCOUNT_MAPPING_PURPOSES = [
   'ACCOUNTS_PAYABLE',
   'INPUT_TAX',
   'PAYMENT_METHOD',
+  'SALES_REVENUE',
+  'ACCOUNTS_RECEIVABLE',
+  'OUTPUT_TAX',
 ] as const;
 export type AccountMappingPurposeValue =
   (typeof ACCOUNT_MAPPING_PURPOSES)[number];

@@ -20,8 +20,8 @@
   <div class="card-body">
     <p class="text-muted small mb-3">
       Sales invoices may be created directly, or from a Sales Order / Proforma Invoice. Sending an invoice
-      publishes the accounting integration event; posting the actual journal entry requires the Accounting
-      service, which does not yet implement a ledger.
+      posts its accounting journal (Accounts Receivable / Sales Revenue / Output Tax); cancelling a posted,
+      SENT invoice reverses that journal. See the Accounting column for the current posting state.
     </p>
     <app-list-state
       [loading]="loading"
@@ -41,6 +41,7 @@
               <th class="text-end">Total</th>
               <th class="text-end">Balance due</th>
               <th class="text-center">Payment</th>
+              <th class="text-center">Accounting</th>
               <th class="text-end">Actions</th>
             </tr>
           </thead>
@@ -59,6 +60,11 @@
               <td class="text-end"><code>{{ item.balanceDue }}</code></td>
               <td class="text-center">
                 <span class="badge" [ngClass]="paymentStatusBadgeClass(item.paymentStatus)">{{ item.paymentStatus }}</span>
+              </td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="postingStatusBadgeClass(item.accountingPostingStatus)">
+                  {{ item.accountingPostingStatus }}
+                </span>
               </td>
               <td class="text-end text-nowrap">
                 <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
@@ -88,9 +94,25 @@
                 <button
                   *ngIf="canCancelInvoice(item)"
                   type="button"
-                  class="btn btn-sm btn-outline-dark"
+                  class="btn btn-sm btn-outline-dark me-1"
                   (click)="askAction('cancel', item)">
                   Cancel
+                </button>
+                <button
+                  *ngIf="canRetryPosting(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  title="The original accounting posting failed — retry it"
+                  (click)="askAction('retry-posting', item)">
+                  Retry Posting
+                </button>
+                <button
+                  *ngIf="canRetryReversal(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning"
+                  title="The accounting reversal for this cancelled invoice failed — retry it"
+                  (click)="askAction('retry-reversal', item)">
+                  Retry Reversal
                 </button>
               </td>
             </tr>
@@ -328,6 +350,12 @@
       <dd class="col-sm-8">
         <span class="badge" [ngClass]="paymentStatusBadgeClass(inv.paymentStatus)">{{ inv.paymentStatus }}</span>
       </dd>
+      <dt class="col-sm-4">Accounting</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="postingStatusBadgeClass(inv.accountingPostingStatus)">
+          {{ inv.accountingPostingStatus }}
+        </span>
+      </dd>
     </dl>
     <div class="table-responsive">
       <table class="table table-sm">
@@ -394,6 +422,20 @@
       class="btn btn-outline-info"
       (click)="modal.close(); openRecordPayment(viewing!)">
       Record Payment
+    </button>
+    <button
+      *ngIf="viewing && canRetryPosting(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      (click)="modal.close(); askAction('retry-posting', viewing!)">
+      Retry Posting
+    </button>
+    <button
+      *ngIf="viewing && canRetryReversal(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      (click)="modal.close(); askAction('retry-reversal', viewing!)">
+      Retry Reversal
     </button>
     <button
       type="button"

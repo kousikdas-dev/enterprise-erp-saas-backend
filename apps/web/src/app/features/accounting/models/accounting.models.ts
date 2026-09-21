@@ -173,7 +173,10 @@ export type AccountMappingPurpose =
   | 'PURCHASE_EXPENSE'
   | 'ACCOUNTS_PAYABLE'
   | 'INPUT_TAX'
-  | 'PAYMENT_METHOD';
+  | 'PAYMENT_METHOD'
+  | 'SALES_REVENUE'
+  | 'ACCOUNTS_RECEIVABLE'
+  | 'OUTPUT_TAX';
 
 export interface AccountMapping {
   id: string;

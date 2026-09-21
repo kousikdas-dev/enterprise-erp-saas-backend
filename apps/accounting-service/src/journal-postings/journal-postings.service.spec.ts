@@ -10,6 +10,8 @@ describe('JournalPostingsService', () => {
   const apAccount = { id: 'acc-ap', code: '2000', name: 'Accounts Payable', isActive: true };
   const bankAccount = { id: 'acc-bank', code: '1000', name: 'Bank', isActive: true };
   const inactiveAccount = { id: 'acc-inactive', code: '9999', name: 'Old', isActive: false };
+  const revenueAccount = { id: 'acc-revenue', code: '4000', name: 'Sales Revenue', isActive: true };
+  const arAccount = { id: 'acc-ar', code: '1200', name: 'Accounts Receivable', isActive: true };
 
   function decimal(value: string) {
     return new Prisma.Decimal(value);
@@ -74,6 +76,9 @@ describe('JournalPostingsService', () => {
       ACCOUNTS_PAYABLE: apAccount,
       INPUT_TAX: expenseAccount,
       PAYMENT_METHOD: bankAccount,
+      SALES_REVENUE: revenueAccount,
+      ACCOUNTS_RECEIVABLE: arAccount,
+      OUTPUT_TAX: revenueAccount,
     };
     const mappings = {
       resolve:
@@ -333,6 +338,116 @@ describe('JournalPostingsService', () => {
       expect(result.idempotentReplay).toBe(true);
       expect(result.id).toBe('je-2');
       expect(prisma.journalEntry.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Sales Accounting Integration roles', () => {
+    it('posts a balanced Sales Invoice entry using the new SALES_REVENUE/ACCOUNTS_RECEIVABLE/OUTPUT_TAX roles (role resolution + balanced posting)', async () => {
+      const { service, prisma, mappings } = buildService({
+        journalEntry: {
+          create: jest.fn().mockResolvedValue(
+            makeEntryRow({
+              sourceService: 'sales-service',
+              sourceType: 'SALES_INVOICE',
+              sourceId: 'sinv-1',
+              lines: [
+                { id: 'l1', lineNumber: 1, accountId: revenueAccount.id, account: revenueAccount, debitAmount: decimal('0'), creditAmount: decimal('100.0000'), description: null },
+                { id: 'l2', lineNumber: 2, accountId: revenueAccount.id, account: revenueAccount, debitAmount: decimal('0'), creditAmount: decimal('18.0000'), description: null },
+                { id: 'l3', lineNumber: 3, accountId: arAccount.id, account: arAccount, debitAmount: decimal('118.0000'), creditAmount: decimal('0'), description: null },
+              ],
+            }),
+          ),
+        },
+      });
+
+      const result = await service.create(actor, {
+        sourceService: 'sales-service',
+        sourceType: 'SALES_INVOICE',
+        sourceId: 'sinv-1',
+        lines: [
+          { role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' },
+          { role: 'OUTPUT_TAX', side: 'CREDIT', amount: '18.0000' },
+          { role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '118.0000' },
+        ],
+      });
+
+      expect(result.status).toBe('POSTED');
+      expect(mappings.resolve).toHaveBeenCalledWith(actor, 'SALES_REVENUE', '');
+      expect(mappings.resolve).toHaveBeenCalledWith(actor, 'OUTPUT_TAX', '');
+      expect(mappings.resolve).toHaveBeenCalledWith(actor, 'ACCOUNTS_RECEIVABLE', '');
+      const data = (prisma.journalEntry.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.lines.create).toHaveLength(3);
+      const totalDebit = data.lines.create.reduce(
+        (sum: Prisma.Decimal, l: { debitAmount: Prisma.Decimal }) => sum.plus(l.debitAmount),
+        decimal('0'),
+      );
+      const totalCredit = data.lines.create.reduce(
+        (sum: Prisma.Decimal, l: { creditAmount: Prisma.Decimal }) => sum.plus(l.creditAmount),
+        decimal('0'),
+      );
+      expect(totalDebit.equals(totalCredit)).toBe(true);
+    });
+
+    it('posts a balanced Customer Payment entry: Dr PAYMENT_METHOD / Cr ACCOUNTS_RECEIVABLE', async () => {
+      const { service, prisma } = buildService({
+        journalEntry: {
+          create: jest.fn().mockResolvedValue(
+            makeEntryRow({
+              sourceService: 'sales-service',
+              sourceType: 'CUSTOMER_PAYMENT',
+              sourceId: 'pay-1',
+            }),
+          ),
+        },
+      });
+
+      await service.create(actor, {
+        sourceService: 'sales-service',
+        sourceType: 'CUSTOMER_PAYMENT',
+        sourceId: 'pay-1',
+        lines: [
+          { role: 'PAYMENT_METHOD', side: 'DEBIT', amount: '40.0000', paymentMethodId: 'pm-1' },
+          { role: 'ACCOUNTS_RECEIVABLE', side: 'CREDIT', amount: '40.0000' },
+        ],
+      });
+
+      const data = (prisma.journalEntry.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.sourceType).toBe('CUSTOMER_PAYMENT');
+      expect(data.lines.create).toHaveLength(2);
+    });
+
+    it('rejects an unbalanced Sales-role posting the same way as any other role', async () => {
+      const { service, prisma } = buildService();
+      await expect(
+        service.create(actor, {
+          sourceService: 'sales-service',
+          sourceType: 'SALES_INVOICE',
+          sourceId: 'sinv-2',
+          lines: [
+            { role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' },
+            { role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '90.0000' },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.journalEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('propagates the mapping resolution error for an unmapped Sales role — never fabricates an account', async () => {
+      const { service } = buildService({
+        resolve: jest.fn().mockRejectedValue(new BadRequestException('No account mapping configured for SALES_REVENUE')),
+      });
+
+      await expect(
+        service.create(actor, {
+          sourceService: 'sales-service',
+          sourceType: 'SALES_INVOICE',
+          sourceId: 'sinv-3',
+          lines: [
+            { role: 'SALES_REVENUE', side: 'CREDIT', amount: '100.0000' },
+            { role: 'ACCOUNTS_RECEIVABLE', side: 'DEBIT', amount: '100.0000' },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

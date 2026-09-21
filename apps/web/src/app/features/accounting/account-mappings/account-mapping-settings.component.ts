@@ -41,6 +41,21 @@ const SINGLETON_PURPOSES: Array<{
     label: 'Input tax',
     hint: 'Debited for the tax portion of a posted purchase invoice.',
   },
+  {
+    purpose: 'SALES_REVENUE',
+    label: 'Sales revenue',
+    hint: 'Credited when a sales invoice is posted to accounting.',
+  },
+  {
+    purpose: 'ACCOUNTS_RECEIVABLE',
+    label: 'Accounts receivable',
+    hint: 'Debited when a sales invoice is posted to accounting.',
+  },
+  {
+    purpose: 'OUTPUT_TAX',
+    label: 'Output tax',
+    hint: 'Credited for the tax portion of a posted sales invoice.',
+  },
 ];
 
 interface SingletonRow {

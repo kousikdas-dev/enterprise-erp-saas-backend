@@ -180,6 +180,54 @@ export class SalesInvoicesController {
     });
   }
 
+  @Post(':id/retry-accounting-posting')
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_SEND)
+  @ApiOperation({
+    summary: 'Retry accounting posting',
+    description:
+      'Retries the journal posting for an invoice whose original post-send posting attempt failed (accountingPostingStatus FAILED). A no-op returning the invoice unchanged if already POSTED. Same permission as send, since this retries the posting send() attempted. Permission: sales-invoices.send.',
+  })
+  @ApiOkResponse({ type: SalesInvoiceDto })
+  @ApiConflictResponse({ description: 'Invoice is cancelled, or the posting attempt failed again' })
+  @ApiManagementErrors()
+  retryAccountingPosting(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<SalesInvoiceDto> {
+    return this.sales.forward<SalesInvoiceDto>({
+      method: 'POST',
+      path: `/api/v1/sales-invoices/${id}/retry-accounting-posting`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_CANCEL)
+  @ApiOperation({
+    summary: 'Retry accounting reversal',
+    description:
+      'Retries the journal reversal for a CANCELLED invoice whose post-cancel reversal attempt failed (still accountingPostingStatus POSTED). A no-op returning the invoice unchanged if already REVERSED. Same permission as cancel, since this retries the reversal cancel() attempted. Permission: sales-invoices.cancel.',
+  })
+  @ApiOkResponse({ type: SalesInvoiceDto })
+  @ApiConflictResponse({ description: 'Invoice is not cancelled, or has no posted journal to reverse' })
+  @ApiManagementErrors()
+  retryAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<SalesInvoiceDto> {
+    return this.sales.forward<SalesInvoiceDto>({
+      method: 'POST',
+      path: `/api/v1/sales-invoices/${id}/retry-accounting-reversal`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
   @Post(':id/payments')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT)

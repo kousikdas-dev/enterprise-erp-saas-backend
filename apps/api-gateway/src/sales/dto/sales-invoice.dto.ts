@@ -262,6 +262,19 @@ export class SalesInvoiceDto {
   @ApiPropertyOptional({ nullable: true })
   sentAt!: string | null;
 
+  @ApiProperty({
+    enum: ['NOT_POSTED', 'POSTED', 'FAILED', 'REVERSED'],
+    description:
+      'Accounting journal posting state for this invoice. NOT_POSTED before send(); POSTED once the journal is posted; FAILED if posting (or reversal) failed and can be retried; REVERSED once a cancelled, previously-posted invoice has had its journal reversed.',
+  })
+  accountingPostingStatus!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  journalEntryId!: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  reversalJournalEntryId!: string | null;
+
   @ApiProperty({ type: [SalesInvoiceItemDto] })
   items!: SalesInvoiceItemDto[];
 }

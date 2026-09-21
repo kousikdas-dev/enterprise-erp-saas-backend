@@ -50,7 +50,7 @@ import { UserService } from '../../administration/users/user.service';
 import { TaxCode } from '../../accounting/models/accounting.models';
 import { TaxCodeService } from '../../accounting/tax-codes/tax-code.service';
 
-type SalesInvoiceAction = 'send' | 'cancel';
+type SalesInvoiceAction = 'send' | 'cancel' | 'retry-posting' | 'retry-reversal';
 
 @Component({
   selector: 'app-sales-invoice-list',
@@ -479,6 +479,42 @@ export class SalesInvoiceListComponent implements OnInit {
     );
   }
 
+  postingStatusBadgeClass(status: string): string {
+    switch (status) {
+      case 'POSTED':
+        return 'bg-success';
+      case 'FAILED':
+        return 'bg-danger';
+      case 'REVERSED':
+        return 'bg-secondary';
+      default:
+        return 'bg-light text-dark border'; // NOT_POSTED
+    }
+  }
+
+  /** A failed original posting can be retried as long as the invoice hasn't been cancelled — mirrors retryAccountingPosting()'s own guard. */
+  canRetryPosting(item: SalesInvoice): boolean {
+    return (
+      this.canSend &&
+      item.status !== 'CANCELLED' &&
+      item.accountingPostingStatus === 'FAILED'
+    );
+  }
+
+  /**
+   * A cancelled invoice whose post-cancel reversal attempt failed stays at
+   * accountingPostingStatus POSTED (never FAILED — mirrors
+   * PurchaseInvoicesService.cancel()'s reconciliation note), so that exact
+   * combination is what's retryable here — mirrors retryAccountingReversal()'s guard.
+   */
+  canRetryReversal(item: SalesInvoice): boolean {
+    return (
+      this.canCancel &&
+      item.status === 'CANCELLED' &&
+      item.accountingPostingStatus === 'POSTED'
+    );
+  }
+
   loadLookups(): void {
     forkJoin({
       customers: this.customerService.list(),
@@ -744,6 +780,10 @@ export class SalesInvoiceListComponent implements OnInit {
         return 'Send sales invoice';
       case 'cancel':
         return 'Cancel sales invoice';
+      case 'retry-posting':
+        return 'Retry accounting posting';
+      case 'retry-reversal':
+        return 'Retry accounting reversal';
     }
   }
 
@@ -755,8 +795,21 @@ export class SalesInvoiceListComponent implements OnInit {
     this.actionBusy = true;
     this.cdr.detectChanges();
 
-    const request$: Observable<unknown> =
-      type === 'send' ? this.invoices.send(invoice.id) : this.invoices.cancel(invoice.id);
+    let request$: Observable<unknown>;
+    switch (type) {
+      case 'send':
+        request$ = this.invoices.send(invoice.id);
+        break;
+      case 'cancel':
+        request$ = this.invoices.cancel(invoice.id);
+        break;
+      case 'retry-posting':
+        request$ = this.invoices.retryAccountingPosting(invoice.id);
+        break;
+      case 'retry-reversal':
+        request$ = this.invoices.retryAccountingReversal(invoice.id);
+        break;
+    }
 
     request$.subscribe({
       next: () => {

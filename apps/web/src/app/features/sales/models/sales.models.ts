@@ -400,6 +400,8 @@ export type SalesInvoiceStatus = 'DRAFT' | 'SENT' | 'CANCELLED';
 
 export type SalesInvoicePaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
 
+export type SalesInvoicePostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+
 export interface SalesInvoiceItemTaxComponent {
   id: string;
   sequence: number;
@@ -455,6 +457,10 @@ export interface SalesInvoice {
   balanceDue: string;
   paymentStatus: SalesInvoicePaymentStatus | string;
   sentAt: string | null;
+  /** Accounting journal posting state — no fallback account, so this can legitimately sit at FAILED until retried. */
+  accountingPostingStatus: SalesInvoicePostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
   items: SalesInvoiceItem[];
 }
 

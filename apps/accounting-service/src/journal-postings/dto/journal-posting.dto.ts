@@ -16,6 +16,9 @@ const ROLES = [
   'ACCOUNTS_PAYABLE',
   'INPUT_TAX',
   'PAYMENT_METHOD',
+  'SALES_REVENUE',
+  'ACCOUNTS_RECEIVABLE',
+  'OUTPUT_TAX',
 ] as const;
 const SIDES = ['DEBIT', 'CREDIT'] as const;
 
