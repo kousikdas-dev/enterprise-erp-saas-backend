@@ -41,6 +41,13 @@ class AccountsProbeController {
   status(): { ok: true } {
     return { ok: true };
   }
+
+  @Get('ledger')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.ACCOUNT_LEDGER_READ)
+  ledger(): { ok: true } {
+    return { ok: true };
+  }
 }
 
 describe('accounting JWT and RBAC', () => {
@@ -133,5 +140,21 @@ describe('accounting JWT and RBAC', () => {
 
   it('returns 401 without JWT', async () => {
     await request(server).get('/accounts-probe').expect(401);
+  });
+
+  it('denies the ledger route to a user with only accounts.read', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNTS_READ]);
+    await request(server)
+      .get('/accounts-probe/ledger')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+  });
+
+  it('allows the ledger route with account-ledger.read', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.ACCOUNT_LEDGER_READ]);
+    await request(server)
+      .get('/accounts-probe/ledger')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(200);
   });
 });

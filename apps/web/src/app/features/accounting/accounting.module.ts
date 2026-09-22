@@ -3,6 +3,7 @@ import { RouterModule, Routes } from '@angular/router';
 import { SharedModule } from '../../shared.module';
 import { ListStateComponent } from '../../shared/list-state/list-state.component';
 import { AccountMappingSettingsComponent } from './account-mappings/account-mapping-settings.component';
+import { AccountLedgerComponent } from './accounts/account-ledger.component';
 import { AccountListComponent } from './accounts/account-list.component';
 import { JournalEntryListComponent } from './journal-entries/journal-entry-list.component';
 import { TaxCodeListComponent } from './tax-codes/tax-code-list.component';
@@ -12,6 +13,11 @@ const routes: Routes = [
   {
     path: 'accounts',
     component: AccountListComponent,
+    data: { extraParameter: 'accountingMenu' },
+  },
+  {
+    path: 'accounts/:id/ledger',
+    component: AccountLedgerComponent,
     data: { extraParameter: 'accountingMenu' },
   },
   {
@@ -34,6 +40,7 @@ const routes: Routes = [
 @NgModule({
   declarations: [
     AccountListComponent,
+    AccountLedgerComponent,
     JournalEntryListComponent,
     TaxCodeListComponent,
     AccountMappingSettingsComponent,

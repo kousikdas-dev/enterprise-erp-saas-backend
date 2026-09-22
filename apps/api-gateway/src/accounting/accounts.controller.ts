@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -35,6 +36,10 @@ import {
   UpdateAccountDto,
   UpdateAccountStatusDto,
 } from './dto/account.dto';
+import {
+  AccountLedgerQueryDto,
+  AccountLedgerResponseDto,
+} from './dto/account-ledger.dto';
 
 @ApiTags('Chart of Accounts')
 @Controller({ path: 'accounts', version: '1' })
@@ -101,6 +106,30 @@ export class AccountsController {
       method: 'GET',
       path: `/api/v1/accounts/${id}`,
       user,
+    });
+  }
+
+  @Get(':id/ledger')
+  @RequirePermissions(PERMISSIONS.ACCOUNT_LEDGER_READ)
+  @ApiOperation({
+    summary: 'Account ledger',
+    description:
+      'Posted journal activity for one account in the JWT tenant, with running balance, ' +
+      'opening/closing balance for the requested period, and pagination. Derived entirely ' +
+      'from posted JournalEntry/JournalLine rows. Permission: account-ledger.read.',
+  })
+  @ApiOkResponse({ type: AccountLedgerResponseDto })
+  @ApiManagementErrors()
+  getLedger(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: AccountLedgerQueryDto,
+  ): Promise<AccountLedgerResponseDto> {
+    return this.accounting.forward<AccountLedgerResponseDto>({
+      method: 'GET',
+      path: `/api/v1/accounts/${id}/ledger`,
+      user,
+      query: { ...query },
     });
   }
 

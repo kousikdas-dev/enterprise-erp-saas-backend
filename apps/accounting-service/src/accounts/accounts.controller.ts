@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -20,11 +21,16 @@ import {
   UpdateAccountDto,
   UpdateAccountStatusDto,
 } from './dto/account.dto';
+import { AccountLedgerQueryDto } from './ledger/account-ledger.dto';
+import { AccountLedgerService } from './ledger/account-ledger.service';
 
 @Controller({ path: 'accounts', version: '1' })
 @UseGuards(ActorGuard)
 export class AccountsController {
-  constructor(private readonly accounts: AccountsService) {}
+  constructor(
+    private readonly accounts: AccountsService,
+    private readonly ledger: AccountLedgerService,
+  ) {}
 
   @Post()
   create(
@@ -46,6 +52,15 @@ export class AccountsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.accounts.getById(actor, id);
+  }
+
+  @Get(':id/ledger')
+  getLedger(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: AccountLedgerQueryDto,
+  ) {
+    return this.ledger.getLedger(actor, id, query);
   }
 
   @Patch(':id/status')

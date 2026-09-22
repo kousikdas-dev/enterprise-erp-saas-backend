@@ -89,6 +89,7 @@ export const AppPermissions = {
   ACCOUNTS_CREATE: 'accounts.create',
   ACCOUNTS_READ: 'accounts.read',
   ACCOUNTS_UPDATE: 'accounts.update',
+  ACCOUNT_LEDGER_READ: 'account-ledger.read',
   JOURNAL_ENTRIES_CREATE: 'journal-entries.create',
   JOURNAL_ENTRIES_READ: 'journal-entries.read',
   JOURNAL_ENTRIES_UPDATE: 'journal-entries.update',

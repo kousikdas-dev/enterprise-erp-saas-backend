@@ -49,6 +49,13 @@
               </td>
               <td class="text-end text-nowrap">
                 <button
+                  *ngIf="canViewLedger"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary me-1"
+                  (click)="openLedger(item)">
+                  Ledger
+                </button>
+                <button
                   *ngIf="canUpdate"
                   type="button"
                   class="btn btn-sm btn-outline-primary me-1"

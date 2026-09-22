@@ -46,6 +46,49 @@ export interface ItemList<T> {
   items: T[];
 }
 
+export interface AccountLedgerAccount {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+}
+
+export interface AccountLedgerLine {
+  journalEntryId: string;
+  entryNumber: string;
+  /** UTC calendar date, YYYY-MM-DD. */
+  entryDate: string;
+  description: string | null;
+  debitAmount: string;
+  creditAmount: string;
+  runningBalance: string;
+  sourceService: string | null;
+  sourceType: string | null;
+  sourceId: string | null;
+  reversesJournalEntryId: string | null;
+}
+
+export interface AccountLedgerResponse {
+  account: AccountLedgerAccount;
+  fromDate: string | null;
+  toDate: string | null;
+  openingBalance: string;
+  closingBalance: string;
+  items: AccountLedgerLine[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AccountLedgerQuery {
+  /** UTC calendar date, YYYY-MM-DD. */
+  fromDate?: string;
+  /** UTC calendar date, YYYY-MM-DD. */
+  toDate?: string;
+  page?: number;
+  limit?: number;
+}
+
 export type JournalEntryStatus = 'DRAFT' | 'POSTED' | 'VOID';
 
 export interface JournalLineAccount {

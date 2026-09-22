@@ -141,6 +141,10 @@ model JournalEntry {
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, entryDate])
+  // Covers the Account Ledger query's WHERE (tenantId, status='POSTED',
+  // entryDate range) in a single index scan instead of a bitmap AND of the
+  // two separate indexes above.
+  @@index([tenantId, status, entryDate])
   @@map("journal_entries")
 }
 
@@ -162,6 +166,10 @@ model JournalLine {
   @@index([tenantId])
   @@index([journalEntryId])
   @@index([accountId])
+  // Covers the Account Ledger query's WHERE (tenantId, accountId) — the
+  // primary access pattern for "all lines for one account" before joining
+  // to journal_entries for the status/date filter.
+  @@index([tenantId, accountId])
   @@map("journal_lines")
 }
 

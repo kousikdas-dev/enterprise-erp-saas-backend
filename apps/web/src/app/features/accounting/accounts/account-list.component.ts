@@ -8,6 +8,7 @@ import {
   inject,
 } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { NgbModal, NgbModalRef } from '@ng-bootstrap/ng-bootstrap';
 import { AppPermissions } from '../../../core/permissions/permissions.constants';
 import { PermissionService } from '../../../core/permissions/permission.service';
@@ -39,9 +40,11 @@ export class AccountListComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly permissions = inject(PermissionService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly router = inject(Router);
 
   readonly canCreate = this.permissions.has(AppPermissions.ACCOUNTS_CREATE);
   readonly canUpdate = this.permissions.has(AppPermissions.ACCOUNTS_UPDATE);
+  readonly canViewLedger = this.permissions.has(AppPermissions.ACCOUNT_LEDGER_READ);
   readonly accountTypes = ACCOUNT_TYPES;
 
   items: Account[] = [];
@@ -176,6 +179,13 @@ export class AccountListComponent implements OnInit {
         this.cdr.detectChanges();
       },
     });
+  }
+
+  openLedger(item: Account): void {
+    if (!this.canViewLedger) {
+      return;
+    }
+    void this.router.navigate(['/accounting/accounts', item.id, 'ledger']);
   }
 
   toggleStatus(item: Account): void {

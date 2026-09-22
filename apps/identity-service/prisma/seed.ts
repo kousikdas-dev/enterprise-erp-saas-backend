@@ -400,6 +400,11 @@ const MANAGEMENT_PERMISSIONS: Array<{
       'Update chart of accounts entries, including activation/deactivation',
   },
   {
+    resource: 'account-ledger',
+    action: 'read',
+    description: 'Read the posted-journal ledger for a chart of accounts entry',
+  },
+  {
     resource: 'journal-entries',
     action: 'create',
     description: 'Create journal entries',

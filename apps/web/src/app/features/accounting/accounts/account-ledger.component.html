@@ -1,0 +1,92 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">
+      Account Ledger
+      <span *ngIf="result" class="text-muted">— {{ result.account.code }} · {{ result.account.name }} ({{ result.account.type }})</span>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" routerLink="/accounting/accounts">Back to Chart of Accounts</a>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label small">From date</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="fromDate" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">To date</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="toDate" />
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="applyFilters()" [disabled]="loading">
+          Apply
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!!result && result.items.length === 0"
+      emptyMessage="No posted activity for this account in the selected period."
+      (retry)="load()">
+      <div *ngIf="result" class="row mb-3">
+        <div class="col-md-4">
+          <div class="text-muted small">Opening balance</div>
+          <div class="fs-5">{{ result.openingBalance }}</div>
+        </div>
+        <div class="col-md-4">
+          <div class="text-muted small">Closing balance</div>
+          <div class="fs-5">{{ result.closingBalance }}</div>
+        </div>
+        <div class="col-md-4">
+          <div class="text-muted small">Matching lines</div>
+          <div class="fs-5">{{ result.total }}</div>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Entry #</th>
+              <th>Description</th>
+              <th class="text-end">Debit</th>
+              <th class="text-end">Credit</th>
+              <th class="text-end">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.items">
+              <td>{{ line.entryDate }}</td>
+              <td>{{ line.entryNumber }}</td>
+              <td>
+                {{ line.description }}
+                <span *ngIf="line.reversesJournalEntryId" class="badge bg-warning text-dark ms-1">Reversal</span>
+                <span *ngIf="line.sourceService" class="text-muted small d-block">
+                  {{ line.sourceService }} / {{ line.sourceType }}
+                </span>
+              </td>
+              <td class="text-end">{{ line.debitAmount }}</td>
+              <td class="text-end">{{ line.creditAmount }}</td>
+              <td class="text-end">{{ line.runningBalance }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mt-3">
+        <div class="text-muted small">Page {{ result?.page }}</div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="!hasPrevPage || loading" (click)="prevPage()">
+            Previous
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="!hasNextPage || loading" (click)="nextPage()">
+            Next
+          </button>
+        </div>
+      </div>
+    </app-list-state>
+  </div>
+</div>

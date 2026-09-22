@@ -29,6 +29,7 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.SHIPMENTS_POST).toBe('shipments.post');
     expect(PERMISSIONS.ACCOUNTS_CREATE).toBe('accounts.create');
     expect(PERMISSIONS.ACCOUNTS_UPDATE).toBe('accounts.update');
+    expect(PERMISSIONS.ACCOUNT_LEDGER_READ).toBe('account-ledger.read');
     expect(PERMISSIONS.JOURNAL_ENTRIES_CREATE).toBe('journal-entries.create');
     expect(PERMISSIONS.JOURNAL_ENTRIES_POST).toBe('journal-entries.post');
     expect(PERMISSIONS.TAX_CODES_CREATE).toBe('tax-codes.create');
