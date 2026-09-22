@@ -92,6 +92,7 @@ export interface DuplicateActiveConflictDetail {
   productId: string;
   warehouseId: string;
   activeOpeningStockId: string;
+  activeOpeningStockDocumentNumber: string;
 }
 
 export interface SubsequentActivityConflictDetail {

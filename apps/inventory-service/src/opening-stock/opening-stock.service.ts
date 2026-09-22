@@ -287,6 +287,7 @@ export class OpeningStockService {
         productId: string;
         warehouseId: string;
         activeOpeningStockId: string;
+        activeOpeningStockDocumentNumber: string;
       }> = [];
       for (const pair of pairs) {
         const inserted = await tx.$queryRaw<Array<{ id: string }>>(
@@ -305,10 +306,17 @@ export class OpeningStockService {
               warehouseId: pair.warehouseId,
             },
           });
+          const activeDocument = existing
+            ? await tx.openingStock.findFirst({
+                where: { id: existing.openingStockId, tenantId: actor.tenantId },
+                select: { documentNumber: true },
+              })
+            : null;
           duplicateConflicts.push({
             productId: pair.productId,
             warehouseId: pair.warehouseId,
             activeOpeningStockId: existing?.openingStockId ?? '',
+            activeOpeningStockDocumentNumber: activeDocument?.documentNumber ?? '',
           });
         }
       }

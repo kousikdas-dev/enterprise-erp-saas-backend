@@ -212,7 +212,7 @@ describe('OpeningStockService', () => {
           findFirst: jest.fn(),
         },
         stock: { update: jest.fn(), create: jest.fn() },
-        openingStock: { update: jest.fn().mockResolvedValue({}) },
+        openingStock: { update: jest.fn().mockResolvedValue({}), findFirst: jest.fn() },
         __status: status,
       };
     }
@@ -314,6 +314,7 @@ describe('OpeningStockService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]); // duplicate-active insert conflicts (0 rows returned)
       tx.openingStockActiveLine.findFirst.mockResolvedValue({ openingStockId: 'other-doc' });
+      tx.openingStock.findFirst.mockResolvedValue({ documentNumber: 'OB-00000002' });
 
       const prisma = {
         $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
@@ -327,8 +328,17 @@ describe('OpeningStockService', () => {
       const response = error.getResponse() as { code: string; details: unknown };
       expect(response.code).toBe('OPENING_DUPLICATE_ACTIVE');
       expect(response.details).toEqual([
-        { productId, warehouseId, activeOpeningStockId: 'other-doc' },
+        {
+          productId,
+          warehouseId,
+          activeOpeningStockId: 'other-doc',
+          activeOpeningStockDocumentNumber: 'OB-00000002',
+        },
       ]);
+      expect(tx.openingStock.findFirst).toHaveBeenCalledWith({
+        where: { id: 'other-doc', tenantId: actor.tenantId },
+        select: { documentNumber: true },
+      });
       expect(tx.stockMovement.create).not.toHaveBeenCalled();
     });
 

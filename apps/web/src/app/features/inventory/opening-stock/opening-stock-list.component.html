@@ -67,13 +67,101 @@
 
 <ng-template #detailModal let-modal>
   <div class="modal-header">
-    <h5 class="modal-title">
+    <h5 class="modal-title" *ngIf="creating">New Opening Stock</h5>
+    <h5 class="modal-title" *ngIf="!creating">
       Opening Stock {{ current?.documentNumber }}
       <span class="badge ms-2" [ngClass]="statusBadgeClass(current?.status ?? '')">{{ current?.status }}</span>
     </h5>
     <button type="button" class="btn-close" (click)="modal.dismiss()"></button>
   </div>
-  <div class="modal-body" *ngIf="current as doc">
+
+  <div class="modal-body" *ngIf="creating">
+    <form [formGroup]="headerForm" class="row g-2 mb-3">
+      <div class="col-md-4">
+        <label class="form-label small">Effective date</label>
+        <input type="date" class="form-control" formControlName="effectiveDate" />
+      </div>
+      <div class="col-md-8">
+        <label class="form-label small">Notes</label>
+        <input type="text" class="form-control" formControlName="notes" maxlength="500" />
+      </div>
+    </form>
+
+    <h6>Lines</h6>
+    <div class="table-responsive mb-3">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Warehouse</th>
+            <th>Quantity</th>
+            <th>Unit</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of draftLines; let i = index">
+            <td>{{ productLabel(line.productId) }}</td>
+            <td>{{ warehouseLabel(line.warehouseId) }}</td>
+            <td>{{ line.quantity }}</td>
+            <td>{{ uomLabel(line.unitOfMeasureId) }}</td>
+            <td>
+              <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeDraftLine(i)">Remove</button>
+            </td>
+          </tr>
+          <tr *ngIf="draftLines.length === 0">
+            <td colspan="5" class="text-muted small">No lines yet. Add at least one line before saving.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <form [formGroup]="lineForm" class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label small">Product</label>
+        <select class="form-select form-select-sm" formControlName="productId" (change)="onLineProductChange(lineForm.value.productId!)">
+          <option value="">Select product</option>
+          <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Warehouse</label>
+        <select class="form-select form-select-sm" formControlName="warehouseId">
+          <option value="">Select warehouse</option>
+          <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Quantity</label>
+        <input type="text" class="form-control form-control-sm" formControlName="quantity" placeholder="0" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Unit</label>
+        <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+          <option value="">Select unit</option>
+          <option *ngFor="let u of uomOptionsFor(lineForm.value.productId ?? '')" [value]="u.id">{{ u.label }}</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-sm btn-primary w-100" (click)="addLine()" [disabled]="lineForm.invalid || addingLine">
+          Add line
+        </button>
+      </div>
+    </form>
+  </div>
+  <div class="modal-footer" *ngIf="creating">
+    <button type="button" class="btn btn-secondary" (click)="modal.dismiss()">Close</button>
+    <button
+      type="button"
+      class="btn btn-primary"
+      (click)="saveCreate()"
+      [disabled]="headerForm.invalid || draftLines.length === 0 || saving"
+    >
+      Save
+    </button>
+  </div>
+
+  <div class="modal-body" *ngIf="!creating && current as doc">
     <div class="alert alert-danger" *ngIf="conflictMessage">
       <div class="mb-2">{{ conflictMessage }}</div>
       <table class="table table-sm mb-0" *ngIf="conflictRows?.length">
@@ -190,7 +278,7 @@
       </ng-container>
     </dl>
   </div>
-  <div class="modal-footer" *ngIf="current as doc">
+  <div class="modal-footer" *ngIf="!creating && current as doc">
     <button type="button" class="btn btn-secondary" (click)="modal.dismiss()">Close</button>
     <button
       *ngIf="doc.status === 'DRAFT' && canPost"

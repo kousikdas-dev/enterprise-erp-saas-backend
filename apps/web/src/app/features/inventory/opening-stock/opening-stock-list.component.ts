@@ -19,7 +19,9 @@ import { Product, ProductUnit, Unit, Warehouse } from '../models/inventory.model
 import { ProductService } from '../products/product.service';
 import { UnitService } from '../units/unit.service';
 import { WarehouseService } from '../warehouses/warehouse.service';
+import { activeOpeningStockLabel } from './opening-stock-conflict.util';
 import {
+  CreateOpeningStockLineRequest,
   DuplicateActiveConflictDetail,
   ExistingStockConflictDetail,
   OPENING_STOCK_ERROR_CODES,
@@ -70,6 +72,8 @@ export class OpeningStockListComponent implements OnInit {
   filterProductId = '';
 
   current: OpeningStock | null = null;
+  creating = false;
+  draftLines: CreateOpeningStockLineRequest[] = [];
   saving = false;
   addingLine = false;
   reverseReason = '';
@@ -147,6 +151,11 @@ export class OpeningStockListComponent implements OnInit {
     return w ? `${w.code} — ${w.name}` : id.slice(0, 8);
   }
 
+  uomLabel(id: string): string {
+    const u = this.units.find((x) => x.id === id);
+    return u ? u.code : id.slice(0, 8);
+  }
+
   statusBadgeClass(status: string): string {
     switch (status) {
       case 'DRAFT':
@@ -208,30 +217,72 @@ export class OpeningStockListComponent implements OnInit {
     return options;
   }
 
+  /**
+   * Opens a blank, unsaved creation form. Nothing is persisted here — the
+   * OpeningStock document is only created when the user clicks Save
+   * (saveCreate()), so closing this modal without saving leaves no DRAFT
+   * behind.
+   */
   openCreate(): void {
-    if (!this.canCreate || this.saving) {
+    if (!this.canCreate) {
       return;
     }
+    this.current = null;
+    this.creating = true;
+    this.draftLines = [];
+    this.conflictMessage = null;
+    this.conflictRows = null;
+    this.reverseReason = '';
+    this.resetLineForm();
+    const effectiveDate = new Date().toISOString().slice(0, 10);
+    this.headerForm.reset({ effectiveDate, notes: '' });
+    this.modalRef = this.modal.open(this.detailModal, { centered: true, size: 'lg' });
+  }
+
+  /** Creates the DRAFT document with the staged header + lines in one call. */
+  saveCreate(): void {
+    if (!this.creating || this.headerForm.invalid || this.draftLines.length === 0 || this.saving) {
+      return;
+    }
+    const value = this.headerForm.getRawValue();
     this.saving = true;
     this.cdr.detectChanges();
-    const effectiveDate = new Date().toISOString().slice(0, 10);
-    this.openingStock.create({ effectiveDate }).subscribe({
-      next: (doc) => {
-        this.saving = false;
-        this.openDetail(doc);
-        this.load();
-        this.cdr.detectChanges();
-      },
-      error: (err) => {
-        this.saving = false;
-        this.toast.error(apiErrorMessage(err, 'Failed to create opening stock document'));
-        this.cdr.detectChanges();
-      },
-    });
+    this.openingStock
+      .create({
+        effectiveDate: value.effectiveDate!,
+        notes: value.notes?.trim() || undefined,
+        lines: this.draftLines,
+      })
+      .subscribe({
+        next: (doc) => {
+          this.saving = false;
+          this.creating = false;
+          this.draftLines = [];
+          // Modal is already open (from openCreate()) — just swap it from the
+          // blank-creation view to the normal persisted-document view, rather
+          // than opening a second modal on top of it.
+          this.current = doc;
+          this.resetLineForm();
+          this.headerForm.reset({
+            effectiveDate: doc.effectiveDate.slice(0, 10),
+            notes: doc.notes ?? '',
+          });
+          this.toast.success('Opening stock created');
+          this.load();
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.saving = false;
+          this.toast.error(apiErrorMessage(err, 'Failed to create opening stock document'));
+          this.cdr.detectChanges();
+        },
+      });
   }
 
   openDetail(row: OpeningStock): void {
     this.current = row;
+    this.creating = false;
+    this.draftLines = [];
     this.conflictMessage = null;
     this.conflictRows = null;
     this.reverseReason = '';
@@ -272,34 +323,56 @@ export class OpeningStockListComponent implements OnInit {
   }
 
   addLine(): void {
-    if (!this.current || this.lineForm.invalid || this.addingLine) {
+    if (this.lineForm.invalid || this.addingLine) {
       this.lineForm.markAllAsTouched();
       return;
     }
     const value = this.lineForm.getRawValue();
+    const line: CreateOpeningStockLineRequest = {
+      productId: value.productId!,
+      warehouseId: value.warehouseId!,
+      quantity: String(value.quantity).trim(),
+      unitOfMeasureId: value.unitOfMeasureId!,
+    };
+
+    if (this.creating) {
+      const duplicate = this.draftLines.some(
+        (l) => l.productId === line.productId && l.warehouseId === line.warehouseId,
+      );
+      if (duplicate) {
+        this.toast.error('This document already has a line for that product and warehouse');
+        return;
+      }
+      this.draftLines = [...this.draftLines, line];
+      this.resetLineForm();
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (!this.current) {
+      return;
+    }
     this.addingLine = true;
     this.cdr.detectChanges();
-    this.openingStock
-      .addLine(this.current.id, {
-        productId: value.productId!,
-        warehouseId: value.warehouseId!,
-        quantity: String(value.quantity).trim(),
-        unitOfMeasureId: value.unitOfMeasureId!,
-      })
-      .subscribe({
-        next: (doc) => {
-          this.addingLine = false;
-          this.current = doc;
-          this.resetLineForm();
-          this.load();
-          this.cdr.detectChanges();
-        },
-        error: (err) => {
-          this.addingLine = false;
-          this.toast.error(apiErrorMessage(err, 'Failed to add line'));
-          this.cdr.detectChanges();
-        },
-      });
+    this.openingStock.addLine(this.current.id, line).subscribe({
+      next: (doc) => {
+        this.addingLine = false;
+        this.current = doc;
+        this.resetLineForm();
+        this.load();
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.addingLine = false;
+        this.toast.error(apiErrorMessage(err, 'Failed to add line'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  /** Removes a not-yet-saved line from the in-progress creation form (no API call). */
+  removeDraftLine(index: number): void {
+    this.draftLines = this.draftLines.filter((_, i) => i !== index);
   }
 
   removeLine(line: OpeningStockLine): void {
@@ -353,9 +426,9 @@ export class OpeningStockListComponent implements OnInit {
           this.conflictMessage =
             'Cannot post: another active (posted, not reversed) opening stock document already covers one of these lines.';
           this.conflictRows = (err.details as DuplicateActiveConflictDetail[]).map((d) => ({
+            'Active Opening Stock': activeOpeningStockLabel(d),
             Product: this.productLabel(d.productId),
             Warehouse: this.warehouseLabel(d.warehouseId),
-            'Active document': d.activeOpeningStockId,
           }));
         } else {
           this.toast.error(apiErrorMessage(err, 'Failed to post opening stock document'));
