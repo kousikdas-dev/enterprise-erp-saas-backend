@@ -24,6 +24,12 @@ enum StockMovementType {
   TRANSFER_OUT
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
+  // Phase 3.4 (Inventory Return Support) — stock coming back in against a
+  // specific, identified original SALE movement (see
+  // StockMovement.originalMovementId). Never used for Purchase Return
+  // (deferred to a later phase, which would add its own PURCHASE_RETURN
+  // value rather than overload this one).
+  SALE_RETURN
 }
 
 // Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is
@@ -220,6 +226,25 @@ model StockMovement {
   unitCost  Decimal? @db.Decimal(19, 4)
   totalCost Decimal? @db.Decimal(19, 4)
 
+  // Phase 3.4 (Inventory Return Support) — soft reference (no @relation,
+  // deliberately mirroring reversesMovementId's own bare-column style),
+  // set only on a SALE_RETURN movement, pointing at the specific original
+  // SALE movement it returns against. This is the AUTHORITATIVE selector
+  // for "which movement is this returning against" — never resolved by
+  // (referenceType, referenceId, productId) lookup. Deliberately NOT
+  // reversesMovementId: that column is unique per original movement
+  // (Opening Stock's "at most one reversal ever" rule) and would wrongly
+  // forbid a second partial return against the same sale.
+  originalMovementId String? @db.Uuid
+
+  // Running total of quantity already returned AGAINST this movement —
+  // meaningful only on SALE (and, in a later phase, PURCHASE) rows; stays 0
+  // on every other row, including SALE_RETURN rows themselves (a return is
+  // never itself returned against). Enforced under a FOR UPDATE lock on
+  // this row: returnedQuantity + returnQty <= quantity, atomically, so
+  // concurrent partial returns against the same sale can never overshoot.
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
+
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
@@ -230,6 +255,7 @@ model StockMovement {
   @@index([productId])
   @@index([warehouseId])
   @@index([tenantId, productId, warehouseId, sequenceNumber])
+  @@index([originalMovementId])
   @@map("stock_movements")
 }
 
