@@ -1,5 +1,9 @@
-import { Prisma, ShipmentStatus } from '../../../generated/prisma-client';
-import { quantityToString } from '../../common/decimal';
+import {
+  Prisma,
+  ShipmentPostingStatus,
+  ShipmentStatus,
+} from '../../../generated/prisma-client';
+import { moneyToString, quantityToString } from '../../common/decimal';
 
 type ShipmentWithItems = {
   id: string;
@@ -10,6 +14,9 @@ type ShipmentWithItems = {
   shippedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  // Phase 3.3 (Sales Shipment COGS)
+  accountingPostingStatus: ShipmentPostingStatus;
+  journalEntryId: string | null;
   items: Array<{
     id: string;
     tenantId: string;
@@ -27,6 +34,10 @@ type ShipmentWithItems = {
     conversionResolvedBy: string | null;
     conversionResolvedAt: Date | null;
     conversionResolutionNote: string | null;
+    // Phase 3.3 (Sales Shipment COGS)
+    productTracksInventory: boolean | null;
+    unitCost: Prisma.Decimal | null;
+    totalCost: Prisma.Decimal | null;
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -42,6 +53,8 @@ export function toShipmentResponse(row: ShipmentWithItems) {
     shippedAt: row.shippedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    accountingPostingStatus: row.accountingPostingStatus,
+    journalEntryId: row.journalEntryId,
     items: row.items.map((item) => ({
       id: item.id,
       tenantId: item.tenantId,
@@ -69,6 +82,9 @@ export function toShipmentResponse(row: ShipmentWithItems) {
       conversionResolvedBy: item.conversionResolvedBy,
       conversionResolvedAt: item.conversionResolvedAt,
       conversionResolutionNote: item.conversionResolutionNote,
+      productTracksInventory: item.productTracksInventory,
+      unitCost: item.unitCost ? moneyToString(item.unitCost) : null,
+      totalCost: item.totalCost ? moneyToString(item.totalCost) : null,
       warehouseId: row.warehouseId,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,

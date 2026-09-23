@@ -29,6 +29,7 @@ describe('ProformaInvoicesService', () => {
   function defaultUomOptions(overrides: Record<string, unknown> = {}) {
     return {
       productId,
+      trackInventory: true,
       base: { unitOfMeasureId, code: 'EA', name: 'Each' },
       alternatives: [],
       ...overrides,
@@ -556,6 +557,42 @@ describe('ProformaInvoicesService', () => {
       expect(itemData.taxAmount.toFixed(4)).toBe('0.0000');
       expect(itemData.taxCodeId).toBeNull();
       expect(itemData.taxComponents.create).toEqual([]);
+    });
+
+    it('snapshots productTracksInventory from inventory-service (Phase 3.3)', async () => {
+      const updated = {
+        ...draftRow,
+        notes: null,
+        ...zeroTotals(),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const tx = {
+        proformaInvoice: { update: jest.fn().mockResolvedValue(updated) },
+        proformaInvoiceItem: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      };
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(draftRow) },
+        $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+      };
+      const inventoryProducts = defaultInventoryProducts({
+        getUomOptions: jest
+          .fn()
+          .mockResolvedValue(defaultUomOptions({ trackInventory: false })),
+      });
+      const service = createService({ prisma, inventoryProducts });
+
+      await service.update(actor, 'pf1', {
+        items: [baseItemInput({ quantity: '10', unitPrice: '5.0000' })],
+      });
+
+      const itemData = (tx.proformaInvoiceItem.create as jest.Mock).mock
+        .calls[0][0].data;
+      expect(itemData.productTracksInventory).toBe(false);
     });
 
     it('rejects a unitOfMeasureId that is neither the base unit nor an active alternative', async () => {

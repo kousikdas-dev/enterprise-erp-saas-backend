@@ -20,6 +20,10 @@ import { SalesEnvironmentVariables } from '../config/sales-env';
 
 export interface UomOptionsResponse {
   productId: string;
+  // Phase 3.3 (Sales Shipment COGS) — snapshotted onto QuotationItem/
+  // ProformaInvoiceItem/SalesOrderItem at line-creation time. Reuses this
+  // existing round-trip; no separate call.
+  trackInventory: boolean;
   base: { unitOfMeasureId: string; code: string; name: string };
   alternatives: Array<{
     unitOfMeasureId: string;

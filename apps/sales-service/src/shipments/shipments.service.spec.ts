@@ -67,17 +67,40 @@ describe('ShipmentsService', () => {
     };
   }
 
+  /** Default per-line issue movement for tests that don't care about cost. */
+  function issueMovement(overrides?: Record<string, unknown>) {
+    return {
+      productId,
+      quantity: '1.000000',
+      unitCost: '0.0000',
+      totalCost: '0.0000',
+      ...overrides,
+    };
+  }
+
+  function defaultAccountingJournal(overrides?: {
+    post?: jest.Mock;
+    reverse?: jest.Mock;
+  }) {
+    return {
+      post: overrides?.post ?? jest.fn(),
+      reverse: overrides?.reverse ?? jest.fn(),
+    };
+  }
+
   function buildService(overrides?: {
     prisma?: object;
     inventory?: object;
     inventoryProducts?: object;
     audit?: object;
+    accountingJournal?: object;
   }) {
     return new ShipmentsService(
       (overrides?.prisma ?? {}) as never,
       (overrides?.inventory ?? { applyIssue: jest.fn() }) as never,
       (overrides?.inventoryProducts ?? { getUomOptions: jest.fn() }) as never,
       (overrides?.audit ?? { record: jest.fn() }) as never,
+      (overrides?.accountingJournal ?? defaultAccountingJournal()) as never,
     );
   }
 
@@ -148,6 +171,7 @@ describe('ShipmentsService', () => {
           }),
           update: jest.fn().mockResolvedValue(posted),
         },
+        shipmentItem: { update: jest.fn().mockResolvedValue({}) },
         salesOrderItem: {
           update: jest.fn(),
           findMany: jest.fn().mockResolvedValue([
@@ -163,7 +187,12 @@ describe('ShipmentsService', () => {
           return fn(txCall === 1 ? tx : finalizeTx);
         }),
       };
-      const inventory = { applyIssue: jest.fn().mockResolvedValue({ created: true }) };
+      const inventory = {
+        applyIssue: jest.fn().mockResolvedValue({
+          created: true,
+          movements: [issueMovement({ productId, quantity: '40.000000' })],
+        }),
+      };
       const audit = { record: jest.fn().mockResolvedValue(undefined) };
       const service = buildService({ prisma, inventory, audit });
 
@@ -431,6 +460,7 @@ describe('ShipmentsService', () => {
           }),
           update: jest.fn().mockResolvedValue(posted),
         },
+        shipmentItem: { update: jest.fn().mockResolvedValue({}) },
         salesOrderItem: {
           update: jest.fn(),
           findMany: jest.fn().mockResolvedValue([
@@ -445,7 +475,12 @@ describe('ShipmentsService', () => {
           fn(finalizeTx),
         ),
       };
-      const inventory = { applyIssue: jest.fn().mockResolvedValue({ created: true }) };
+      const inventory = {
+        applyIssue: jest.fn().mockResolvedValue({
+          created: true,
+          movements: [issueMovement({ productId, quantity: '72.000000' })],
+        }),
+      };
       const audit = { record: jest.fn().mockResolvedValue(undefined) };
       const service = buildService({ prisma, inventory, audit });
 
@@ -512,6 +547,7 @@ describe('ShipmentsService', () => {
           }),
           update: jest.fn().mockResolvedValue({ ...pending, status: ShipmentStatus.POSTED, items: pending.items }),
         },
+        shipmentItem: { update: jest.fn().mockResolvedValue({}) },
         salesOrderItem: {
           update: jest.fn(),
           findMany: jest.fn().mockResolvedValue([{ id: soItemId, quantity: decimal('100'), shippedQuantity: decimal('60') }]),
@@ -526,7 +562,12 @@ describe('ShipmentsService', () => {
           return fn(call === 1 ? persistTx : finalizeTx);
         }),
       };
-      const inventory = { applyIssue: jest.fn().mockResolvedValue({ created: true }) };
+      const inventory = {
+        applyIssue: jest.fn().mockResolvedValue({
+          created: true,
+          movements: [issueMovement({ productId, quantity: '60.000000' })],
+        }),
+      };
       const service = buildService({ prisma, inventory });
 
       const result = await service.post(actor, 'sh1');
@@ -846,6 +887,558 @@ describe('ShipmentsService', () => {
       expect(prisma.shipment.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: {} }),
       );
+    });
+  });
+
+  describe('Phase 3.3 — COGS accounting', () => {
+    const soItemId2 = 'jjjjjjjj-jjjj-4jjj-8jjj-jjjjjjjjjjjj';
+    const productId2 = 'qqqqqqqq-qqqq-4qqq-8qqq-qqqqqqqqqqqq';
+    const shipmentId = '99999999-9999-4999-8999-999999999999';
+
+    /**
+     * Builds a full create()-path harness (prepare tx + finalize tx +
+     * Inventory + Accounting mocks) for N lines, each independently
+     * configurable for productTracksInventory / issue cost. Mirrors the
+     * structure of the existing "creates PENDING_STOCK then posts..." test
+     * above, generalized to N lines and parameterized cost/tracking.
+     */
+    function buildCogsScenario(
+      lines: Array<{
+        soItemId: string;
+        productId: string;
+        quantity: string;
+        productTracksInventory: boolean | null;
+        unitCost: string;
+        totalCost: string;
+      }>,
+      opts?: { accountingJournal?: ReturnType<typeof defaultAccountingJournal> },
+    ) {
+      const shipmentItemIds = lines.map((_, i) => `shi-${i}`);
+      const orderItems = lines.map((l) => ({
+        id: l.soItemId,
+        tenantId,
+        productId: l.productId,
+        productSku: 'SKU',
+        productName: 'Widget',
+        quantity: decimal('1000'),
+        shippedQuantity: decimal('0'),
+        unitOfMeasureId: null,
+        uomCode: null,
+        uomName: null,
+        conversionFactor: null,
+        productTracksInventory: l.productTracksInventory,
+      }));
+
+      const tx = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'so1', status: SalesOrderStatus.CONFIRMED }])
+          .mockResolvedValueOnce([{ id: 'x' }]),
+        salesOrder: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'so1', tenantId, items: orderItems }),
+        },
+        shipmentItem: { findMany: jest.fn().mockResolvedValue([]) },
+        shipment: { create: jest.fn().mockResolvedValue({ id: shipmentId }) },
+      };
+
+      const finalItems = lines.map((l, i) => ({
+        id: shipmentItemIds[i],
+        salesOrderItemId: l.soItemId,
+        productId: l.productId,
+        quantity: decimal(l.quantity),
+        productTracksInventory: l.productTracksInventory,
+        totalCost: decimal(l.totalCost),
+      }));
+
+      const finalizeTx = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([
+            { id: shipmentId, status: ShipmentStatus.PENDING_STOCK, salesOrderId: 'so1' },
+          ])
+          .mockResolvedValueOnce([{ id: 'so1' }])
+          .mockResolvedValueOnce([{ id: 'x' }]),
+        shipment: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            id: shipmentId,
+            salesOrderId: 'so1',
+            warehouseId,
+            items: lines.map((l, i) => ({
+              id: shipmentItemIds[i],
+              salesOrderItemId: l.soItemId,
+              productId: l.productId,
+              quantity: decimal(l.quantity),
+            })),
+            salesOrder: { id: 'so1', items: orderItems },
+          }),
+          update: jest.fn().mockResolvedValue({
+            id: shipmentId,
+            tenantId,
+            salesOrderId: 'so1',
+            warehouseId,
+            status: ShipmentStatus.POSTED,
+            shippedAt: new Date(),
+            accountingPostingStatus: 'NOT_POSTED',
+            journalEntryId: null,
+            items: finalItems,
+          }),
+        },
+        shipmentItem: { update: jest.fn().mockResolvedValue({}) },
+        salesOrderItem: {
+          update: jest.fn(),
+          findMany: jest.fn().mockResolvedValue(
+            orderItems.map((it) => ({
+              ...it,
+              shippedQuantity: decimal(
+                lines.find((l) => l.soItemId === it.id)!.quantity,
+              ),
+            })),
+          ),
+        },
+        salesOrder: { update: jest.fn() },
+      };
+
+      let txCall = 0;
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: unknown) => Promise<unknown>) => {
+          txCall += 1;
+          return fn(txCall === 1 ? tx : finalizeTx);
+        }),
+        shipment: {
+          update: jest.fn().mockResolvedValue({
+            id: shipmentId,
+            tenantId,
+            salesOrderId: 'so1',
+            warehouseId,
+            status: ShipmentStatus.POSTED,
+            shippedAt: new Date(),
+            accountingPostingStatus: 'POSTED',
+            journalEntryId: 'je-1',
+            items: finalItems,
+          }),
+          findFirst: jest.fn().mockResolvedValue({
+            id: shipmentId,
+            tenantId,
+            salesOrderId: 'so1',
+            warehouseId,
+            status: ShipmentStatus.POSTED,
+            shippedAt: new Date(),
+            accountingPostingStatus: 'FAILED',
+            journalEntryId: null,
+            items: finalItems,
+          }),
+        },
+      };
+
+      const movements = lines.map((l) =>
+        issueMovement({
+          productId: l.productId,
+          quantity: l.quantity,
+          unitCost: l.unitCost,
+          totalCost: l.totalCost,
+        }),
+      );
+      const inventory = {
+        applyIssue: jest.fn().mockResolvedValue({ created: true, movements }),
+      };
+      const accountingJournal =
+        opts?.accountingJournal ??
+        defaultAccountingJournal({
+          post: jest.fn().mockResolvedValue({
+            id: 'je-1',
+            idempotentReplay: false,
+          }),
+        });
+      const audit = { record: jest.fn().mockResolvedValue(undefined) };
+      const service = buildService({ prisma, inventory, audit, accountingJournal });
+
+      return { service, prisma, finalizeTx, inventory, accountingJournal, shipmentId };
+    }
+
+    it('exact single-line shipment posts Dr COGS / Cr INVENTORY_ASSET for the issue totalCost, balanced', async () => {
+      const { service, accountingJournal } = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '10',
+          productTracksInventory: true,
+          unitCost: '12.0000',
+          totalCost: '120.0000',
+        },
+      ]);
+
+      const result = await service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+      });
+
+      expect(accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceService: 'sales-service',
+          sourceType: 'SHIPMENT',
+          sourceId: shipmentId,
+          lines: [
+            { role: 'COGS', side: 'DEBIT', amount: '120.0000' },
+            { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: '120.0000' },
+          ],
+        }),
+      );
+      const request = accountingJournal.post.mock.calls[0][1];
+      const totalDebit = request.lines
+        .filter((l: any) => l.side === 'DEBIT')
+        .reduce((sum: number, l: any) => sum + Number(l.amount), 0);
+      const totalCredit = request.lines
+        .filter((l: any) => l.side === 'CREDIT')
+        .reduce((sum: number, l: any) => sum + Number(l.amount), 0);
+      expect(totalDebit).toBe(totalCredit);
+      expect(result.accountingPostingStatus).toBe('POSTED');
+      expect(result.journalEntryId).toBe('je-1');
+    });
+
+    it('multi-line shipment sums COGS only over tracked lines; non-tracked lines contribute nothing', async () => {
+      const { service, accountingJournal } = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '10',
+          productTracksInventory: true,
+          unitCost: '12.0000',
+          totalCost: '120.0000',
+        },
+        {
+          soItemId: soItemId2,
+          productId: productId2,
+          quantity: '5',
+          productTracksInventory: false,
+          unitCost: '50.0000',
+          totalCost: '250.0000',
+        },
+      ]);
+
+      await service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [
+          { salesOrderItemId: soItemId, quantity: '10' },
+          { salesOrderItemId: soItemId2, quantity: '5' },
+        ],
+      });
+
+      expect(accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            { role: 'COGS', side: 'DEBIT', amount: '120.0000' },
+            { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: '120.0000' },
+          ],
+        }),
+      );
+    });
+
+    it('all-non-tracked shipment posts no journal at all; accountingPostingStatus stays NOT_POSTED', async () => {
+      const { service, accountingJournal } = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '10',
+          productTracksInventory: false,
+          unitCost: '12.0000',
+          totalCost: '120.0000',
+        },
+      ]);
+
+      const result = await service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+      });
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(result.accountingPostingStatus).toBe('NOT_POSTED');
+    });
+
+    it('historical NULL productTracksInventory is treated identically to false', async () => {
+      const { service, accountingJournal } = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '10',
+          productTracksInventory: null,
+          unitCost: '12.0000',
+          totalCost: '120.0000',
+        },
+      ]);
+
+      await service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+      });
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+    });
+
+    it('partial shipment: COGS reflects only the partially-shipped quantity\'s issue cost', async () => {
+      const { service, accountingJournal } = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '4',
+          productTracksInventory: true,
+          unitCost: '12.0000',
+          totalCost: '48.0000',
+        },
+      ]);
+
+      await service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '4' }],
+      });
+
+      expect(accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            { role: 'COGS', side: 'DEBIT', amount: '48.0000' },
+            { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: '48.0000' },
+          ],
+        }),
+      );
+    });
+
+    it('two shipments against the same sales order at different moving-average costs post two independent journals', async () => {
+      const first = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '10',
+          productTracksInventory: true,
+          unitCost: '12.0000',
+          totalCost: '120.0000',
+        },
+      ]);
+      await first.service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+      });
+
+      const second = buildCogsScenario([
+        {
+          soItemId,
+          productId,
+          quantity: '10',
+          productTracksInventory: true,
+          unitCost: '15.0000',
+          totalCost: '150.0000',
+        },
+      ]);
+      await second.service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+      });
+
+      expect(first.accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            { role: 'COGS', side: 'DEBIT', amount: '120.0000' },
+            { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: '120.0000' },
+          ],
+        }),
+      );
+      expect(second.accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            { role: 'COGS', side: 'DEBIT', amount: '150.0000' },
+            { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: '150.0000' },
+          ],
+        }),
+      );
+    });
+
+    it('insufficient stock (Inventory rejects) leaves the shipment PENDING_STOCK and never attempts a COGS posting', async () => {
+      const tx = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'so1', status: SalesOrderStatus.CONFIRMED }])
+          .mockResolvedValueOnce([{ id: 'x' }]),
+        salesOrder: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'so1',
+            tenantId,
+            items: [
+              {
+                id: soItemId,
+                tenantId,
+                productId,
+                productSku: 'SKU',
+                productName: 'Widget',
+                quantity: decimal('1000'),
+                shippedQuantity: decimal('0'),
+                unitOfMeasureId: null,
+                uomCode: null,
+                uomName: null,
+                conversionFactor: null,
+                productTracksInventory: true,
+              },
+            ],
+          }),
+        },
+        shipmentItem: { findMany: jest.fn().mockResolvedValue([]) },
+        shipment: { create: jest.fn().mockResolvedValue({ id: shipmentId }) },
+      };
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: unknown) => Promise<unknown>) => fn(tx)),
+        shipment: { update: jest.fn(), findFirst: jest.fn() },
+      };
+      const inventory = {
+        applyIssue: jest.fn().mockRejectedValue(new ConflictException('Insufficient stock')),
+      };
+      const accountingJournal = defaultAccountingJournal();
+      const service = buildService({ prisma, inventory, accountingJournal });
+
+      await expect(
+        service.create(actor, {
+          salesOrderId: 'so1',
+          warehouseId,
+          items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(prisma.shipment.update).not.toHaveBeenCalled();
+    });
+
+    it('accounting posting fails post-commit: shipment stays POSTED with accountingPostingStatus FAILED, journalEntryId null', async () => {
+      const failingPost = jest.fn().mockRejectedValue(new Error('accounting service unreachable'));
+      const { service } = buildCogsScenario(
+        [
+          {
+            soItemId,
+            productId,
+            quantity: '10',
+            productTracksInventory: true,
+            unitCost: '12.0000',
+            totalCost: '120.0000',
+          },
+        ],
+        { accountingJournal: defaultAccountingJournal({ post: failingPost }) },
+      );
+
+      const result = await service.create(actor, {
+        salesOrderId: 'so1',
+        warehouseId,
+        items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+      });
+
+      expect(result.status).toBe(ShipmentStatus.POSTED);
+      expect(result.accountingPostingStatus).toBe('FAILED');
+      expect(result.journalEntryId).toBeNull();
+    });
+
+    describe('retryAccountingPosting()', () => {
+      function shipmentRow(overrides: Record<string, unknown> = {}) {
+        return {
+          id: shipmentId,
+          tenantId,
+          salesOrderId: 'so1',
+          warehouseId,
+          status: ShipmentStatus.POSTED,
+          shippedAt: new Date(),
+          accountingPostingStatus: 'NOT_POSTED',
+          journalEntryId: null,
+          items: [
+            {
+              id: 'shi-0',
+              salesOrderItemId: soItemId,
+              productId,
+              quantity: decimal('10'),
+              productTracksInventory: true,
+              totalCost: decimal('120.0000'),
+            },
+          ],
+          ...overrides,
+        };
+      }
+
+      it('rejects retry for a non-POSTED shipment', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(shipmentRow({ status: ShipmentStatus.PENDING_STOCK })),
+          },
+        };
+        const service = buildService({ prisma });
+
+        await expect(
+          service.retryAccountingPosting(actor, shipmentId),
+        ).rejects.toBeInstanceOf(ConflictException);
+      });
+
+      it('no-ops when accountingPostingStatus is already POSTED', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(shipmentRow({ accountingPostingStatus: 'POSTED', journalEntryId: 'je-existing' })),
+          },
+        };
+        const accountingJournal = defaultAccountingJournal();
+        const service = buildService({ prisma, accountingJournal });
+
+        const result = await service.retryAccountingPosting(actor, shipmentId);
+
+        expect(accountingJournal.post).not.toHaveBeenCalled();
+        expect(result.journalEntryId).toBe('je-existing');
+      });
+
+      it('retries and surfaces the error when accounting is still unavailable', async () => {
+        const failingPost = jest.fn().mockRejectedValue(new Error('still down'));
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(shipmentRow()),
+            update: jest.fn().mockResolvedValue(shipmentRow({ accountingPostingStatus: 'FAILED' })),
+          },
+        };
+        const accountingJournal = defaultAccountingJournal({ post: failingPost });
+        const service = buildService({ prisma, accountingJournal });
+
+        await expect(
+          service.retryAccountingPosting(actor, shipmentId),
+        ).rejects.toThrow('still down');
+      });
+
+      it('retries and succeeds, updating accountingPostingStatus to POSTED', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(shipmentRow()),
+            update: jest.fn().mockResolvedValue(
+              shipmentRow({ accountingPostingStatus: 'POSTED', journalEntryId: 'je-retry' }),
+            ),
+          },
+        };
+        const accountingJournal = defaultAccountingJournal({
+          post: jest.fn().mockResolvedValue({ id: 'je-retry', idempotentReplay: false }),
+        });
+        const audit = { record: jest.fn().mockResolvedValue(undefined) };
+        const service = buildService({ prisma, accountingJournal, audit });
+
+        const result = await service.retryAccountingPosting(actor, shipmentId);
+
+        expect(accountingJournal.post).toHaveBeenCalledWith(
+          actor,
+          expect.objectContaining({ sourceType: 'SHIPMENT', sourceId: shipmentId }),
+        );
+        expect(result.accountingPostingStatus).toBe('POSTED');
+        expect(result.journalEntryId).toBe('je-retry');
+      });
     });
   });
 });

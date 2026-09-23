@@ -45,6 +45,7 @@ describe('SalesOrdersService', () => {
   function defaultUomOptions(overrides: Record<string, unknown> = {}) {
     return {
       productId,
+      trackInventory: true,
       base: { unitOfMeasureId, code: 'EA', name: 'Each' },
       alternatives: [],
       ...overrides,
@@ -182,6 +183,7 @@ describe('SalesOrdersService', () => {
       uomCode: 'EA',
       uomName: 'Each',
       conversionFactor: decimal('1'),
+      productTracksInventory: true,
       unitPrice: decimal('5'),
       discountPercent: decimal('10'),
       discountAmount: decimal('5'),
@@ -492,6 +494,7 @@ describe('SalesOrdersService', () => {
       const createdItem = data.items.create[0];
       expect(createdItem.unitOfMeasureId).toBe(item.unitOfMeasureId);
       expect(createdItem.conversionFactor).toBe(item.conversionFactor);
+      expect(createdItem.productTracksInventory).toBe(item.productTracksInventory);
       expect(createdItem.discountAmount).toBe(item.discountAmount);
       expect(createdItem.taxCodeId).toBe(item.taxCodeId);
       expect(createdItem.taxAmount).toBe(item.taxAmount);
@@ -588,6 +591,7 @@ describe('SalesOrdersService', () => {
       expect(data.taxTotal).toBe(proforma.taxTotal);
       const createdItem = data.items.create[0];
       expect(createdItem.unitOfMeasureId).toBe(item.unitOfMeasureId);
+      expect(createdItem.productTracksInventory).toBe(item.productTracksInventory);
       expect(createdItem.discountAmount).toBe(item.discountAmount);
       expect(createdItem.taxCodeId).toBe(item.taxCodeId);
       expect(createdItem.taxComponents.create).toHaveLength(2);
@@ -721,6 +725,25 @@ describe('SalesOrdersService', () => {
       expect(item.taxComponents.create).toHaveLength(2);
       expect(item.taxAmount.toFixed(4)).toBe('9.0000');
       expect(item.lineTotal.toFixed(4)).toBe('59.0000');
+    });
+
+    it('snapshots productTracksInventory from inventory-service (Phase 3.3)', async () => {
+      const { customer, prisma, customers } = customerAndPrisma();
+      const inventoryProducts = defaultInventoryProducts({
+        getUomOptions: jest
+          .fn()
+          .mockResolvedValue(defaultUomOptions({ trackInventory: false })),
+      });
+      const service = createService({ prisma, customers, inventoryProducts });
+
+      await service.create(actor, {
+        customerId: customer.id,
+        items: [baseItemInput({ quantity: '10', unitPrice: '5.0000' })],
+      });
+
+      const item = (prisma.salesOrder.create as jest.Mock).mock.calls[0][0]
+        .data.items.create[0];
+      expect(item.productTracksInventory).toBe(false);
     });
 
     it('defaults discountPercent to 0 and taxAmount to 0 when neither is provided', async () => {

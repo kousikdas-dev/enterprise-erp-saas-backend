@@ -25,6 +25,22 @@ export interface InventoryStockIssueRequest {
   lines: Array<{ productId: string; quantity: string }>;
 }
 
+// Phase 3.3 (Sales Shipment COGS) — one entry per requested line, in the
+// exact same order `lines` was sent (inventory-service's StockIssuesService
+// processes lines strictly 1:1 in order — never re-fetched from Sales, this
+// is the authoritative moving-average cost at the moment of this issue).
+export interface InventoryStockIssueMovement {
+  productId: string;
+  quantity: string;
+  unitCost: string | null;
+  totalCost: string | null;
+}
+
+export interface InventoryStockIssueResult {
+  created: boolean;
+  movements: InventoryStockIssueMovement[];
+}
+
 interface InventoryEnvelope<T> {
   success?: boolean;
   data?: T;
@@ -42,14 +58,14 @@ export class InventoryStockClient {
   async applyIssue(
     actor: ActorContext,
     body: InventoryStockIssueRequest,
-  ): Promise<{ created: boolean }> {
+  ): Promise<InventoryStockIssueResult> {
     const base = this.config
       .get('INVENTORY_SERVICE_URL', { infer: true })
       .replace(/\/$/, '');
     const secret = this.config.get('INTERNAL_SERVICE_SECRET', { infer: true });
     try {
       const response = await firstValueFrom(
-        this.http.post<InventoryEnvelope<{ created?: boolean }>>(
+        this.http.post<InventoryEnvelope<InventoryStockIssueResult>>(
           `${base}/api/v1/internal/stock/issues`,
           body,
           {
@@ -62,7 +78,11 @@ export class InventoryStockClient {
           },
         ),
       );
-      return { created: response.status === 201 };
+      const data = response.data.data;
+      return {
+        created: response.status === 201,
+        movements: data?.movements ?? [],
+      };
     } catch (error) {
       this.rethrow(error);
     }

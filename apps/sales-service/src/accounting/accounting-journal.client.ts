@@ -23,7 +23,11 @@ export type JournalPostingRole =
   | 'ACCOUNTS_RECEIVABLE'
   | 'OUTPUT_TAX'
   | 'PAYMENT_METHOD'
-  | 'SALES_DISCOUNT';
+  | 'SALES_DISCOUNT'
+  // Phase 3.3 (Sales Shipment COGS) — Shipment posts Dr COGS / Cr
+  // INVENTORY_ASSET at the moment inventory leaves stock.
+  | 'COGS'
+  | 'INVENTORY_ASSET';
 
 export interface JournalPostingLineRequest {
   role: JournalPostingRole;

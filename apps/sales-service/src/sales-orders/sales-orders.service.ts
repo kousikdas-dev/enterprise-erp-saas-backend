@@ -71,6 +71,10 @@ interface SnapshotSourceItem {
   uomCode: string | null;
   uomName: string | null;
   conversionFactor: Prisma.Decimal | null;
+  // Phase 3.3 (Sales Shipment COGS) — copied verbatim from the Quotation/
+  // ProformaInvoice line, never re-fetched (no fresh inventory-service call
+  // happens on this conversion path).
+  productTracksInventory: boolean | null;
   unitPrice: Prisma.Decimal;
   discountPercent: Prisma.Decimal;
   discountAmount: Prisma.Decimal;
@@ -101,6 +105,11 @@ interface SalesOrderLine {
   uomCode: string;
   uomName: string;
   conversionFactor: Prisma.Decimal;
+  // Phase 3.3 (Sales Shipment COGS) — snapshotted from inventory-service's
+  // Product.trackInventory when mapLines() resolves this line directly, or
+  // copied forward verbatim from the SnapshotSourceItem when this order is
+  // converted from a Quotation/ProformaInvoice.
+  productTracksInventory: boolean | null;
   unitPrice: Prisma.Decimal;
   gross: Prisma.Decimal;
   discountPercent: Prisma.Decimal;
@@ -596,6 +605,7 @@ export class SalesOrdersService {
       uomCode: line.uomCode,
       uomName: line.uomName,
       conversionFactor: line.conversionFactor,
+      productTracksInventory: line.productTracksInventory,
       unitPrice: line.unitPrice,
       discountPercent: line.discountPercent,
       discountAmount: line.discountAmount,
@@ -634,6 +644,7 @@ export class SalesOrdersService {
       uomCode: item.uomCode,
       uomName: item.uomName,
       conversionFactor: item.conversionFactor,
+      productTracksInventory: item.productTracksInventory,
       unitPrice: item.unitPrice,
       discountPercent: item.discountPercent,
       discountAmount: item.discountAmount,
@@ -749,6 +760,7 @@ export class SalesOrdersService {
           uomCode,
           uomName,
           conversionFactor,
+          productTracksInventory: uomOptions.trackInventory,
           unitPrice,
           gross,
           discountPercent,

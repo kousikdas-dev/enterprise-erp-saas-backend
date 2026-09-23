@@ -41,6 +41,7 @@ describe('QuotationsService', () => {
   function defaultUomOptions(overrides: Record<string, unknown> = {}) {
     return {
       productId,
+      trackInventory: true,
       base: { unitOfMeasureId: baseUnitOfMeasureId, code: 'EA', name: 'Each' },
       alternatives: [],
       ...overrides,
@@ -412,6 +413,25 @@ describe('QuotationsService', () => {
       expect(item.taxAmount.toFixed(4)).toBe('0.0000');
       expect(item.taxCodeId).toBeNull();
       expect(item.taxComponents.create).toEqual([]);
+    });
+
+    it('snapshots productTracksInventory from inventory-service (Phase 3.3)', async () => {
+      const { customer, prisma, customers } = customerAndPrisma();
+      const inventoryProducts = defaultInventoryProducts({
+        getUomOptions: jest
+          .fn()
+          .mockResolvedValue(defaultUomOptions({ trackInventory: false })),
+      });
+      const service = createService({ prisma, customers, inventoryProducts });
+
+      await service.create(actorA, {
+        customerId: customer.id,
+        items: [baseItemInput({ quantity: '10', unitPrice: '5.0000' })],
+      });
+
+      const item = (prisma.quotation.create as jest.Mock).mock.calls[0][0].data
+        .items.create[0];
+      expect(item.productTracksInventory).toBe(false);
     });
 
     it('does not call AccountingTaxCodeClient when no taxCodeId is provided', async () => {

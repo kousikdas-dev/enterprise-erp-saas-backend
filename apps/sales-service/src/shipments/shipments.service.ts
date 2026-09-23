@@ -1,23 +1,34 @@
 import {
   ConflictException,
   Injectable,
+  InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
   Prisma,
   SalesOrderStatus,
+  ShipmentPostingStatus,
   ShipmentStatus,
 } from '../../generated/prisma-client';
+import {
+  AccountingJournalClient,
+  CreateJournalPostingRequest,
+} from '../accounting/accounting-journal.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
 import {
+  moneyToString,
   parseConversionFactor,
   parsePositiveDecimal,
   quantityToString,
 } from '../common/decimal';
 import { InventoryProductClient } from '../inventory/inventory-product.client';
-import { InventoryStockClient } from '../inventory/inventory-stock.client';
+import {
+  InventoryStockClient,
+  InventoryStockIssueMovement,
+} from '../inventory/inventory-stock.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toShipmentResponse } from './dto/shipment-response';
 import { CreateShipmentDto, ResolveShipmentLineConversionDto } from './dto/shipment.dto';
@@ -31,12 +42,15 @@ const SHIPMENT_WITH_ORDER_INCLUDE = {
   salesOrder: { include: { items: true } },
 };
 
+const ACCOUNTING_SOURCE_SERVICE = 'sales-service';
+
 type SalesOrderItemRow = {
   id: string;
   unitOfMeasureId: string | null;
   uomCode: string | null;
   uomName: string | null;
   conversionFactor: Prisma.Decimal | null;
+  productTracksInventory: boolean | null;
 };
 
 type ShipmentItemRow = {
@@ -46,6 +60,24 @@ type ShipmentItemRow = {
   quantity: Prisma.Decimal;
   baseQuantity: Prisma.Decimal | null;
 };
+
+// Phase 3.3 (Sales Shipment COGS) — the authoritative per-line cost
+// returned by Inventory's issue call, keyed by ShipmentItem.id so it can be
+// persisted onto the right row inside finalizePosted()'s own transaction.
+// Never recomputed by Sales — this is exactly what Inventory returned.
+type CostsByShipmentItemId = Map<
+  string,
+  { unitCost: Prisma.Decimal; totalCost: Prisma.Decimal }
+>;
+
+/** Minimal shape needed to build a Shipment's COGS accounting posting request. */
+interface CogsPostingSource {
+  id: string;
+  items: Array<{
+    productTracksInventory: boolean | null;
+    totalCost: Prisma.Decimal | null;
+  }>;
+}
 
 /**
  * A line is already resolved (baseQuantity persisted — new shipment, or a
@@ -108,11 +140,14 @@ function classifyLine(
 
 @Injectable()
 export class ShipmentsService {
+  private readonly logger = new Logger(ShipmentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventory: InventoryStockClient,
     private readonly inventoryProducts: InventoryProductClient,
     private readonly audit: IdentityAuditClient,
+    private readonly accountingJournal: AccountingJournalClient,
   ) {}
 
   async create(
@@ -139,13 +174,37 @@ export class ShipmentsService {
       },
       request,
     });
-    await this.inventory.applyIssue(actor, {
+    const issueResult = await this.inventory.applyIssue(actor, {
       referenceType: 'shipment',
       referenceId: shipmentId,
       warehouseId: dto.warehouseId,
-      lines: prepared.inventoryLines,
+      lines: prepared.inventoryLines.map(({ productId, quantity }) => ({
+        productId,
+        quantity,
+      })),
     });
-    return this.finalizePosted(actor, shipmentId, request);
+    const costsByItemId = this.buildCostsByItemId(
+      prepared.inventoryLines,
+      issueResult.movements,
+    );
+    const posted = await this.finalizePosted(
+      actor,
+      shipmentId,
+      request,
+      costsByItemId,
+    );
+    // Post-commit, best-effort (Phase 3.3): accounting-service is a
+    // separate database, so this is never attempted inside finalizePosted()'s
+    // own transaction. A failure here never fails create() itself — the
+    // shipment is already, correctly, POSTED regardless of accounting's
+    // availability; only accountingPostingStatus reflects the outcome,
+    // retryable via retryAccountingPosting().
+    const { shipment: finalRow } = await this.attemptCogsPosting(
+      actor,
+      posted,
+      request,
+    );
+    return toShipmentResponse(finalRow);
   }
 
   async post(
@@ -170,13 +229,31 @@ export class ShipmentsService {
       existing,
     );
 
-    await this.inventory.applyIssue(actor, {
+    const issueResult = await this.inventory.applyIssue(actor, {
       referenceType: 'shipment',
       referenceId: existing.id,
       warehouseId: existing.warehouseId,
-      lines: inventoryLines,
+      lines: inventoryLines.map(({ productId, quantity }) => ({
+        productId,
+        quantity,
+      })),
     });
-    return this.finalizePosted(actor, existing.id, request);
+    const costsByItemId = this.buildCostsByItemId(
+      inventoryLines,
+      issueResult.movements,
+    );
+    const posted = await this.finalizePosted(
+      actor,
+      existing.id,
+      request,
+      costsByItemId,
+    );
+    const { shipment: finalRow } = await this.attemptCogsPosting(
+      actor,
+      posted,
+      request,
+    );
+    return toShipmentResponse(finalRow);
   }
 
   /**
@@ -197,7 +274,7 @@ export class ShipmentsService {
       items: ShipmentItemRow[];
       salesOrder: { items: SalesOrderItemRow[] };
     },
-  ): Promise<Array<{ productId: string; quantity: string }>> {
+  ): Promise<Array<{ shipmentItemId: string; productId: string; quantity: string }>> {
     const soItemsById = new Map(
       existing.salesOrder.items.map((item) => [item.id, item]),
     );
@@ -248,6 +325,7 @@ export class ShipmentsService {
     }
 
     return classifications.map(({ item, resolution }) => ({
+      shipmentItemId: item.id,
       productId: item.productId,
       quantity: quantityToString(
         resolution.kind === 'unresolvable' ? item.quantity : resolution.baseQuantity,
@@ -441,6 +519,12 @@ export class ShipmentsService {
 
       const itemsById = new Map(order.items.map((item) => [item.id, item]));
       const shipmentItems: Array<{
+        // Phase 3.3 (Sales Shipment COGS) — pre-generated, exactly like the
+        // shipment's own id, so the caller can correlate Inventory's
+        // per-line issue response back to this specific ShipmentItem row
+        // (both arrays are built from/consumed in the same order in the
+        // same function call — never relies on a later DB re-fetch order).
+        id: string;
         salesOrderItemId: string;
         productId: string;
         productSku: string;
@@ -475,6 +559,7 @@ export class ShipmentsService {
           ? parseConversionFactor(soItem.conversionFactor)
           : new Prisma.Decimal(1);
         shipmentItems.push({
+          id: randomUUID(),
           salesOrderItemId: soItem.id,
           productId: soItem.productId,
           productSku: soItem.productSku,
@@ -498,6 +583,7 @@ export class ShipmentsService {
           status: ShipmentStatus.PENDING_STOCK,
           items: {
             create: shipmentItems.map((item) => ({
+              id: item.id,
               tenantId: actor.tenantId,
               salesOrderItemId: item.salesOrderItemId,
               productId: item.productId,
@@ -516,8 +602,11 @@ export class ShipmentsService {
 
       return {
         // baseQuantity — never quantity — is the only value ever sent to
-        // Inventory (Phase A §8).
+        // Inventory (Phase A §8). shipmentItemId travels alongside it
+        // purely for this process's own later cost-correlation step — it is
+        // stripped before the actual HTTP payload (see create()).
         inventoryLines: shipmentItems.map((item) => ({
+          shipmentItemId: item.id,
           productId: item.productId,
           quantity: quantityToString(item.baseQuantity),
         })),
@@ -529,6 +618,7 @@ export class ShipmentsService {
     actor: ActorContext,
     shipmentId: string,
     request?: RequestAuditMeta,
+    costsByItemId?: CostsByShipmentItemId,
   ) {
     const posted = await this.prisma.$transaction(async (tx) => {
       const shipmentRows = await tx.$queryRaw<
@@ -591,6 +681,23 @@ export class ShipmentsService {
           where: { id: soItem.id },
           data: { shippedQuantity: nextShipped },
         });
+
+        // Phase 3.3 (Sales Shipment COGS) — persist the authoritative
+        // issue-time cost (from Inventory's response, never recomputed
+        // here) onto this ShipmentItem, in the same transaction that
+        // commits the shipment as POSTED. Copies productTracksInventory
+        // forward from the SalesOrderItem at the same time — the ONLY
+        // place this snapshot is ever written for a ShipmentItem.
+        const cost = costsByItemId?.get(item.id);
+        await tx.shipmentItem.update({
+          where: { id: item.id },
+          data: {
+            productTracksInventory: soItem.productTracksInventory,
+            ...(cost
+              ? { unitCost: cost.unitCost, totalCost: cost.totalCost }
+              : {}),
+          },
+        });
       }
 
       const refreshedItems = await tx.salesOrderItem.findMany({
@@ -633,7 +740,11 @@ export class ShipmentsService {
       },
       request,
     });
-    return toShipmentResponse(posted);
+    // Returns the raw row (not toShipmentResponse()) — the caller still
+    // needs to run attemptCogsPosting() and reflect its outcome before
+    // shaping the final API response (mirrors GoodsReceiptsService's
+    // finalizePosted() -> attemptGrniPosting() ordering exactly).
+    return posted;
   }
 
   private async pendingQuantitiesByOrderItem(
@@ -657,5 +768,189 @@ export class ShipmentsService {
       map.set(item.salesOrderItemId, current.plus(item.quantity));
     }
     return map;
+  }
+
+  /**
+   * Phase 3.3 (Sales Shipment COGS) — zips the local, ordered
+   * `{ shipmentItemId, productId, quantity }` array (exactly what was sent
+   * to Inventory, in the same order) against Inventory's `movements`
+   * response (returned strictly 1:1, in that same order, per
+   * StockIssuesService's implementation) into a lookup by ShipmentItem id.
+   * Never reads `productId` to correlate — a shipment can legitimately have
+   * two lines for the same product, and only positional correspondence is
+   * guaranteed to be correct in that case. A length mismatch is treated as
+   * an internal invariant violation, never silently mis-mapped.
+   */
+  private buildCostsByItemId(
+    sentLines: Array<{ shipmentItemId: string; productId: string; quantity: string }>,
+    movements: InventoryStockIssueMovement[],
+  ): CostsByShipmentItemId {
+    if (movements.length !== sentLines.length) {
+      throw new InternalServerErrorException(
+        'Inventory issue response line count does not match the request',
+      );
+    }
+    const map: CostsByShipmentItemId = new Map();
+    sentLines.forEach((line, index) => {
+      const movement = movements[index];
+      map.set(line.shipmentItemId, {
+        unitCost: new Prisma.Decimal(movement.unitCost ?? 0),
+        totalCost: new Prisma.Decimal(movement.totalCost ?? 0),
+      });
+    });
+    return map;
+  }
+
+  /**
+   * Phase 3.3 (Sales Shipment COGS). Sums ShipmentItem.totalCost only over
+   * lines where productTracksInventory === true (NULL/false lines — including
+   * every historical pre-Phase-3.3 row — contribute nothing: Sales has no
+   * pre-existing "expense on issue" concept to fall back to, unlike
+   * Purchase's PURCHASE_EXPENSE). Returns null (skip posting entirely) when
+   * there is nothing to post, mirroring
+   * GoodsReceiptsService.buildGrniPostingRequest()'s `total.lte(0) -> null`
+   * rule exactly.
+   */
+  private buildCogsPostingRequest(
+    shipment: CogsPostingSource,
+  ): CreateJournalPostingRequest | null {
+    let total = new Prisma.Decimal(0);
+    for (const item of shipment.items) {
+      if (item.productTracksInventory !== true) continue;
+      if (!item.totalCost) continue;
+      total = total.plus(item.totalCost);
+    }
+    if (total.lte(0)) return null;
+
+    return {
+      sourceService: ACCOUNTING_SOURCE_SERVICE,
+      sourceType: 'SHIPMENT',
+      sourceId: shipment.id,
+      description: `Shipment ${shipment.id}`,
+      lines: [
+        { role: 'COGS', side: 'DEBIT', amount: moneyToString(total) },
+        { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: moneyToString(total) },
+      ],
+    };
+  }
+
+  /**
+   * Attempts to post (or idempotently replay) this shipment's COGS
+   * accounting journal and persists the outcome as a Sales-side cache —
+   * never throws: the caller decides whether a failure should be surfaced
+   * (retryAccountingPosting does; create()/post()'s post-commit call does
+   * not). Mirrors GoodsReceiptsService.attemptGrniPosting() exactly.
+   */
+  private async attemptCogsPosting(
+    actor: ActorContext,
+    shipment: Awaited<ReturnType<typeof this.finalizePosted>>,
+    request?: RequestAuditMeta,
+  ) {
+    const postingRequest = this.buildCogsPostingRequest(shipment);
+    if (!postingRequest) {
+      // Nothing postable (no inventory-tracked line, or every tracked
+      // line's totalCost was 0) — nothing was written, so the shipment
+      // already in hand is accurate; accountingPostingStatus stays
+      // NOT_POSTED at its default.
+      return { shipment, error: undefined as unknown };
+    }
+    try {
+      const result = await this.accountingJournal.post(actor, postingRequest);
+      const updated = await this.prisma.shipment.update({
+        where: { id: shipment.id },
+        data: {
+          accountingPostingStatus: ShipmentPostingStatus.POSTED,
+          journalEntryId: result.id,
+        },
+        include: SHIPMENT_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'shipment.accounting-posted',
+        resource: 'shipment',
+        resourceId: shipment.id,
+        metadata: {
+          journalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { shipment: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to post COGS accounting journal for shipment ${shipment.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      try {
+        await this.prisma.shipment.update({
+          where: { id: shipment.id },
+          data: { accountingPostingStatus: ShipmentPostingStatus.FAILED },
+        });
+      } catch (updateError) {
+        this.logger.error(
+          `Failed to record FAILED accounting posting status for shipment ${shipment.id}`,
+          updateError instanceof Error ? updateError.stack : undefined,
+        );
+      }
+      const refreshed = await this.require(actor, shipment.id);
+      return { shipment: refreshed, error };
+    }
+  }
+
+  private async require(actor: ActorContext, id: string) {
+    const row = await this.prisma.shipment.findFirst({
+      where: { id, tenantId: actor.tenantId },
+      include: SHIPMENT_INCLUDE,
+    });
+    if (!row) throw new NotFoundException('Shipment not found');
+    return row;
+  }
+
+  /**
+   * Manual retry for a POSTED shipment whose COGS accounting posting is
+   * currently FAILED (or was never attempted). Rejected for a non-POSTED
+   * shipment — nothing to account for until Inventory has actually issued
+   * the stock. Already-POSTED accounting is a no-op (never calls
+   * accounting-service again) rather than an error. Unlike create()/post()'s
+   * post-commit best-effort call, a failure here is surfaced to the caller:
+   * retrying IS the primary action being requested. Mirrors
+   * GoodsReceiptsService.retryAccountingPosting() exactly.
+   */
+  async retryAccountingPosting(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+
+    if (existing.status !== ShipmentStatus.POSTED) {
+      throw new ConflictException(
+        'Only a POSTED shipment can have its accounting posting retried',
+      );
+    }
+
+    if (existing.accountingPostingStatus === ShipmentPostingStatus.POSTED) {
+      return toShipmentResponse(existing);
+    }
+
+    const { shipment, error } = await this.attemptCogsPosting(
+      actor,
+      existing,
+      request,
+    );
+    if (error) {
+      throw error;
+    }
+
+    await this.audit.record({
+      actor,
+      action: 'shipment.accounting-posting-retried',
+      resource: 'shipment',
+      resourceId: shipment.id,
+      metadata: { journalEntryId: shipment.journalEntryId },
+      request,
+    });
+
+    return toShipmentResponse(shipment);
   }
 }

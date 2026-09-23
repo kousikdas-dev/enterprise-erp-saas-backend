@@ -50,6 +50,9 @@ interface QuotationLine {
   uomCode: string;
   uomName: string;
   conversionFactor: Prisma.Decimal;
+  // Phase 3.3 (Sales Shipment COGS) — snapshotted from inventory-service's
+  // Product.trackInventory via the same getUomOptions() call below.
+  productTracksInventory: boolean;
   unitPrice: Prisma.Decimal;
   gross: Prisma.Decimal;
   discountPercent: Prisma.Decimal;
@@ -419,6 +422,7 @@ export class QuotationsService {
       uomCode: line.uomCode,
       uomName: line.uomName,
       conversionFactor: line.conversionFactor,
+      productTracksInventory: line.productTracksInventory,
       unitPrice: line.unitPrice,
       discountPercent: line.discountPercent,
       discountAmount: line.discountAmount,
@@ -525,6 +529,7 @@ export class QuotationsService {
           uomCode,
           uomName,
           conversionFactor,
+          productTracksInventory: uomOptions.trackInventory,
           unitPrice,
           gross,
           discountPercent,

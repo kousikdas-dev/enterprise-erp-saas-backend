@@ -56,6 +56,19 @@ export class ShipmentsController {
     return this.shipments.post(actor, id, requestAuditMeta(request));
   }
 
+  @Post(':id/retry-accounting-posting')
+  retryAccountingPosting(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.shipments.retryAccountingPosting(
+      actor,
+      id,
+      requestAuditMeta(request),
+    );
+  }
+
   @Patch(':id/lines/:lineId/resolve-conversion')
   resolveConversion(
     @CurrentActor() actor: ActorContext,

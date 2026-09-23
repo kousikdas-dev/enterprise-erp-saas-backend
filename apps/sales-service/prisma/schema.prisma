@@ -50,6 +50,18 @@ enum ShipmentStatus {
   UOM_RESOLUTION_REQUIRED
 }
 
+// Phase 3.3 (Sales Shipment COGS) — Shipment posting can only ever be
+// NOT_POSTED/POSTED/FAILED: Shipment reversal is not implemented (there is
+// no cancel/reverse operation on Shipment at all), so no REVERSED value is
+// representable here (mirrors GoodsReceiptPostingStatus on the Purchase
+// side exactly — same rationale, same narrower shape than an invoice-style
+// posting-status enum).
+enum ShipmentPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+}
+
 enum CustomerAddressType {
   BILLING
   SHIPPING
@@ -214,6 +226,14 @@ model QuotationItem {
   uomCode          String?
   uomName          String?
   conversionFactor Decimal? @db.Decimal(19, 6)
+  // Phase 3.3 (Sales Shipment COGS) — snapshotted verbatim from
+  // inventory-service's Product.trackInventory via the same getUomOptions()
+  // round-trip already used for UOM resolution — no separate call. Copied
+  // forward to SalesOrderItem when a Sales Order is converted from this
+  // Quotation, never re-fetched. Nullable permanently, not just during a
+  // migration window: every row created before this column existed has NULL
+  // here, and NULL is always treated identically to false downstream.
+  productTracksInventory Boolean?
   unitPrice        Decimal  @db.Decimal(19, 4)
   discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
   discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
@@ -296,6 +316,11 @@ model ProformaInvoiceItem {
   uomCode           String?
   uomName           String?
   conversionFactor  Decimal? @db.Decimal(19, 6)
+  // Phase 3.3 (Sales Shipment COGS) — same snapshot rule as
+  // QuotationItem.productTracksInventory above; copied forward to
+  // SalesOrderItem when a Sales Order is converted from this Proforma
+  // Invoice.
+  productTracksInventory Boolean?
   unitPrice         Decimal  @db.Decimal(19, 4)
   discountPercent   Decimal  @default(0) @db.Decimal(5, 2)
   discountAmount    Decimal  @default(0) @db.Decimal(19, 4)
@@ -387,6 +412,14 @@ model SalesOrderItem {
   uomCode          String?
   uomName          String?
   conversionFactor Decimal? @db.Decimal(19, 6)
+  // Phase 3.3 (Sales Shipment COGS) — snapshotted from inventory-service's
+  // Product.trackInventory when this order line is created directly (via
+  // mapLines()'s existing getUomOptions() call), or copied forward verbatim
+  // when this order is converted from a Quotation/ProformaInvoice (never a
+  // fresh call in that path). Copied forward again to ShipmentItem at
+  // shipment-creation time. NULL and false are always treated identically —
+  // only an explicit true requires/enables COGS posting at shipment time.
+  productTracksInventory Boolean?
   unitPrice        Decimal  @db.Decimal(19, 4)
   discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
   discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
@@ -439,6 +472,17 @@ model Shipment {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
+  // Phase 3.3 (Sales Shipment COGS) — Sales-side cache of accounting-
+  // service's own posting state, mirroring GoodsReceipt's identical Phase
+  // 3.1 pattern exactly. No reversalJournalEntryId: Shipment reversal is
+  // not implemented (no cancel/reverse operation exists on Shipment at all)
+  // — see ShipmentPostingStatus. No FK to accounting_db (separate database;
+  // soft reference). The authoritative idempotency guard is
+  // accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never this column.
+  accountingPostingStatus ShipmentPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?               @db.Uuid
+
   salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
   items      ShipmentItem[]
 
@@ -480,6 +524,24 @@ model ShipmentItem {
   conversionResolvedBy     String?
   conversionResolvedAt     DateTime?
   conversionResolutionNote String?
+
+  // Phase 3.3 (Sales Shipment COGS) — copied verbatim from the parent
+  // SalesOrderItem at shipment-creation time, never re-fetched. NULL is
+  // always treated identically to false — never blocks a shipment, never
+  // participates in COGS posting.
+  productTracksInventory Boolean?
+
+  // Phase 3.3 (Sales Shipment COGS) — the authoritative issue-time cost
+  // snapshot returned by Inventory's stock-issue call (never computed by
+  // Sales itself). unitCost is the moving average AT THE MOMENT of this
+  // shipment's issue (never re-derived later from a since-changed Stock
+  // average); totalCost = baseQuantity × unitCost, exactly as Inventory
+  // itself computed it. Nullable at the DB level only for legacy
+  // pre-migration rows — the service never writes NULL for a new row.
+  // This is the sole input to buildCogsPostingRequest(); never re-fetched
+  // from Inventory at posting or retry time.
+  unitCost  Decimal? @db.Decimal(19, 4)
+  totalCost Decimal? @db.Decimal(19, 4)
 
   shipment       Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
   salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id], onDelete: Restrict)
