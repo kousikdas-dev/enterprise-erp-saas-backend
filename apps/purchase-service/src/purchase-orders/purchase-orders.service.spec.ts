@@ -80,6 +80,7 @@ describe('PurchaseOrdersService', () => {
   function defaultUomOptions(overrides: Record<string, unknown> = {}) {
     return {
       productId,
+      trackInventory: true,
       base: { unitOfMeasureId, code: 'EA', name: 'Each' },
       alternatives: [],
       ...overrides,
@@ -886,6 +887,25 @@ describe('PurchaseOrdersService', () => {
       expect(item.taxComponents.create).toHaveLength(2);
       expect(item.taxAmount.toFixed(4)).toBe('9.0000');
       expect(item.lineTotal.toFixed(4)).toBe('59.0000');
+    });
+
+    it('snapshots productTracksInventory from inventory-service (Phase 3.2)', async () => {
+      const prisma = prismaForCreate();
+      const inventoryProducts = defaultInventoryProducts({
+        getUomOptions: jest
+          .fn()
+          .mockResolvedValue(defaultUomOptions({ trackInventory: false })),
+      });
+      const service = createService({ prisma, inventoryProducts });
+
+      await service.create(actor, {
+        supplierId,
+        items: [baseItemInput({ quantity: '10', unitCost: '5.0000' })],
+      });
+
+      const item = (prisma.purchaseOrder.create as jest.Mock).mock.calls[0][0]
+        .data.items.create[0];
+      expect(item.productTracksInventory).toBe(false);
     });
 
     it('defaults discountPercent to 0 and taxAmount to 0 when neither is provided', async () => {

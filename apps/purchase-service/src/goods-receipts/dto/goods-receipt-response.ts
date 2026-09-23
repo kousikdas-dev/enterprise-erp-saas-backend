@@ -1,9 +1,10 @@
 import {
+  GoodsReceiptPostingStatus,
   GoodsReceiptStatus,
   Prisma,
   PurchaseOrderStatus,
 } from '../../../generated/prisma-client';
-import { quantityToString } from '../../common/decimal';
+import { moneyToString, quantityToString } from '../../common/decimal';
 
 type ReceiptWithItems = {
   id: string;
@@ -14,6 +15,8 @@ type ReceiptWithItems = {
   receivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  accountingPostingStatus: GoodsReceiptPostingStatus;
+  journalEntryId: string | null;
   items: Array<{
     id: string;
     tenantId: string;
@@ -28,6 +31,7 @@ type ReceiptWithItems = {
     uomName: string | null;
     conversionFactor: Prisma.Decimal | null;
     baseQuantity: Prisma.Decimal | null;
+    unitCost: Prisma.Decimal | null;
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -43,6 +47,10 @@ export function toGoodsReceiptResponse(row: ReceiptWithItems) {
     receivedAt: row.receivedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    // Phase 3.1 (GRNI Accounting) — Purchase-side cache of accounting-service's
+    // own posting state, mirroring PurchaseInvoice's response shape.
+    accountingPostingStatus: row.accountingPostingStatus,
+    journalEntryId: row.journalEntryId,
     items: row.items.map((item) => ({
       id: item.id,
       tenantId: item.tenantId,
@@ -61,10 +69,11 @@ export function toGoodsReceiptResponse(row: ReceiptWithItems) {
       baseQuantity: item.baseQuantity
         ? quantityToString(item.baseQuantity)
         : null,
+      unitCost: item.unitCost ? moneyToString(item.unitCost) : null,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     })),
   };
 }
 
-export { PurchaseOrderStatus, GoodsReceiptStatus };
+export { PurchaseOrderStatus, GoodsReceiptStatus, GoodsReceiptPostingStatus };

@@ -22,7 +22,13 @@ export interface InventoryStockReceiptRequest {
   referenceType: 'goods_receipt';
   referenceId: string;
   warehouseId: string;
-  lines: Array<{ productId: string; quantity: string }>;
+  // unitCost is optional (Inventory Valuation V1, Phase 2 — the receipt
+  // endpoint already accepts it and blends it into Stock.totalValue via
+  // moving average). Phase 3.1 (GRNI Accounting) is the first Purchase-side
+  // caller to actually populate it, from the persisted GoodsReceiptItem.unitCost
+  // snapshot; a legacy line with no snapshotted cost simply omits it,
+  // preserving the exact pre-Phase-3.1 behavior for that line.
+  lines: Array<{ productId: string; quantity: string; unitCost?: string }>;
 }
 
 interface InventoryEnvelope<T> {

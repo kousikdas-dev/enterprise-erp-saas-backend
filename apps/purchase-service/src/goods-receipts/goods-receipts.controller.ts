@@ -39,6 +39,19 @@ export class GoodsReceiptsController {
     return this.receipts.post(actor, id, requestAuditMeta(request));
   }
 
+  @Post(':id/retry-accounting-posting')
+  retryAccountingPosting(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.receipts.retryAccountingPosting(
+      actor,
+      id,
+      requestAuditMeta(request),
+    );
+  }
+
   @Get()
   list(@CurrentActor() actor: ActorContext) {
     return this.receipts.list(actor);

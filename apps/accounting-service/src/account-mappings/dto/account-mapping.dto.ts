@@ -9,6 +9,11 @@ const PURPOSES = [
   'ACCOUNTS_RECEIVABLE',
   'OUTPUT_TAX',
   'SALES_DISCOUNT',
+  'INVENTORY_ASSET',
+  'COGS',
+  'GOODS_RECEIVED_NOT_INVOICED',
+  'PURCHASE_PRICE_VARIANCE',
+  'OPENING_BALANCE_EQUITY',
 ] as const;
 
 export type AccountMappingPurposeInput = (typeof PURPOSES)[number];

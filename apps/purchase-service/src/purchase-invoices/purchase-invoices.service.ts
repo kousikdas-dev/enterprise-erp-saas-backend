@@ -6,6 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  GoodsReceiptPostingStatus,
+  GoodsReceiptStatus,
   Prisma,
   PurchaseInvoicePaymentStatus,
   PurchaseInvoicePostingStatus,
@@ -43,7 +45,13 @@ import { toSupplierPaymentResponse } from './dto/supplier-payment-response';
 const INVOICE_INCLUDE = {
   items: {
     orderBy: { createdAt: 'asc' as const },
-    include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
+    include: {
+      taxComponents: { orderBy: { sequence: 'asc' as const } },
+      // Phase 3.2 (GRNI Clearing / PPV) — only unitCost/baseQuantity are
+      // ever read from this relation (buildInvoicePostingRequest); never
+      // re-fetched separately at posting time.
+      goodsReceiptItem: { select: { unitCost: true, baseQuantity: true } },
+    },
   },
 };
 
@@ -70,6 +78,8 @@ interface PoItemRow extends PoItemQuantityRow {
   uomCode: string | null;
   uomName: string | null;
   conversionFactor: Prisma.Decimal | null;
+  // Phase 3.2 (GRNI Clearing / PPV) snapshot — see PurchaseInvoiceLine below.
+  productTracksInventory: boolean | null;
   taxCodeId: string | null;
   taxCode: string | null;
   taxCodeName: string | null;
@@ -87,7 +97,12 @@ interface GrItemRow {
   uomCode: string | null;
   uomName: string | null;
   conversionFactor: Prisma.Decimal | null;
-  goodsReceipt: { purchaseOrderId: string };
+  productTracksInventory: boolean | null;
+  goodsReceipt: {
+    purchaseOrderId: string;
+    status: string;
+    accountingPostingStatus: string;
+  };
 }
 
 interface PurchaseInvoiceLineTaxComponent {
@@ -108,6 +123,12 @@ interface PurchaseInvoiceLine {
   uomCode: string | null;
   uomName: string | null;
   conversionFactor: Prisma.Decimal | null;
+  // Phase 3.2 (GRNI Clearing / PPV) — copied from productSource (GoodsReceiptItem
+  // when goodsReceiptItemId is supplied, otherwise PurchaseOrderItem), never
+  // re-fetched. NULL and false are always treated identically — only an
+  // explicit true requires goodsReceiptItemId and participates in GRNI
+  // clearing/PPV at confirm().
+  productTracksInventory: boolean | null;
   quantity: Prisma.Decimal;
   unitCost: Prisma.Decimal;
   gross: Prisma.Decimal;
@@ -130,6 +151,28 @@ const RECEIVABLE_PO_STATUSES: PurchaseOrderStatus[] = [
 
 const ACCOUNTING_SOURCE_SERVICE = 'purchase-service';
 
+/**
+ * Phase 3.2 (GRNI Clearing / PPV) — minimal per-line shape needed to decide
+ * whether a line clears GRNI (productTracksInventory === true AND a matched
+ * GoodsReceiptItem with a snapshotted unitCost) or falls back to the
+ * pre-Phase-3.2 PURCHASE_EXPENSE treatment. Deliberately independent of
+ * PurchaseInvoiceGoodsReceiptMatch — the clearing amount is a pure function
+ * of already-persisted, immutable data (this line + its linked
+ * GoodsReceiptItem.unitCost), recomputed identically whether this is the
+ * initial post-confirm() posting attempt or a later retryAccountingPosting().
+ */
+interface InvoicePostingLineSource {
+  productTracksInventory: boolean | null;
+  goodsReceiptItemId: string | null;
+  quantity: Prisma.Decimal;
+  conversionFactor: Prisma.Decimal | null;
+  lineSubtotal: Prisma.Decimal;
+  goodsReceiptItem: {
+    unitCost: Prisma.Decimal | null;
+    baseQuantity: Prisma.Decimal | null;
+  } | null;
+}
+
 /** Minimal shape needed to build a Purchase Invoice's accounting posting request. */
 interface InvoicePostingSource {
   id: string;
@@ -139,6 +182,7 @@ interface InvoicePostingSource {
   discountTotal: Prisma.Decimal;
   taxTotal: Prisma.Decimal;
   total: Prisma.Decimal;
+  items: InvoicePostingLineSource[];
 }
 
 /** Minimal shape needed to build a Supplier Payment's accounting posting request. */
@@ -437,6 +481,12 @@ export class PurchaseInvoicesService {
         invoice.id,
       );
 
+      // Phase 3.2 (GRNI Clearing / PPV) — hard, lock-protected re-check and
+      // matchedQuantity accumulation for every inventory-tracked line. Runs
+      // after the quantity check above and before invoicedQuantity is
+      // committed, so a rejection here leaves no partial state written.
+      await this.assertGoodsReceiptsMatchedAndAccumulate(tx, actor, invoice.items);
+
       // Aggregate this invoice's own lines by purchaseOrderItemId before
       // writing — one line's worth is never applied in isolation when the
       // same PO item is billed across multiple lines (Decision B).
@@ -582,6 +632,10 @@ export class PurchaseInvoicesService {
               data: { invoicedQuantity: newInvoicedQuantity },
             });
           }
+
+          // Phase 3.2 (GRNI Clearing / PPV) — symmetric reversal of
+          // confirm()'s matchedQuantity accumulation.
+          await this.reverseGoodsReceiptMatches(tx, actor, existing.items);
         }
 
         const updated = await tx.purchaseInvoice.update({
@@ -864,16 +918,91 @@ export class PurchaseInvoicesService {
     return row;
   }
 
+  /**
+   * Phase 3.2 (GRNI Clearing / PPV). Splits what used to be a single
+   * unconditional PURCHASE_EXPENSE line into three buckets:
+   *
+   *   expensePortion    — lines that are NOT a matched inventory-tracked
+   *                       line (non-inventory, historical NULL, or the
+   *                       productTracksInventory === false case) — treated
+   *                       byte-for-byte like every PurchaseInvoice line was
+   *                       before this phase.
+   *   grniClearingTotal — Σ(invoiceLineBaseQty × receipt unitCost) over
+   *                       matched inventory lines. Reuses the exact formula
+   *                       Phase 3.1 used to CREDIT GRNI at receipt time, so
+   *                       clearing always nets to zero against whatever was
+   *                       actually accrued, regardless of any deeper
+   *                       UOM/cost convention question (never re-derived).
+   *   ppvTotal          — Σ(lineSubtotal) over matched lines, minus
+   *                       grniClearingTotal. Positive (invoice cost >
+   *                       receipt cost, unfavorable) debits PPV; negative
+   *                       (invoice cost < receipt cost, favorable) credits
+   *                       it; exactly zero omits the line.
+   *
+   * Algebraically, expensePortion + grniClearingTotal + ppvTotal always
+   * equals subtotal - discountTotal (the old single PURCHASE_EXPENSE
+   * amount), so the journal balances against ACCOUNTS_PAYABLE/INPUT_TAX
+   * exactly as before regardless of ppvTotal's sign. When no line is a
+   * matched inventory-tracked line, this produces the identical journal
+   * Phase 3.1-era code would have produced (no GRNI/PPV lines at all).
+   */
   private buildInvoicePostingRequest(
     invoice: InvoicePostingSource,
   ): CreateJournalPostingRequest {
-    const lines: CreateJournalPostingRequest['lines'] = [
-      {
+    let expensePortion = new Prisma.Decimal(0);
+    let grniClearingTotal = new Prisma.Decimal(0);
+    let matchedInvoiceValue = new Prisma.Decimal(0);
+
+    for (const item of invoice.items) {
+      const isMatchedInventoryLine =
+        item.productTracksInventory === true &&
+        item.goodsReceiptItemId !== null &&
+        item.goodsReceiptItem?.unitCost != null;
+
+      if (isMatchedInventoryLine) {
+        const baseQty = item.quantity.mul(
+          item.conversionFactor ?? new Prisma.Decimal(1),
+        );
+        grniClearingTotal = grniClearingTotal.plus(
+          baseQty.mul(item.goodsReceiptItem!.unitCost!),
+        );
+        matchedInvoiceValue = matchedInvoiceValue.plus(item.lineSubtotal);
+      } else {
+        expensePortion = expensePortion.plus(item.lineSubtotal);
+      }
+    }
+    const ppvTotal = matchedInvoiceValue.minus(grniClearingTotal);
+
+    const lines: CreateJournalPostingRequest['lines'] = [];
+    if (expensePortion.gt(0)) {
+      lines.push({
         role: 'PURCHASE_EXPENSE',
         side: 'DEBIT',
-        amount: moneyToString(invoice.subtotal.minus(invoice.discountTotal)),
-      },
-    ];
+        amount: moneyToString(expensePortion),
+      });
+    }
+    if (grniClearingTotal.gt(0)) {
+      lines.push({
+        role: 'GOODS_RECEIVED_NOT_INVOICED',
+        side: 'DEBIT',
+        amount: moneyToString(grniClearingTotal),
+      });
+    }
+    if (ppvTotal.gt(0)) {
+      // Invoice cost > receipt cost — unfavorable variance.
+      lines.push({
+        role: 'PURCHASE_PRICE_VARIANCE',
+        side: 'DEBIT',
+        amount: moneyToString(ppvTotal),
+      });
+    } else if (ppvTotal.lt(0)) {
+      // Invoice cost < receipt cost — favorable variance.
+      lines.push({
+        role: 'PURCHASE_PRICE_VARIANCE',
+        side: 'CREDIT',
+        amount: moneyToString(ppvTotal.abs()),
+      });
+    }
     if (invoice.taxTotal.gt(0)) {
       lines.push({
         role: 'INPUT_TAX',
@@ -1230,6 +1359,248 @@ export class PurchaseInvoicesService {
   }
 
   /**
+   * Phase 3.2 (GRNI Clearing / PPV) — the hard, lock-protected gate for
+   * every inventory-tracked line (productTracksInventory === true) in this
+   * invoice. Called only from confirm()'s own locked transaction (never
+   * from create()/update()'s unlocked soft check, which only re-validates
+   * that a goodsReceiptItemId is present — see resolveLines).
+   *
+   * Lock order (appended to confirm()'s existing purchase_invoices ->
+   * purchase_orders -> purchase_order_items chain, never reordering it):
+   *   goods_receipt_items -> purchase_invoice_goods_receipt_matches
+   * Both locked in ascending id order when more than one row is involved.
+   * A future Purchase Return implementation MUST follow this same order
+   * (acquiring these two tables last, in ascending id order) to avoid
+   * deadlocking against Invoice Confirm.
+   *
+   * For each matched line, asserts
+   *   matchedQuantity + returnedQuantity + invoiceLineBaseQty <= baseQuantity
+   * then accumulates matchedQuantity. Also requires the linked
+   * GoodsReceipt to be fully POSTED (physically received AND its GRNI
+   * accrual successfully posted to accounting-service) — clearing GRNI
+   * against a receipt whose accrual never posted would debit an account
+   * that was never credited.
+   */
+  private async assertGoodsReceiptsMatchedAndAccumulate(
+    tx: Prisma.TransactionClient,
+    actor: ActorContext,
+    items: Array<{
+      productTracksInventory: boolean | null;
+      goodsReceiptItemId: string | null;
+      quantity: Prisma.Decimal;
+      conversionFactor: Prisma.Decimal | null;
+    }>,
+  ): Promise<void> {
+    const matchedItems = items.filter(
+      (item) => item.productTracksInventory === true,
+    );
+    if (matchedItems.length === 0) return;
+
+    if (matchedItems.some((item) => !item.goodsReceiptItemId)) {
+      throw new ConflictException(
+        'A goods receipt is required for every inventory-tracked line before this invoice can be confirmed',
+      );
+    }
+    const grItemIds = Array.from(
+      new Set(matchedItems.map((item) => item.goodsReceiptItemId as string)),
+    );
+
+    // Lock the receipt items first (immutable after creation, but locked
+    // for consistency with the documented lock-order rule above).
+    const grItemRows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        goodsReceiptId: string;
+        baseQuantity: Prisma.Decimal | null;
+        unitCost: Prisma.Decimal | null;
+      }>
+    >(
+      Prisma.sql`
+        SELECT id, "goodsReceiptId", "baseQuantity", "unitCost"
+        FROM goods_receipt_items
+        WHERE id = ANY(${grItemIds}::uuid[]) AND "tenantId" = ${actor.tenantId}::uuid
+        ORDER BY id
+        FOR UPDATE
+      `,
+    );
+    const grItemsById = new Map(grItemRows.map((row) => [row.id, row]));
+    for (const grItemId of grItemIds) {
+      if (!grItemsById.get(grItemId)) {
+        throw new NotFoundException('Goods receipt item not found');
+      }
+    }
+
+    const receiptIds = Array.from(
+      new Set(grItemRows.map((row) => row.goodsReceiptId)),
+    );
+    const receipts = await tx.goodsReceipt.findMany({
+      where: { id: { in: receiptIds }, tenantId: actor.tenantId },
+      select: { id: true, status: true, accountingPostingStatus: true },
+    });
+    const receiptsById = new Map(receipts.map((row) => [row.id, row]));
+
+    for (const grItemId of grItemIds) {
+      const grItem = grItemsById.get(grItemId)!;
+      const receipt = receiptsById.get(grItem.goodsReceiptId);
+      if (
+        !receipt ||
+        receipt.status !== GoodsReceiptStatus.POSTED ||
+        receipt.accountingPostingStatus !== GoodsReceiptPostingStatus.POSTED
+      ) {
+        throw new ConflictException(
+          'Required goods receipt has not been posted to inventory/accounting yet',
+        );
+      }
+      if (grItem.baseQuantity === null || grItem.unitCost === null) {
+        throw new ConflictException(
+          'Goods receipt item is missing base quantity or cost information',
+        );
+      }
+    }
+
+    // Lazily create, then lock, the match row for each referenced receipt
+    // item — same ascending order as the lock above.
+    for (const grItemId of grItemIds) {
+      await tx.purchaseInvoiceGoodsReceiptMatch.upsert({
+        where: { goodsReceiptItemId: grItemId },
+        create: { tenantId: actor.tenantId, goodsReceiptItemId: grItemId },
+        update: {},
+      });
+    }
+    const matchRows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        goodsReceiptItemId: string;
+        matchedQuantity: Prisma.Decimal;
+        returnedQuantity: Prisma.Decimal;
+      }>
+    >(
+      Prisma.sql`
+        SELECT id, "goodsReceiptItemId", "matchedQuantity", "returnedQuantity"
+        FROM purchase_invoice_goods_receipt_matches
+        WHERE "goodsReceiptItemId" = ANY(${grItemIds}::uuid[]) AND "tenantId" = ${actor.tenantId}::uuid
+        ORDER BY "goodsReceiptItemId"
+        FOR UPDATE
+      `,
+    );
+    const matchByGrItemId = new Map(
+      matchRows.map((row) => [row.goodsReceiptItemId, row]),
+    );
+
+    // Dedupe within this invoice is already guaranteed by resolveLines'
+    // (purchaseOrderItemId, goodsReceiptItemId) uniqueness check, but this
+    // additional-per-GR-item map still generalizes correctly if that ever
+    // changes, exactly like assertAvailableQuantity's selfConsumed map.
+    const additionalByGrItemId = new Map<string, Prisma.Decimal>();
+    for (const item of matchedItems) {
+      const grItemId = item.goodsReceiptItemId as string;
+      const grItem = grItemsById.get(grItemId)!;
+      const match = matchByGrItemId.get(grItemId)!;
+      const invoiceLineBaseQty = item.quantity.mul(
+        item.conversionFactor ?? new Prisma.Decimal(1),
+      );
+      const already = additionalByGrItemId.get(grItemId) ?? new Prisma.Decimal(0);
+      const projected = match.matchedQuantity
+        .plus(match.returnedQuantity)
+        .plus(already)
+        .plus(invoiceLineBaseQty);
+      if (projected.gt(grItem.baseQuantity as Prisma.Decimal)) {
+        throw new ConflictException(
+          'Invoice quantity exceeds the matchable goods receipt quantity for this line',
+        );
+      }
+      additionalByGrItemId.set(grItemId, already.plus(invoiceLineBaseQty));
+    }
+
+    for (const [grItemId, additional] of additionalByGrItemId) {
+      const match = matchByGrItemId.get(grItemId)!;
+      await tx.purchaseInvoiceGoodsReceiptMatch.update({
+        where: { id: match.id },
+        data: { matchedQuantity: match.matchedQuantity.plus(additional) },
+      });
+    }
+  }
+
+  /**
+   * Phase 3.2 (GRNI Clearing / PPV) — symmetric reversal of
+   * assertGoodsReceiptsMatchedAndAccumulate, called from cancel()'s
+   * CONFIRMED -> CANCELLED path. Recomputes each matched line's base
+   * quantity identically (never a different formula) and decrements the
+   * match row by the same amount that was added at confirm() time. Only
+   * the match rows need locking here — goods_receipt_items is never
+   * written by this path (baseQuantity/unitCost are immutable), so it is
+   * not re-locked.
+   */
+  private async reverseGoodsReceiptMatches(
+    tx: Prisma.TransactionClient,
+    actor: ActorContext,
+    items: Array<{
+      productTracksInventory: boolean | null;
+      goodsReceiptItemId: string | null;
+      quantity: Prisma.Decimal;
+      conversionFactor: Prisma.Decimal | null;
+    }>,
+  ): Promise<void> {
+    const matchedItems = items.filter(
+      (item) => item.productTracksInventory === true && item.goodsReceiptItemId,
+    );
+    if (matchedItems.length === 0) return;
+
+    const grItemIds = Array.from(
+      new Set(matchedItems.map((item) => item.goodsReceiptItemId as string)),
+    );
+    const matchRows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        goodsReceiptItemId: string;
+        matchedQuantity: Prisma.Decimal;
+      }>
+    >(
+      Prisma.sql`
+        SELECT id, "goodsReceiptItemId", "matchedQuantity"
+        FROM purchase_invoice_goods_receipt_matches
+        WHERE "goodsReceiptItemId" = ANY(${grItemIds}::uuid[]) AND "tenantId" = ${actor.tenantId}::uuid
+        ORDER BY "goodsReceiptItemId"
+        FOR UPDATE
+      `,
+    );
+    const matchByGrItemId = new Map(
+      matchRows.map((row) => [row.goodsReceiptItemId, row]),
+    );
+
+    const reductionByGrItemId = new Map<string, Prisma.Decimal>();
+    for (const item of matchedItems) {
+      const grItemId = item.goodsReceiptItemId as string;
+      const invoiceLineBaseQty = item.quantity.mul(
+        item.conversionFactor ?? new Prisma.Decimal(1),
+      );
+      const already = reductionByGrItemId.get(grItemId) ?? new Prisma.Decimal(0);
+      reductionByGrItemId.set(grItemId, already.plus(invoiceLineBaseQty));
+    }
+
+    for (const [grItemId, reduction] of reductionByGrItemId) {
+      const match = matchByGrItemId.get(grItemId);
+      if (!match) {
+        // Data-integrity guard — should never trigger under correct
+        // operation (mirrors the invoicedQuantity-negative guard below).
+        throw new ConflictException(
+          'No goods receipt match record found to reverse for this line',
+        );
+      }
+      const newMatchedQuantity = match.matchedQuantity.minus(reduction);
+      if (newMatchedQuantity.lt(0)) {
+        throw new ConflictException(
+          'Cancelling this invoice would drive matchedQuantity negative for a goods receipt line',
+        );
+      }
+      await tx.purchaseInvoiceGoodsReceiptMatch.update({
+        where: { id: match.id },
+        data: { matchedQuantity: newMatchedQuantity },
+      });
+    }
+  }
+
+  /**
    * Resolves and validates each DTO line against the loaded PO (and,
    * optionally, a GoodsReceiptItem), assembling the snapshot and calculation
    * for that line. Runs outside any transaction — every lookup here is a
@@ -1293,6 +1664,17 @@ export class PurchaseInvoicesService {
       // re-fetched from Product/inventory-service.
       const productSource = grItem ?? poItem;
 
+      // Phase 3.2 (GRNI Clearing / PPV) — soft, fail-fast validation. The
+      // authoritative, lock-protected re-check happens inside confirm()
+      // (see assertGoodsReceiptRequired), since productTracksInventory is a
+      // frozen snapshot that cannot change between here and confirm() time,
+      // but the linked GoodsReceipt's own posting state can.
+      if (productSource.productTracksInventory === true && !grItem) {
+        throw new BadRequestException(
+          'A goods receipt is required for this inventory-tracked line',
+        );
+      }
+
       // Tax rate/code structure copied from the PO line, never re-resolved
       // via AccountingTaxCodeClient; amounts recomputed against THIS line's
       // own lineSubtotal, not copied as a verbatim dollar amount.
@@ -1322,6 +1704,7 @@ export class PurchaseInvoicesService {
         uomCode: productSource.uomCode,
         uomName: productSource.uomName,
         conversionFactor: productSource.conversionFactor,
+        productTracksInventory: productSource.productTracksInventory,
         quantity,
         unitCost,
         gross,
@@ -1352,6 +1735,7 @@ export class PurchaseInvoicesService {
       uomCode: line.uomCode,
       uomName: line.uomName,
       conversionFactor: line.conversionFactor,
+      productTracksInventory: line.productTracksInventory,
       quantity: line.quantity,
       unitCost: line.unitCost,
       discountPercent: line.discountPercent,

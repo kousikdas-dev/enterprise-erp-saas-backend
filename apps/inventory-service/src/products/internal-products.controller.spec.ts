@@ -91,6 +91,17 @@ describe('InternalProductsController', () => {
     });
   });
 
+  it("returns the product's trackInventory flag", async () => {
+    const { controller, products, productUnits, units } = createController();
+    products.getById.mockResolvedValue(product({ trackInventory: false }));
+    productUnits.list.mockResolvedValue({ items: [] });
+    units.list.mockResolvedValue({ items: [unit(baseUnitId, 'EA', 'Each')] });
+
+    const result = await controller.uomOptions(actor, productId);
+
+    expect(result.trackInventory).toBe(false);
+  });
+
   it('returns only active ProductUnit alternatives', async () => {
     const { controller, products, productUnits, units } = createController();
     products.getById.mockResolvedValue(product());

@@ -1,9 +1,11 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import {
+  GoodsReceiptPostingStatus,
   GoodsReceiptStatus,
   Prisma,
   PurchaseOrderStatus,
 } from '../../generated/prisma-client';
+import { AccountingJournalClient } from '../accounting/accounting-journal.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { InventoryStockClient } from '../inventory/inventory-stock.client';
 import { GoodsReceiptsService } from './goods-receipts.service';
@@ -56,6 +58,10 @@ describe('GoodsReceiptsService', () => {
       uomCode: null,
       uomName: null,
       conversionFactor: null,
+      // PurchaseOrderItem.unitCost is NOT NULL in production (Phase 3.1 —
+      // GRNI Accounting); every PO item mock carries one so
+      // preparePendingReceipt()'s snapshot step has real data to copy.
+      unitCost: decimal('10'),
       ...overrides,
     };
   }
@@ -74,6 +80,7 @@ describe('GoodsReceiptsService', () => {
       uomCode: 'BOX',
       uomName: 'Box',
       conversionFactor: decimal('10'),
+      unitCost: decimal('10'),
       ...overrides,
     };
   }
@@ -184,6 +191,11 @@ describe('GoodsReceiptsService', () => {
     extra: {
       findFirst?: jest.Mock;
       applyReceipt?: jest.Mock;
+      // Phase 3.1 (GRNI Accounting) — defaults are harmless no-ops so every
+      // pre-existing test (none of which assert on accounting behavior)
+      // keeps passing unmodified; GRNI-specific tests override these.
+      updateGoodsReceipt?: jest.Mock;
+      postJournal?: jest.Mock;
     } = {},
   ) {
     const txSequence = [prepareTx, finalizeTx].filter(
@@ -197,19 +209,30 @@ describe('GoodsReceiptsService', () => {
         return fn(tx);
       }),
       goodsReceipt: {
-        findFirst: extra.findFirst ?? jest.fn(),
+        findFirst: extra.findFirst ?? jest.fn().mockResolvedValue(postedResponse()),
+        update:
+          extra.updateGoodsReceipt ??
+          jest.fn((args: { data: unknown }) =>
+            Promise.resolve({ ...postedResponse(), ...(args.data as object) }),
+          ),
       },
     };
     const inventory = {
       applyReceipt: extra.applyReceipt ?? jest.fn().mockResolvedValue({ created: true }),
+    };
+    const accountingJournal = {
+      post:
+        extra.postJournal ??
+        jest.fn().mockResolvedValue({ id: 'journal-1', idempotentReplay: false }),
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
     const service = new GoodsReceiptsService(
       prisma as never,
       inventory as unknown as InventoryStockClient,
       audit as unknown as IdentityAuditClient,
+      accountingJournal as unknown as AccountingJournalClient,
     );
-    return { service, prisma, inventory, audit };
+    return { service, prisma, inventory, audit, accountingJournal };
   }
 
   function postedResponse(overrides: Record<string, unknown> = {}) {
@@ -222,6 +245,9 @@ describe('GoodsReceiptsService', () => {
       receivedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
+      // Phase 3.1 (GRNI Accounting) — Purchase-side posting-status cache.
+      accountingPostingStatus: GoodsReceiptPostingStatus.NOT_POSTED,
+      journalEntryId: null,
       items: [],
       ...overrides,
     };
@@ -284,7 +310,7 @@ describe('GoodsReceiptsService', () => {
     expect(inventory.applyReceipt).toHaveBeenCalledWith(
       actor,
       expect.objectContaining({
-        lines: [{ productId, quantity: '4.000000' }],
+        lines: [{ productId, quantity: '4.000000', unitCost: '10.0000' }],
       }),
     );
     expect(result.items[0].baseQuantity).toBe('4.000000');
@@ -349,7 +375,7 @@ describe('GoodsReceiptsService', () => {
     expect(inventory.applyReceipt).toHaveBeenCalledWith(
       actor,
       expect.objectContaining({
-        lines: [{ productId, quantity: '20.000000' }],
+        lines: [{ productId, quantity: '20.000000', unitCost: '10.0000' }],
       }),
     );
     expect(result.items[0].quantity).toBe('2.000000');
@@ -924,5 +950,264 @@ describe('GoodsReceiptsService', () => {
         resource: 'goods-receipt',
       }),
     );
+  });
+
+  // ==========================================================================
+  // Phase 3.1 — GRNI Accounting (Dr INVENTORY_ASSET / Cr GOODS_RECEIVED_NOT_INVOICED)
+  // ==========================================================================
+  describe('Phase 3.1 — GRNI Accounting', () => {
+    /** Minimal-but-complete GoodsReceiptItem row for GRNI-only tests (only baseQuantity/unitCost vary). */
+    function grniItem(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'gri1',
+        tenantId: actor.tenantId,
+        goodsReceiptId: receiptId,
+        purchaseOrderItemId: poItemId,
+        quantity: decimal('4'),
+        baseQuantity: decimal('4'),
+        unitCost: decimal('10'),
+        productId,
+        productSku: 'SKU-1',
+        productName: 'Widget',
+        unitOfMeasureId: null,
+        uomCode: null,
+        uomName: null,
+        conversionFactor: decimal('1'),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    it('A. snapshots PurchaseOrderItem.unitCost onto GoodsReceiptItem.unitCost at creation, never re-resolved', async () => {
+      const order = buildOrder([basePoItem({ unitCost: decimal('12.5') })]);
+      const prepareTx = buildPrepareTx({ order });
+      const { service } = buildService(
+        prepareTx,
+        buildFinalizeTx({
+          receiptId: 'created',
+          purchaseOrderId: poId,
+          initialStatus: GoodsReceiptStatus.PENDING_STOCK,
+          receiptItems: [],
+          poItems: [{ id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('0') }],
+          postedResult: postedResponse(),
+        }),
+      );
+
+      await service.create(actor, {
+        purchaseOrderId: poId,
+        warehouseId,
+        items: [{ purchaseOrderItemId: poItemId, quantity: '2' }],
+      });
+
+      const createData = prepareTx.__created.data as {
+        items: { create: Array<Record<string, unknown>> };
+      };
+      expect((createData.items.create[0].unitCost as Prisma.Decimal).toFixed(2)).toBe('12.50');
+    });
+
+    it('C. posts Dr INVENTORY_ASSET / Cr GOODS_RECEIVED_NOT_INVOICED at baseQuantity x unitCost for a single-line receipt', async () => {
+      const items = [grniItem({ baseQuantity: decimal('4'), unitCost: decimal('10') })];
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items }),
+      );
+      const { service, accountingJournal } = buildService(null, null, { findFirst });
+
+      await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).toHaveBeenCalledWith(actor, {
+        sourceService: 'purchase-service',
+        sourceType: 'GOODS_RECEIPT',
+        sourceId: receiptId,
+        description: `Goods Receipt ${receiptId}`,
+        lines: [
+          { role: 'INVENTORY_ASSET', side: 'DEBIT', amount: '40.0000' },
+          { role: 'GOODS_RECEIVED_NOT_INVOICED', side: 'CREDIT', amount: '40.0000' },
+        ],
+      });
+    });
+
+    it('D. multi-line Goods Receipt sums baseQuantity x unitCost across all lines into one balanced journal', async () => {
+      const items = [
+        grniItem({ baseQuantity: decimal('4'), unitCost: decimal('10') }), // 40
+        grniItem({ id: 'gri2', baseQuantity: decimal('5'), unitCost: decimal('8') }), // 40
+      ];
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items }),
+      );
+      const { service, accountingJournal } = buildService(null, null, { findFirst });
+
+      await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            { role: 'INVENTORY_ASSET', side: 'DEBIT', amount: '80.0000' },
+            { role: 'GOODS_RECEIVED_NOT_INVOICED', side: 'CREDIT', amount: '80.0000' },
+          ],
+        }),
+      );
+    });
+
+    it('E. zero unitCost across all lines results in no journal being posted (stays NOT_POSTED, no accounting call)', async () => {
+      const items = [grniItem({ baseQuantity: decimal('4'), unitCost: decimal('0') })];
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({
+          status: GoodsReceiptStatus.POSTED,
+          accountingPostingStatus: GoodsReceiptPostingStatus.NOT_POSTED,
+          items,
+        }),
+      );
+      const { service, accountingJournal } = buildService(null, null, { findFirst });
+
+      const result = await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(result.accountingPostingStatus).toBe(GoodsReceiptPostingStatus.NOT_POSTED);
+    });
+
+    it('F. a legacy line with NULL unitCost is excluded from the journal without blocking the receipt', async () => {
+      const items = [
+        grniItem({ baseQuantity: decimal('4'), unitCost: null }), // legacy pre-migration row, no cost
+        grniItem({ id: 'gri2', baseQuantity: decimal('5'), unitCost: decimal('8') }), // 40
+      ];
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items }),
+      );
+      const { service, accountingJournal } = buildService(null, null, { findFirst });
+
+      await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          lines: [
+            { role: 'INVENTORY_ASSET', side: 'DEBIT', amount: '40.0000' },
+            { role: 'GOODS_RECEIVED_NOT_INVOICED', side: 'CREDIT', amount: '40.0000' },
+          ],
+        }),
+      );
+    });
+
+    it('G. accounting posting failure does not roll back the already-POSTED goods receipt', async () => {
+      const order = buildOrder([basePoItem()]);
+      const prepareTx = buildPrepareTx({ order });
+      const postedItems = [
+        {
+          id: 'gri1',
+          tenantId: actor.tenantId,
+          goodsReceiptId: 'created',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('4'),
+          baseQuantity: decimal('4'),
+          unitCost: decimal('10'),
+          productId,
+          productSku: 'SKU-1',
+          productName: 'Widget',
+          unitOfMeasureId: null,
+          uomCode: null,
+          uomName: null,
+          conversionFactor: decimal('1'),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ];
+      const finalizeTx = buildFinalizeTx({
+        receiptId: 'created',
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.PENDING_STOCK,
+        receiptItems: [{ id: 'gri1', purchaseOrderItemId: poItemId, quantity: decimal('4'), baseQuantity: decimal('4') }],
+        poItems: [{ id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('0') }],
+        postedResult: postedResponse({ items: postedItems }),
+      });
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ items: postedItems, accountingPostingStatus: GoodsReceiptPostingStatus.FAILED }),
+      );
+      const postJournal = jest.fn().mockRejectedValue(new Error('accounting service unavailable'));
+      const { service } = buildService(prepareTx, finalizeTx, { findFirst, postJournal });
+
+      // create() must resolve successfully — the accounting failure is
+      // swallowed post-commit, never propagated back to the caller.
+      const result = await service.create(actor, {
+        purchaseOrderId: poId,
+        warehouseId,
+        items: [{ purchaseOrderItemId: poItemId, quantity: '4' }],
+      });
+
+      expect(result.status).toBe(GoodsReceiptStatus.POSTED);
+      expect(result.accountingPostingStatus).toBe(GoodsReceiptPostingStatus.FAILED);
+      expect(postJournal).toHaveBeenCalledTimes(1);
+    });
+
+    it('H. retryAccountingPosting(): a FAILED posting retried succeeds and transitions to POSTED', async () => {
+      const items = [grniItem({ baseQuantity: decimal('4'), unitCost: decimal('10') })];
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({
+          status: GoodsReceiptStatus.POSTED,
+          accountingPostingStatus: GoodsReceiptPostingStatus.FAILED,
+          items,
+        }),
+      );
+      const postJournal = jest.fn().mockResolvedValue({ id: 'journal-2', idempotentReplay: false });
+      const updateGoodsReceipt = jest.fn((args: { data: unknown }) =>
+        Promise.resolve(postedResponse({ items, ...(args.data as object) })),
+      );
+      const { service, accountingJournal } = buildService(null, null, {
+        findFirst,
+        postJournal,
+        updateGoodsReceipt,
+      });
+
+      const result = await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe(GoodsReceiptPostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('journal-2');
+    });
+
+    it('I. retryAccountingPosting(): already-POSTED is a no-op, never calls accounting-service again', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({
+          status: GoodsReceiptStatus.POSTED,
+          accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+          journalEntryId: 'journal-1',
+          items: [],
+        }),
+      );
+      const { service, accountingJournal } = buildService(null, null, { findFirst });
+
+      const result = await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(result.accountingPostingStatus).toBe(GoodsReceiptPostingStatus.POSTED);
+    });
+
+    it('J. retryAccountingPosting(): rejected with 409 for a PENDING_STOCK receipt', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.PENDING_STOCK, items: [] }),
+      );
+      const { service, accountingJournal } = buildService(null, null, { findFirst });
+
+      await expect(service.retryAccountingPosting(actor, receiptId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+    });
+
+    it('K. an idempotent replay from accounting-service (idempotentReplay: true) still marks POSTED without erroring', async () => {
+      const items = [{ baseQuantity: decimal('4'), unitCost: decimal('10') }];
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items }),
+      );
+      const postJournal = jest.fn().mockResolvedValue({ id: 'journal-1', idempotentReplay: true });
+      const { service, accountingJournal } = buildService(null, null, { findFirst, postJournal });
+
+      const result = await service.retryAccountingPosting(actor, receiptId);
+
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe(GoodsReceiptPostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('journal-1');
+    });
   });
 });

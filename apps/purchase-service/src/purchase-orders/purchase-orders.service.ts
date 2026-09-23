@@ -51,6 +51,9 @@ interface PurchaseOrderLine {
   uomCode: string;
   uomName: string;
   conversionFactor: Prisma.Decimal;
+  // Phase 3.2 (GRNI Clearing / PPV) — snapshotted from inventory-service's
+  // Product.trackInventory via the same getUomOptions() call below.
+  productTracksInventory: boolean;
   unitCost: Prisma.Decimal;
   gross: Prisma.Decimal;
   discountPercent: Prisma.Decimal;
@@ -566,6 +569,7 @@ export class PurchaseOrdersService {
       uomCode: line.uomCode,
       uomName: line.uomName,
       conversionFactor: line.conversionFactor,
+      productTracksInventory: line.productTracksInventory,
       unitCost: line.unitCost,
       discountPercent: line.discountPercent,
       discountAmount: line.discountAmount,
@@ -684,6 +688,7 @@ export class PurchaseOrdersService {
           uomCode,
           uomName,
           conversionFactor,
+          productTracksInventory: uomOptions.trackInventory,
           unitCost,
           gross,
           discountPercent,

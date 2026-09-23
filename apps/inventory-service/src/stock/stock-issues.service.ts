@@ -6,6 +6,7 @@ import {
 import { Prisma, StockMovementType } from '../../generated/prisma-client';
 import { ActorContext } from '../auth/actor-context';
 import {
+  moneyToString,
   parsePositiveDecimal,
   quantityToString,
 } from '../common/decimal';
@@ -33,6 +34,8 @@ export type StockIssueResult = {
     referenceId: string | null;
     createdBy: string;
     createdAt: Date;
+    unitCost: string | null;
+    totalCost: string | null;
   }>;
   stocks: Array<{
     id: string;
@@ -40,6 +43,7 @@ export type StockIssueResult = {
     productId: string;
     warehouseId: string;
     quantity: string;
+    totalValue: string;
   }>;
 };
 
@@ -99,9 +103,9 @@ export class StockIssuesService {
       const stocks = [];
       for (const line of lines) {
         const locked = await tx.$queryRaw<
-          Array<{ id: string; quantity: Prisma.Decimal }>
+          Array<{ id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal }>
         >(
-          Prisma.sql`SELECT id, quantity FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${line.productId}::uuid AND "warehouseId" = ${dto.warehouseId}::uuid FOR UPDATE`,
+          Prisma.sql`SELECT id, quantity, "totalValue" FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${line.productId}::uuid AND "warehouseId" = ${dto.warehouseId}::uuid FOR UPDATE`,
         );
         if (!locked[0]) {
           throw new ConflictException('Insufficient stock');
@@ -111,6 +115,20 @@ export class StockIssuesService {
         if (next.lt(0)) {
           throw new ConflictException('Insufficient stock');
         }
+
+        // Inventory Valuation V1 (Phase 2) — Moving Average issue: the
+        // CURRENT average (never a client-supplied cost) is snapshotted onto
+        // the movement at the moment of issue and is never re-derived later
+        // from a since-changed Stock average. averageCost is 0 when quantity
+        // is (or was) 0 — nothing to divide by, and nothing to charge.
+        const currentValue = new Prisma.Decimal(locked[0].totalValue.toString());
+        const averageCost = current.gt(0) ? currentValue.div(current) : new Prisma.Decimal(0);
+        const issueValue = line.quantity.mul(averageCost);
+        // Zero-stock rule: quantity reaching exactly 0 forces value to
+        // exactly 0 too, rather than trusting the subtraction to land there
+        // (defensive against any residual rounding dust from the division
+        // above).
+        const nextValue = next.eq(0) ? new Prisma.Decimal(0) : currentValue.minus(issueValue);
 
         const movement = await tx.stockMovement.create({
           data: {
@@ -122,11 +140,13 @@ export class StockIssuesService {
             referenceType: REFERENCE_TYPE,
             referenceId: dto.referenceId,
             createdBy: actor.userId,
+            unitCost: averageCost,
+            totalCost: issueValue,
           },
         });
         const stock = await tx.stock.update({
           where: { id: locked[0].id },
-          data: { quantity: next },
+          data: { quantity: next, totalValue: nextValue },
         });
         movements.push(this.toMovement(movement));
         stocks.push({
@@ -135,6 +155,7 @@ export class StockIssuesService {
           productId: stock.productId,
           warehouseId: stock.warehouseId,
           quantity: quantityToString(stock.quantity),
+          totalValue: moneyToString(stock.totalValue),
         });
       }
 
@@ -198,6 +219,7 @@ export class StockIssuesService {
           productId: stock.productId,
           warehouseId: stock.warehouseId,
           quantity: quantityToString(stock.quantity),
+          totalValue: moneyToString(stock.totalValue),
         });
       }
     }
@@ -222,6 +244,8 @@ export class StockIssuesService {
     referenceId: string | null;
     createdBy: string;
     createdAt: Date;
+    unitCost: Prisma.Decimal | null;
+    totalCost: Prisma.Decimal | null;
   }) {
     return {
       id: row.id,
@@ -234,6 +258,8 @@ export class StockIssuesService {
       referenceId: row.referenceId,
       createdBy: row.createdBy,
       createdAt: row.createdAt,
+      unitCost: row.unitCost ? moneyToString(row.unitCost) : null,
+      totalCost: row.totalCost ? moneyToString(row.totalCost) : null,
     };
   }
 }

@@ -11,7 +11,12 @@ import {
 } from '../../generated/prisma-client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
-import { parsePositiveDecimal, quantityToString } from '../common/decimal';
+import {
+  moneyToString,
+  parseMoney,
+  parsePositiveDecimal,
+  quantityToString,
+} from '../common/decimal';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AddOpeningStockLineDto,
@@ -91,6 +96,7 @@ export class OpeningStockService {
               uomName: line.uomName,
               conversionFactor: line.conversionFactor,
               baseQuantity: line.baseQuantity,
+              unitCost: line.unitCost,
             })),
           },
         },
@@ -183,6 +189,7 @@ export class OpeningStockService {
           uomName: resolved.uomName,
           conversionFactor: resolved.conversionFactor,
           baseQuantity: resolved.baseQuantity,
+          unitCost: resolved.unitCost,
         },
       });
       return tx.openingStock.findFirstOrThrow({
@@ -242,13 +249,13 @@ export class OpeningStockService {
       const pairs = sortedPairs(lines);
       const stockByKey = new Map<
         string,
-        { id: string; quantity: Prisma.Decimal } | null
+        { id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal } | null
       >();
       for (const pair of pairs) {
         const rows = await tx.$queryRaw<
-          Array<{ id: string; quantity: Prisma.Decimal }>
+          Array<{ id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal }>
         >(
-          Prisma.sql`SELECT id, quantity FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${pair.productId}::uuid AND "warehouseId" = ${pair.warehouseId}::uuid FOR UPDATE`,
+          Prisma.sql`SELECT id, quantity, "totalValue" FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${pair.productId}::uuid AND "warehouseId" = ${pair.warehouseId}::uuid FOR UPDATE`,
         );
         stockByKey.set(`${pair.productId}::${pair.warehouseId}`, rows[0] ?? null);
       }
@@ -330,6 +337,11 @@ export class OpeningStockService {
       }
 
       for (const line of lines) {
+        // Inventory Valuation V1 (Phase 2): a line without a unitCost
+        // contributes 0 to Stock.totalValue, exactly preserving pre-Phase-2
+        // behavior — cost is entirely optional, never inferred or defaulted
+        // from Product.costPrice.
+        const totalCost = line.unitCost ? line.baseQuantity.mul(line.unitCost) : null;
         const movement = await tx.stockMovement.create({
           data: {
             tenantId: actor.tenantId,
@@ -340,13 +352,18 @@ export class OpeningStockService {
             referenceType: REFERENCE_TYPE,
             referenceId: id,
             createdBy: actor.userId,
+            unitCost: line.unitCost,
+            totalCost,
           },
         });
         const stock = stockByKey.get(`${line.productId}::${line.warehouseId}`);
         if (stock) {
           await tx.stock.update({
             where: { id: stock.id },
-            data: { quantity: stock.quantity.plus(line.baseQuantity) },
+            data: {
+              quantity: stock.quantity.plus(line.baseQuantity),
+              totalValue: stock.totalValue.plus(totalCost ?? 0),
+            },
           });
         } else {
           await tx.stock.create({
@@ -355,6 +372,7 @@ export class OpeningStockService {
               productId: line.productId,
               warehouseId: line.warehouseId,
               quantity: line.baseQuantity,
+              totalValue: totalCost ?? 0,
             },
           });
         }
@@ -427,13 +445,13 @@ export class OpeningStockService {
       const pairs = sortedPairs(lines);
       const stockByKey = new Map<
         string,
-        { id: string; quantity: Prisma.Decimal } | null
+        { id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal } | null
       >();
       for (const pair of pairs) {
         const rows = await tx.$queryRaw<
-          Array<{ id: string; quantity: Prisma.Decimal }>
+          Array<{ id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal }>
         >(
-          Prisma.sql`SELECT id, quantity FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${pair.productId}::uuid AND "warehouseId" = ${pair.warehouseId}::uuid FOR UPDATE`,
+          Prisma.sql`SELECT id, quantity, "totalValue" FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${pair.productId}::uuid AND "warehouseId" = ${pair.warehouseId}::uuid FOR UPDATE`,
         );
         stockByKey.set(`${pair.productId}::${pair.warehouseId}`, rows[0] ?? null);
       }
@@ -493,6 +511,13 @@ export class OpeningStockService {
 
       for (const line of lines) {
         const original = originalByLine.get(line.stockMovementId!)!;
+        // Inventory Valuation V1 (Phase 2): the reversal always undoes
+        // exactly the value the original OPENING movement contributed
+        // (original.totalCost), never a re-derived current average — this is
+        // safe and exact (not merely approximate) specifically because
+        // reverse() is already hard-blocked above unless this is the only
+        // stock-affecting movement since posting, so stock.totalValue at
+        // this point can only be what this one movement put there.
         await tx.stockMovement.create({
           data: {
             tenantId: actor.tenantId,
@@ -504,13 +529,23 @@ export class OpeningStockService {
             referenceId: id,
             reversesMovementId: original.id,
             createdBy: actor.userId,
+            unitCost: original.unitCost,
+            totalCost: original.totalCost,
           },
         });
         const stock = stockByKey.get(`${line.productId}::${line.warehouseId}`);
         if (stock) {
+          const nextQuantity = stock.quantity.minus(line.baseQuantity);
+          const nextValue = stock.totalValue.minus(original.totalCost ?? 0);
           await tx.stock.update({
             where: { id: stock.id },
-            data: { quantity: stock.quantity.minus(line.baseQuantity) },
+            data: {
+              quantity: nextQuantity,
+              // Zero-stock rule: quantity reaching exactly 0 forces value to
+              // exactly 0 too, rather than trusting arithmetic to land there
+              // (defensive against any residual rounding dust).
+              totalValue: nextQuantity.eq(0) ? new Prisma.Decimal(0) : nextValue,
+            },
           });
         }
         await tx.openingStockActiveLine.deleteMany({
@@ -588,9 +623,22 @@ export class OpeningStockService {
    */
   private async resolveLine(
     actor: ActorContext,
-    dto: { productId: string; warehouseId: string; quantity: string; unitOfMeasureId: string },
+    dto: {
+      productId: string;
+      warehouseId: string;
+      quantity: string;
+      unitOfMeasureId: string;
+      unitCost: string;
+    },
   ) {
     const quantity = parsePositiveDecimal(dto.quantity);
+    // Mandatory as of Inventory Valuation V1 (Phase 2) — enforced first by
+    // CreateOpeningStockLineDto's own class-validator decorators (400 on a
+    // missing/blank field), parsed here into a Decimal the same way every
+    // other money field in this service is. OpeningStockLine.unitCost stays
+    // nullable at the schema level only for historical rows this code path
+    // no longer produces.
+    const unitCost = parseMoney(dto.unitCost);
     const product = await this.prisma.product.findFirst({
       where: { id: dto.productId, tenantId: actor.tenantId },
     });
@@ -656,6 +704,7 @@ export class OpeningStockService {
       uomName,
       conversionFactor,
       baseQuantity: quantity.mul(conversionFactor),
+      unitCost,
     };
   }
 
@@ -705,6 +754,7 @@ export class OpeningStockService {
         uomName: string;
         conversionFactor: Prisma.Decimal;
         baseQuantity: Prisma.Decimal;
+        unitCost: Prisma.Decimal | null;
         stockMovementId: string | null;
       }>;
     },
@@ -736,6 +786,7 @@ export class OpeningStockService {
         uomName: line.uomName,
         conversionFactor: line.conversionFactor.toString(),
         baseQuantity: quantityToString(line.baseQuantity),
+        unitCost: line.unitCost ? moneyToString(line.unitCost) : null,
         stockMovementId: line.stockMovementId,
       })),
     };

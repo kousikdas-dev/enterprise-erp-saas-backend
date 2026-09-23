@@ -20,6 +20,9 @@ import { PurchaseEnvironmentVariables } from '../config/purchase-env';
 
 export interface UomOptionsResponse {
   productId: string;
+  // Phase 3.2 (GRNI Clearing / PPV) — snapshotted onto PurchaseOrderItem at
+  // line-creation time. Reuses this existing round-trip; no separate call.
+  trackInventory: boolean;
   base: { unitOfMeasureId: string; code: string; name: string };
   alternatives: Array<{
     unitOfMeasureId: string;

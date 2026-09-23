@@ -403,4 +403,184 @@ describe('AccountMappingsService', () => {
       );
     });
   });
+
+  describe('Inventory Valuation / GRNI / PPV Accounting purposes', () => {
+    const inventoryAssetAccount = {
+      id: 'acc-inventory-asset',
+      tenantId,
+      code: '1300',
+      name: 'Inventory Asset',
+      isActive: true,
+    };
+    const cogsAccount = {
+      id: 'acc-cogs',
+      tenantId,
+      code: '5100',
+      name: 'Cost of Goods Sold',
+      isActive: true,
+    };
+    const grniAccount = {
+      id: 'acc-grni',
+      tenantId,
+      code: '2100',
+      name: 'Goods Received Not Invoiced',
+      isActive: true,
+    };
+    const ppvAccount = {
+      id: 'acc-ppv',
+      tenantId,
+      code: '5200',
+      name: 'Purchase Price Variance',
+      isActive: true,
+    };
+    const openingBalanceEquityAccount = {
+      id: 'acc-obe',
+      tenantId,
+      code: '3900',
+      name: 'Opening Balance Equity',
+      isActive: true,
+    };
+    const inventoryAccountsById: Record<string, typeof inventoryAssetAccount> = {
+      [inventoryAssetAccount.id]: inventoryAssetAccount,
+      [cogsAccount.id]: cogsAccount,
+      [grniAccount.id]: grniAccount,
+      [ppvAccount.id]: ppvAccount,
+      [openingBalanceEquityAccount.id]: openingBalanceEquityAccount,
+    };
+
+    function buildServiceWithInventoryAccounts(
+      overrides: {
+        accountMapping?: Partial<Record<string, jest.Mock>>;
+        account?: Partial<Record<string, jest.Mock>>;
+      } = {},
+    ) {
+      return buildService({
+        ...overrides,
+        account: {
+          findFirst: jest.fn().mockImplementation(({ where }: { where: { id: string } }) =>
+            Promise.resolve(inventoryAccountsById[where.id] ?? null),
+          ),
+          ...overrides.account,
+        },
+      });
+    }
+
+    it.each([
+      ['INVENTORY_ASSET', inventoryAssetAccount],
+      ['COGS', cogsAccount],
+      ['GOODS_RECEIVED_NOT_INVOICED', grniAccount],
+      ['PURCHASE_PRICE_VARIANCE', ppvAccount],
+      ['OPENING_BALANCE_EQUITY', openingBalanceEquityAccount],
+    ] as const)(
+      'accepts %s as a new tenant-wide singleton purpose, created at externalRefId = ""',
+      async (purpose, account) => {
+        const { service, prisma } = buildServiceWithInventoryAccounts({
+          accountMapping: {
+            create: jest.fn().mockResolvedValue({
+              id: 'map-inventory-1',
+              tenantId,
+              purpose: purpose as AccountMappingPurpose,
+              externalRefId: '',
+              accountId: account.id,
+              account,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }),
+          },
+        });
+
+        const result = await service.create(actor, { purpose, accountId: account.id });
+
+        expect(result.purpose).toBe(purpose);
+        expect(result.externalRefId).toBe('');
+        expect(prisma.accountMapping.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ purpose, externalRefId: '' }) }),
+        );
+      },
+    );
+
+    it.each([
+      'INVENTORY_ASSET',
+      'COGS',
+      'GOODS_RECEIVED_NOT_INVOICED',
+      'PURCHASE_PRICE_VARIANCE',
+      'OPENING_BALANCE_EQUITY',
+    ] as const)(
+      'rejects %s (a singleton purpose) when externalRefId is supplied — singleton validation extends to the new Inventory Accounting purposes',
+      async (purpose) => {
+        const { service } = buildServiceWithInventoryAccounts();
+        await expect(
+          service.create(actor, {
+            purpose,
+            externalRefId: 'should-not-be-here',
+            accountId: inventoryAssetAccount.id,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      },
+    );
+
+    it('PAYMENT_METHOD remains a shared, per-entity purpose — unaffected by adding the Inventory Accounting purposes', async () => {
+      const { service } = buildServiceWithInventoryAccounts();
+      await expect(
+        service.create(actor, { purpose: 'PAYMENT_METHOD', accountId: inventoryAssetAccount.id }),
+      ).rejects.toBeInstanceOf(BadRequestException); // still requires externalRefId
+    });
+
+    it.each([
+      'INVENTORY_ASSET',
+      'COGS',
+      'GOODS_RECEIVED_NOT_INVOICED',
+      'PURCHASE_PRICE_VARIANCE',
+      'OPENING_BALANCE_EQUITY',
+    ] as const)('resolve() resolves a configured %s mapping (role resolution)', async (purpose) => {
+      const { service, prisma } = buildServiceWithInventoryAccounts({
+        accountMapping: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'map-inventory-2',
+            account: { ...inventoryAssetAccount, isActive: true },
+          }),
+        },
+      });
+
+      const account = await service.resolve(actor, purpose as AccountMappingPurpose);
+
+      expect(account.id).toBe(inventoryAssetAccount.id);
+      expect(prisma.accountMapping.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { tenantId, purpose, externalRefId: '' } }),
+      );
+    });
+
+    it('resolve() never falls back for the new purposes either — an unmapped INVENTORY_ASSET/COGS/GRNI/PPV/OPENING_BALANCE_EQUITY throws instead of guessing an account', async () => {
+      const { service } = buildServiceWithInventoryAccounts({
+        accountMapping: { findFirst: jest.fn().mockResolvedValue(null) },
+      });
+
+      await expect(
+        service.resolve(actor, AccountMappingPurpose.INVENTORY_ASSET),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.resolve(actor, AccountMappingPurpose.COGS)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      await expect(
+        service.resolve(actor, AccountMappingPurpose.GOODS_RECEIVED_NOT_INVOICED),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.resolve(actor, AccountMappingPurpose.PURCHASE_PRICE_VARIANCE),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.resolve(actor, AccountMappingPurpose.OPENING_BALANCE_EQUITY),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('list() scopes the new Inventory Accounting purposes to the caller tenant, same as every other purpose', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      const { service } = buildServiceWithInventoryAccounts({ accountMapping: { findMany } });
+
+      await service.list(actor);
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { tenantId } }),
+      );
+    });
+  });
 });

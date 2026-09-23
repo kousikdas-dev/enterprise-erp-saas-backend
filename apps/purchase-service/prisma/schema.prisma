@@ -29,6 +29,17 @@ enum GoodsReceiptStatus {
   POSTED
 }
 
+// Phase 3.1 (GRNI Accounting) — GoodsReceipt posting can only ever be
+// NOT_POSTED/POSTED/FAILED: Goods Receipt reversal is explicitly deferred
+// in this phase, so no REVERSED value is representable here (mirrors
+// SupplierPaymentPostingStatus, which is narrower than
+// PurchaseInvoicePostingStatus for the identical reason — no reversal path).
+enum GoodsReceiptPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+}
+
 enum SupplierAddressType {
   BILLING
   DISPATCH
@@ -104,10 +115,10 @@ model PurchaseOrder {
 
   // Supplier snapshot — frozen at create time, re-derived only if
   // supplierId changes while the order is still DRAFT.
-  supplierName            String
-  supplierGstin           String?
-  supplierBillingAddress  String?
-  supplierDispatchAddress String?
+  supplierName              String
+  supplierGstin             String?
+  supplierBillingAddress    String?
+  supplierDispatchAddress   String?
   // References to the specific SupplierAddress rows the snapshot text above
   // was formatted from. Same-database FKs (unlike paymentTermId/buyerId
   // below), so onDelete: SetNull keeps the frozen text intact even if the
@@ -119,8 +130,8 @@ model PurchaseOrder {
   // belongs to separate services/databases (mirrors SalesOrder.paymentTermId
   // / SalesOrder.salespersonId). paymentTermId defaults from the supplier at
   // create time but may be explicitly overridden per order.
-  paymentTermId           String? @db.Uuid
-  buyerId                 String? @db.Uuid
+  paymentTermId             String? @db.Uuid
+  buyerId                   String? @db.Uuid
 
   supplierReference    String?
   expectedDeliveryDate DateTime?
@@ -172,6 +183,17 @@ model PurchaseOrderItem {
   uomCode          String?
   uomName          String?
   conversionFactor Decimal? @db.Decimal(19, 6)
+
+  // Phase 3.2 (GRNI Clearing / PPV) — snapshotted verbatim from
+  // inventory-service's Product.trackInventory at line-creation time (via
+  // the same InventoryProductClient.getUomOptions() round-trip already used
+  // for UOM resolution — no separate call). Never re-fetched afterwards.
+  // Nullable permanently, not just during a migration window: every row
+  // created before this column existed has NULL here and there is no way to
+  // retroactively know what the flag was at that historical point in time.
+  // NULL is always treated identically to false — it never blocks
+  // PurchaseInvoice confirm() and never participates in GRNI/PPV posting.
+  productTracksInventory Boolean?
 
   unitCost Decimal @db.Decimal(19, 4)
 
@@ -235,6 +257,17 @@ model GoodsReceipt {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
+  // Phase 3.1 (GRNI Accounting) — Purchase-side cache of accounting-service's
+  // own posting state, mirroring the exact PurchaseInvoice/SupplierPayment
+  // pattern (Phase C1/C2) above. No reversalJournalEntryId: Goods Receipt
+  // reversal is deferred in this phase (see GoodsReceiptPostingStatus). No
+  // FK to accounting_db (separate database; soft reference). The
+  // authoritative idempotency guard is accounting-service's own unique
+  // constraint on (tenantId, sourceService, sourceType, sourceId), never
+  // this column.
+  accountingPostingStatus GoodsReceiptPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                   @db.Uuid
+
   purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   items         GoodsReceiptItem[]
 
@@ -269,6 +302,11 @@ model GoodsReceiptItem {
   uomName          String?
   conversionFactor Decimal? @db.Decimal(19, 6)
 
+  // Phase 3.2 (GRNI Clearing / PPV) — copied verbatim from the parent
+  // PurchaseOrderItem.productTracksInventory, never re-fetched. Nullable for
+  // the same permanent reason as the PurchaseOrderItem column above.
+  productTracksInventory Boolean?
+
   // Derived once at creation: quantity × conversionFactor. The ONLY value
   // ever sent to Inventory (Section 19.3.3). Nullable at the DB level only
   // for legacy pre-migration rows that could not be safely backfilled
@@ -276,12 +314,27 @@ model GoodsReceiptItem {
   // post()/retry rejects a NULL baseQuantity rather than guessing.
   baseQuantity Decimal? @db.Decimal(19, 6)
 
+  // Phase 3.1 (GRNI Accounting) — snapshotted verbatim from the parent
+  // PurchaseOrderItem.unitCost at receipt-creation time, never re-resolved
+  // (same "snapshot, never re-derive" convention as every other column
+  // above). This is the expected/ordered cost — the only cost available at
+  // receipt time, since no invoice exists yet. Nullable at the DB level only
+  // for legacy pre-migration rows; the service never writes NULL for a new
+  // row. Used both as the Inventory receipt's unitCost line and as the GRNI
+  // accrual amount (baseQuantity x unitCost). Never fabricated/backfilled
+  // for historical rows (D12-style rule, mirrors baseQuantity/conversionFactor).
+  unitCost Decimal? @db.Decimal(19, 4)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   goodsReceipt         GoodsReceipt          @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   purchaseOrderItem    PurchaseOrderItem     @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
   purchaseInvoiceItems PurchaseInvoiceItem[]
+  // Phase 3.2 (GRNI Clearing / PPV) — at most one match row per receipt
+  // item (see PurchaseInvoiceGoodsReceiptMatch below), created lazily the
+  // first time this item is matched by a PurchaseInvoiceItem.
+  invoiceMatch         PurchaseInvoiceGoodsReceiptMatch?
 
   @@index([tenantId])
   @@index([goodsReceiptId])
@@ -413,6 +466,14 @@ model PurchaseInvoiceItem {
   uomName          String?
   conversionFactor Decimal? @db.Decimal(19, 6)
 
+  // Phase 3.2 (GRNI Clearing / PPV) — copied from the same productSource
+  // (GoodsReceiptItem when goodsReceiptItemId is supplied, otherwise
+  // PurchaseOrderItem) as every other snapshot field above. Nullable for the
+  // same permanent reason as the PurchaseOrderItem/GoodsReceiptItem columns.
+  // Only an explicit `true` requires goodsReceiptItemId and participates in
+  // GRNI clearing/PPV at confirm() — NULL and false behave identically.
+  productTracksInventory Boolean?
+
   // Commercial UOM quantity actually billed — never a base-UOM quantity.
   // May legitimately differ from the PO line's quantity/unitCost/discount
   // (that difference is matching information, never silently overwritten).
@@ -466,6 +527,50 @@ model PurchaseInvoiceItemTaxComponent {
   @@map("purchase_invoice_item_tax_components")
 }
 
+// Phase 3.2 (GRNI Clearing / PPV) — source of truth for how much of a
+// GoodsReceiptItem's baseQuantity has been claimed by CONFIRMED
+// PurchaseInvoiceItems (matchedQuantity) or, in a future phase, Purchase
+// Returns (returnedQuantity — always 0 until that phase exists). One row per
+// GoodsReceiptItem, created lazily on first match. No FIFO/cost-layer
+// concept: this is a flat running total, mirroring
+// PurchaseOrderItem.invoicedQuantity. No monetary column is stored — GRNI
+// clearing value is always recomputed at posting time from
+// GoodsReceiptItem.unitCost, never persisted redundantly.
+//
+// Invariant `matchedQuantity + returnedQuantity <= baseQuantity` is
+// enforced only in application code (baseQuantity lives on a different
+// table), while holding a FOR UPDATE lock on both this row and its parent
+// GoodsReceiptItem row. Lock-order rule for every current and future flow
+// that touches this table: acquire goods_receipt_items THEN
+// purchase_invoice_goods_receipt_matches, always last in the transaction's
+// lock chain, always in ascending id order when locking more than one row.
+// PurchaseInvoicesService.confirm()/cancel() follow this today; a future
+// Purchase Return implementation MUST follow the same order to avoid
+// deadlocking against Invoice Confirm.
+model PurchaseInvoiceGoodsReceiptMatch {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @db.Uuid
+  goodsReceiptItemId String   @unique @db.Uuid
+
+  // Base-UOM quantity matched to CONFIRMED PurchaseInvoiceItems so far.
+  // Accumulated only at PurchaseInvoice CONFIRM time, reversed on CONFIRMED
+  // invoice cancellation — mirrors PurchaseOrderItem.invoicedQuantity.
+  matchedQuantity Decimal @default(0) @db.Decimal(19, 6)
+  // Base-UOM quantity returned via Purchase Return. Always 0 in Phase 3.2 —
+  // Purchase Return is not implemented yet; this column exists now so the
+  // capacity check above is correct on day one and no future migration is
+  // needed to add it.
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  goodsReceiptItem GoodsReceiptItem @relation(fields: [goodsReceiptItemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("purchase_invoice_goods_receipt_matches")
+}
+
 // Supplier Payment V1 (Section 22.9-22.10, Phase B) — a payment recorded
 // against a CONFIRMED PurchaseInvoice's balance. Child resource of
 // PurchaseInvoice (mirrors SalesPayment's relationship to SalesInvoice
@@ -492,8 +597,8 @@ model SupplierPayment {
   accountingPostingStatus SupplierPaymentPostingStatus @default(NOT_POSTED)
   journalEntryId          String?                      @db.Uuid
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
 

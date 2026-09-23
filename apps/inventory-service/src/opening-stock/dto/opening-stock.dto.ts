@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsISO8601,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
@@ -22,6 +23,19 @@ export class CreateOpeningStockLineDto {
 
   @IsUUID()
   unitOfMeasureId!: string;
+
+  // Mandatory unit cost per BASE unit (Inventory Valuation V1, Phase 2).
+  // Stock.totalValue is authoritative moving-average valuation, so a new
+  // line is never allowed to create positive quantity with zero valuation
+  // by simply omitting this field — every NEW request through this DTO is
+  // rejected with 400 if it's missing. OpeningStockLine.unitCost stays
+  // nullable at the SCHEMA level purely for historical rows created before
+  // this field existed (or before it became mandatory) — those are read-only
+  // past data, never produced by this DTO again.
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : String(value)))
+  @IsString()
+  @IsNotEmpty()
+  unitCost!: string;
 }
 
 export class CreateOpeningStockDto {

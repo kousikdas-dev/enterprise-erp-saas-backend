@@ -380,12 +380,22 @@ describe('PurchaseInvoicesService', () => {
     return { service, audit };
   }
 
-  /** tx mock for confirm(): $queryRaw x3, findFirstOrThrow, PO items, updates. */
+  /** tx mock for confirm(): $queryRaw x3 (x5 when matched inventory lines are
+   * present), findFirstOrThrow, PO items, updates. */
   function buildConfirmTx(options: {
     invoiceId: string;
     purchaseOrderId: string;
     initialStatus: PurchaseInvoiceStatus;
-    invoiceItems: Array<{ id: string; purchaseOrderItemId: string; quantity: Prisma.Decimal }>;
+    invoiceItems: Array<{
+      id: string;
+      purchaseOrderItemId: string;
+      quantity: Prisma.Decimal;
+      productTracksInventory?: boolean | null;
+      goodsReceiptItemId?: string | null;
+      conversionFactor?: Prisma.Decimal | null;
+      lineSubtotal?: Prisma.Decimal;
+      goodsReceiptItem?: { unitCost: Prisma.Decimal | null; baseQuantity: Prisma.Decimal | null } | null;
+    }>;
     poItems: Array<{
       id: string;
       quantity: Prisma.Decimal;
@@ -393,13 +403,36 @@ describe('PurchaseInvoicesService', () => {
       invoicedQuantity: Prisma.Decimal;
     }>;
     otherDraftRows?: Array<{ purchaseOrderItemId: string; quantity: Prisma.Decimal }>;
+    // Phase 3.2 (GRNI Clearing / PPV) fixtures — only consulted when at
+    // least one invoiceItem has productTracksInventory === true.
+    grItemRows?: Array<{
+      id: string;
+      goodsReceiptId: string;
+      baseQuantity: Prisma.Decimal | null;
+      unitCost: Prisma.Decimal | null;
+    }>;
+    receipts?: Array<{ id: string; status: string; accountingPostingStatus: string }>;
+    matchRows?: Array<{
+      id: string;
+      goodsReceiptItemId: string;
+      matchedQuantity: Prisma.Decimal;
+      returnedQuantity: Prisma.Decimal;
+    }>;
+    // Header fields for the invoice row returned post-confirm — only
+    // consulted by buildInvoicePostingRequest (taxTotal/total). Defaults to
+    // fullInvoiceHeader()'s zeroed fields, which is fine for tests that
+    // don't inspect what was actually sent to accountingJournal.post().
+    header?: Record<string, unknown>;
   }) {
     const queryRawCalls: unknown[][] = [];
     const poItemUpdateCalls: Array<{ where: { id: string }; data: { invoicedQuantity: Prisma.Decimal } }> = [];
+    const matchUpdateCalls: Array<{ where: { id: string }; data: { matchedQuantity: Prisma.Decimal } }> = [];
+    const matchUpsertCalls: unknown[] = [];
     return {
       $queryRaw: jest.fn((...args: unknown[]) => {
         queryRawCalls.push(args);
-        if (queryRawCalls.length === 1) {
+        const n = queryRawCalls.length;
+        if (n === 1) {
           return Promise.resolve([
             {
               id: options.invoiceId,
@@ -407,6 +440,17 @@ describe('PurchaseInvoicesService', () => {
               purchaseOrderId: options.purchaseOrderId,
             },
           ]);
+        }
+        if (n === 2 || n === 3) {
+          return Promise.resolve([{ id: 'lock-row' }]);
+        }
+        if (n === 4) {
+          // goods_receipt_items lock query
+          return Promise.resolve(options.grItemRows ?? []);
+        }
+        if (n === 5) {
+          // purchase_invoice_goods_receipt_matches lock query
+          return Promise.resolve(options.matchRows ?? []);
         }
         return Promise.resolve([{ id: 'lock-row' }]);
       }),
@@ -422,6 +466,7 @@ describe('PurchaseInvoicesService', () => {
             purchaseOrderId: options.purchaseOrderId,
             status: PurchaseInvoiceStatus.CONFIRMED,
             items: options.invoiceItems,
+            ...options.header,
           }),
         ),
       },
@@ -435,8 +480,25 @@ describe('PurchaseInvoicesService', () => {
       purchaseInvoiceItem: {
         findMany: jest.fn().mockResolvedValue(options.otherDraftRows ?? []),
       },
+      goodsReceipt: {
+        findMany: jest.fn().mockResolvedValue(options.receipts ?? []),
+      },
+      purchaseInvoiceGoodsReceiptMatch: {
+        upsert: jest.fn((args: unknown) => {
+          matchUpsertCalls.push(args);
+          return Promise.resolve({});
+        }),
+        update: jest.fn(
+          (args: { where: { id: string }; data: { matchedQuantity: Prisma.Decimal } }) => {
+            matchUpdateCalls.push(args);
+            return Promise.resolve(args);
+          },
+        ),
+      },
       __queryRawCalls: queryRawCalls,
       __poItemUpdateCalls: poItemUpdateCalls,
+      __matchUpdateCalls: matchUpdateCalls,
+      __matchUpsertCalls: matchUpsertCalls,
     };
   }
 
@@ -2204,5 +2266,419 @@ describe('PurchaseInvoicesService', () => {
     // Already REVERSED locally now — guard 2 short-circuits, no second call.
     expect(reverseMock).toHaveBeenCalledTimes(1);
     expect(second.reversalJournalEntryId).toBe('je-already-existing-reversal');
+  });
+
+  // ======================= PHASE 3.2 — GRNI CLEARING / PPV =================
+
+  describe('Phase 3.2 — GRNI Clearing / PPV', () => {
+    const grReceiptId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+    function matchedInvoiceItem(overrides: Record<string, unknown> = {}) {
+      return fullInvoiceItem({
+        id: 'pii-matched',
+        purchaseOrderItemId: poItemId,
+        goodsReceiptItemId: grItemId,
+        productTracksInventory: true,
+        quantity: decimal('5'),
+        conversionFactor: null, // base UOM === commercial UOM (factor 1)
+        unitCost: decimal('12'),
+        lineSubtotal: decimal('60'), // 5 x 12, no discount
+        goodsReceiptItem: { unitCost: decimal('10'), baseQuantity: decimal('20') },
+        ...overrides,
+      });
+    }
+
+    function postedReceipt(overrides: Record<string, unknown> = {}) {
+      return {
+        id: grReceiptId,
+        status: 'POSTED',
+        accountingPostingStatus: 'POSTED',
+        ...overrides,
+      };
+    }
+
+    function grItemLockRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: grItemId,
+        goodsReceiptId: grReceiptId,
+        baseQuantity: decimal('20'),
+        unitCost: decimal('10'),
+        ...overrides,
+      };
+    }
+
+    function matchLockRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'match-1',
+        goodsReceiptItemId: grItemId,
+        matchedQuantity: decimal('0'),
+        returnedQuantity: decimal('0'),
+        ...overrides,
+      };
+    }
+
+    function confirmWithMatchedItem(
+      itemOverrides: Record<string, unknown> = {},
+      txOverrides: Record<string, unknown> = {},
+      journalPost?: jest.Mock,
+    ) {
+      const invoiceItems = [matchedInvoiceItem(itemOverrides)];
+      // Single-line invoice, no tax: header total must equal the line's own
+      // lineSubtotal for the posted journal to balance in these tests.
+      const total = invoiceItems[0].lineSubtotal as Prisma.Decimal;
+      const tx = buildConfirmTx({
+        invoiceId,
+        purchaseOrderId: poId,
+        initialStatus: PurchaseInvoiceStatus.DRAFT,
+        invoiceItems,
+        poItems: [
+          { id: poItemId, quantity: decimal('50'), receivedQuantity: decimal('20'), invoicedQuantity: decimal('0') },
+        ],
+        grItemRows: [grItemLockRow()],
+        receipts: [postedReceipt()],
+        matchRows: [matchLockRow()],
+        header: { total, subtotal: total },
+        ...txOverrides,
+      });
+      const accountingJournal = buildAccountingJournalMock(
+        journalPost ? { post: journalPost } : {},
+      );
+      const { service } = buildServiceForConfirm(tx, [], { accountingJournal });
+      return { service, tx, accountingJournal };
+    }
+
+    it('exact match: invoice cost === receipt cost clears GRNI fully with no PPV line', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-1', entryNumber: 'JE-1', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '50.0000', totalCredit: '50.0000',
+      });
+      // Invoice cost = receipt cost = 10/unit, qty 5 -> 50 exactly.
+      const { service } = confirmWithMatchedItem(
+        { unitCost: decimal('10'), lineSubtotal: decimal('50') },
+        {},
+        post,
+      );
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const roles = request.lines.map((l: any) => l.role);
+      expect(roles).not.toContain('PURCHASE_PRICE_VARIANCE');
+      expect(roles).toContain('GOODS_RECEIVED_NOT_INVOICED');
+      const grniLine = request.lines.find((l: any) => l.role === 'GOODS_RECEIVED_NOT_INVOICED');
+      expect(grniLine.side).toBe('DEBIT');
+      expect(grniLine.amount).toBe('50.0000');
+      const totalDebit = request.lines
+        .filter((l: any) => l.side === 'DEBIT')
+        .reduce((sum: Prisma.Decimal, l: any) => sum.plus(l.amount), decimal('0'));
+      const totalCredit = request.lines
+        .filter((l: any) => l.side === 'CREDIT')
+        .reduce((sum: Prisma.Decimal, l: any) => sum.plus(l.amount), decimal('0'));
+      expect(totalDebit.toFixed(4)).toBe(totalCredit.toFixed(4));
+    });
+
+    it('invoice cost > receipt cost debits PURCHASE_PRICE_VARIANCE (unfavorable)', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-2', entryNumber: 'JE-2', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '60.0000', totalCredit: '60.0000',
+      });
+      // Receipt cost 10/unit x 5 = 50; invoice cost 12/unit x 5 = 60 -> PPV +10.
+      const { service } = confirmWithMatchedItem({}, {}, post);
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const ppvLine = request.lines.find((l: any) => l.role === 'PURCHASE_PRICE_VARIANCE');
+      expect(ppvLine).toBeDefined();
+      expect(ppvLine.side).toBe('DEBIT');
+      expect(ppvLine.amount).toBe('10.0000');
+    });
+
+    it('invoice cost < receipt cost credits PURCHASE_PRICE_VARIANCE (favorable)', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-3', entryNumber: 'JE-3', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '40.0000', totalCredit: '40.0000',
+      });
+      // Receipt cost 10/unit x 5 = 50; invoice cost 8/unit x 5 = 40 -> PPV -10.
+      const { service } = confirmWithMatchedItem(
+        { unitCost: decimal('8'), lineSubtotal: decimal('40') },
+        {},
+        post,
+      );
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const ppvLine = request.lines.find((l: any) => l.role === 'PURCHASE_PRICE_VARIANCE');
+      expect(ppvLine).toBeDefined();
+      expect(ppvLine.side).toBe('CREDIT');
+      expect(ppvLine.amount).toBe('10.0000');
+    });
+
+    it('discount is reflected via lineSubtotal (net-of-discount PPV, no separate discount line)', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-4', entryNumber: 'JE-4', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '55.0000', totalCredit: '55.0000',
+      });
+      // Gross 5 x 12 = 60, 10% discount = 6 -> lineSubtotal (net) = 54.
+      // Receipt cost 50 -> PPV = 54 - 50 = +4 (unfavorable, debit).
+      const { service } = confirmWithMatchedItem(
+        { lineSubtotal: decimal('54') },
+        {},
+        post,
+      );
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const ppvLine = request.lines.find((l: any) => l.role === 'PURCHASE_PRICE_VARIANCE');
+      expect(ppvLine.side).toBe('DEBIT');
+      expect(ppvLine.amount).toBe('4.0000');
+    });
+
+    it('different UOM/conversionFactor: invoiceLineBaseQty uses conversionFactor, not raw commercial quantity', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-5', entryNumber: 'JE-5', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '60.0000', totalCredit: '60.0000',
+      });
+      // 1 box, conversionFactor 5 -> 5 base units x receipt unitCost 10 = 50 GRNI clearing.
+      const { service, tx } = confirmWithMatchedItem(
+        {
+          quantity: decimal('1'),
+          conversionFactor: decimal('5'),
+          unitCost: decimal('60'),
+          lineSubtotal: decimal('60'),
+        },
+        {},
+        post,
+      );
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const grniLine = request.lines.find((l: any) => l.role === 'GOODS_RECEIVED_NOT_INVOICED');
+      expect(grniLine.amount).toBe('50.0000');
+      // matchedQuantity accumulated in base units (1 x 5 = 5), not commercial units (1).
+      expect(tx.__matchUpdateCalls[0].data.matchedQuantity.toFixed(0)).toBe('5');
+    });
+
+    it('non-inventory line (productTracksInventory === false) posts PURCHASE_EXPENSE only — no GR required, no GRNI/PPV', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-6', entryNumber: 'JE-6', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '50.0000', totalCredit: '50.0000',
+      });
+      const invoiceItems = [
+        fullInvoiceItem({
+          id: 'pii-non-inv',
+          purchaseOrderItemId: poItemId,
+          goodsReceiptItemId: null,
+          productTracksInventory: false,
+          quantity: decimal('5'),
+          lineSubtotal: decimal('50'),
+        }),
+      ];
+      const tx = buildConfirmTx({
+        invoiceId,
+        purchaseOrderId: poId,
+        initialStatus: PurchaseInvoiceStatus.DRAFT,
+        invoiceItems,
+        poItems: [
+          { id: poItemId, quantity: decimal('50'), receivedQuantity: decimal('20'), invoicedQuantity: decimal('0') },
+        ],
+      });
+      const { service } = buildServiceForConfirm(tx, [], {
+        accountingJournal: buildAccountingJournalMock({ post }),
+      });
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const roles = request.lines.map((l: any) => l.role);
+      expect(roles).toContain('PURCHASE_EXPENSE');
+      expect(roles).not.toContain('GOODS_RECEIVED_NOT_INVOICED');
+      expect(roles).not.toContain('PURCHASE_PRICE_VARIANCE');
+      // No inventory-tracked line -> the new matching queries never run.
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+    });
+
+    it('historical NULL productTracksInventory behaves identically to false', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-7', entryNumber: 'JE-7', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '50.0000', totalCredit: '50.0000',
+      });
+      const invoiceItems = [
+        fullInvoiceItem({
+          id: 'pii-null',
+          purchaseOrderItemId: poItemId,
+          goodsReceiptItemId: null,
+          productTracksInventory: null,
+          quantity: decimal('5'),
+          lineSubtotal: decimal('50'),
+        }),
+      ];
+      const tx = buildConfirmTx({
+        invoiceId,
+        purchaseOrderId: poId,
+        initialStatus: PurchaseInvoiceStatus.DRAFT,
+        invoiceItems,
+        poItems: [
+          { id: poItemId, quantity: decimal('50'), receivedQuantity: decimal('20'), invoicedQuantity: decimal('0') },
+        ],
+      });
+      const { service } = buildServiceForConfirm(tx, [], {
+        accountingJournal: buildAccountingJournalMock({ post }),
+      });
+
+      await service.confirm(actor, invoiceId);
+
+      const request = post.mock.calls[0][1];
+      const roles = request.lines.map((l: any) => l.role);
+      expect(roles).toEqual(['PURCHASE_EXPENSE', 'ACCOUNTS_PAYABLE']);
+    });
+
+    it('rejects confirm() when an inventory-tracked line has no goodsReceiptItemId', async () => {
+      const invoiceItems = [
+        fullInvoiceItem({
+          id: 'pii-missing-gr',
+          purchaseOrderItemId: poItemId,
+          goodsReceiptItemId: null,
+          productTracksInventory: true,
+          quantity: decimal('5'),
+        }),
+      ];
+      const tx = buildConfirmTx({
+        invoiceId,
+        purchaseOrderId: poId,
+        initialStatus: PurchaseInvoiceStatus.DRAFT,
+        invoiceItems,
+        poItems: [
+          { id: poItemId, quantity: decimal('50'), receivedQuantity: decimal('20'), invoicedQuantity: decimal('0') },
+        ],
+      });
+      const { service } = buildServiceForConfirm(tx);
+
+      await expect(service.confirm(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects confirm() when the linked goods receipt is not yet POSTED', async () => {
+      const { service } = confirmWithMatchedItem(
+        {},
+        { receipts: [postedReceipt({ status: 'PENDING_STOCK' })] },
+      );
+
+      await expect(service.confirm(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects confirm() when the goods receipt is POSTED but its GRNI accrual accountingPostingStatus is not POSTED', async () => {
+      const { service } = confirmWithMatchedItem(
+        {},
+        { receipts: [postedReceipt({ accountingPostingStatus: 'FAILED' })] },
+      );
+
+      await expect(service.confirm(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects confirm() when invoice quantity exceeds the matchable goods receipt quantity', async () => {
+      // baseQuantity=20, already matchedQuantity=17, this line adds 5 base units -> 22 > 20.
+      const { service, tx } = confirmWithMatchedItem(
+        {},
+        { matchRows: [matchLockRow({ matchedQuantity: decimal('17') })] },
+      );
+
+      await expect(service.confirm(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.__matchUpdateCalls).toHaveLength(0);
+    });
+
+    it('partial invoice: accumulates matchedQuantity without exceeding baseQuantity, GRNI cleared proportionally', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-8', entryNumber: 'JE-8', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '60.0000', totalCredit: '60.0000',
+      });
+      // baseQuantity=20, already matched 10; this invoice adds 5 more -> 15 <= 20, OK.
+      const { service, tx } = confirmWithMatchedItem(
+        {},
+        { matchRows: [matchLockRow({ matchedQuantity: decimal('10') })] },
+        post,
+      );
+
+      await service.confirm(actor, invoiceId);
+
+      expect(tx.__matchUpdateCalls).toHaveLength(1);
+      expect(tx.__matchUpdateCalls[0].data.matchedQuantity.toFixed(0)).toBe('15');
+      const request = post.mock.calls[0][1];
+      const grniLine = request.lines.find((l: any) => l.role === 'GOODS_RECEIVED_NOT_INVOICED');
+      // Only THIS line's 5-unit portion clears at receipt cost (10/unit) = 50,
+      // regardless of how much was already matched by a prior invoice.
+      expect(grniLine.amount).toBe('50.0000');
+    });
+
+    it('cancelling a CONFIRMED matched invoice decrements matchedQuantity back', async () => {
+      const cancelTx = buildCancelTx({
+        invoiceId,
+        purchaseOrderId: poId,
+        status: PurchaseInvoiceStatus.CONFIRMED,
+        invoiceItems: [matchedInvoiceItem()],
+        poItems: [{ id: poItemId, invoicedQuantity: decimal('5') }],
+      });
+      (cancelTx as any).purchaseInvoiceGoodsReceiptMatch = {
+        update: jest.fn((args: any) => Promise.resolve(args)),
+      };
+      // Call 1 is cancel()'s own invoice-lock query (buildCancelTx's
+      // default); calls 2/3 (purchase_orders/purchase_order_items locks)
+      // are awaited only for their side effect and never read; call 4 is
+      // reverseGoodsReceiptMatches' own match-row lock query.
+      let call = 0;
+      (cancelTx as any).$queryRaw = jest.fn(() => {
+        call += 1;
+        if (call === 1) return Promise.resolve([{ id: invoiceId }]);
+        return Promise.resolve([
+          { id: 'match-1', goodsReceiptItemId: grItemId, matchedQuantity: decimal('5') },
+        ]);
+      });
+      const { service } = buildServiceForCancel(cancelTx);
+
+      await service.cancel(actor, invoiceId);
+
+      const updateCalls = (cancelTx as any).purchaseInvoiceGoodsReceiptMatch.update.mock.calls;
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0][0].data.matchedQuantity.toFixed(0)).toBe('0');
+    });
+
+    it('journal always balances across every GRNI/PPV scenario (debits === credits)', async () => {
+      const scenarios = [
+        { unitCost: decimal('10'), lineSubtotal: decimal('50') }, // exact match
+        { unitCost: decimal('12'), lineSubtotal: decimal('60') }, // unfavorable
+        { unitCost: decimal('8'), lineSubtotal: decimal('40') }, // favorable
+      ];
+      for (const overrides of scenarios) {
+        const post = jest.fn().mockResolvedValue({
+          id: 'je-x', entryNumber: 'JE-X', status: 'POSTED', sourceService: 'purchase-service',
+          sourceType: 'PURCHASE_INVOICE', sourceId: invoiceId, reversesJournalEntryId: null,
+          idempotentReplay: false, totalDebit: '0.0000', totalCredit: '0.0000',
+        });
+        const { service } = confirmWithMatchedItem(overrides, {}, post);
+
+        await service.confirm(actor, invoiceId);
+
+        const request = post.mock.calls[0][1];
+        expect(request.sourceType).toBe('PURCHASE_INVOICE');
+        expect(request.sourceId).toBe(invoiceId);
+        const totalDebit = request.lines
+          .filter((l: any) => l.side === 'DEBIT')
+          .reduce((sum: Prisma.Decimal, l: any) => sum.plus(l.amount), decimal('0'));
+        const totalCredit = request.lines
+          .filter((l: any) => l.side === 'CREDIT')
+          .reduce((sum: Prisma.Decimal, l: any) => sum.plus(l.amount), decimal('0'));
+        expect(totalDebit.toFixed(4)).toBe(totalCredit.toFixed(4));
+      }
+    });
   });
 });

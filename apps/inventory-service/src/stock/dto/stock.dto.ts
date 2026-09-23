@@ -34,6 +34,19 @@ export class CreateStockAdjustmentDto {
   @IsString()
   quantity!: string;
 
+  // Inventory Valuation V1 (Phase 2): required for ADJUSTMENT_IN (there is
+  // no other source of cost for stock entering via this endpoint), and must
+  // be OMITTED for ADJUSTMENT_OUT (its cost is always the current moving
+  // average, computed server-side — a client-supplied value here would be
+  // silently wrong the instant the average has since moved). Because the
+  // requirement is conditional on `type`, it can't be expressed as a single
+  // unconditional class-validator decorator here — StockService.adjust()
+  // enforces both directions explicitly and returns a distinct error code
+  // for each.
+  @IsOptional()
+  @IsString()
+  unitCost?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(255)

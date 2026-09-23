@@ -85,8 +85,8 @@ model Warehouse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stocks     Stock[]
-  movements  StockMovement[]
+  stocks    Stock[]
+  movements StockMovement[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -94,25 +94,25 @@ model Warehouse {
 }
 
 model Product {
-  id               String      @id @default(uuid()) @db.Uuid
-  tenantId         String      @db.Uuid
-  sku              String
-  name             String
-  description      String?
-  categoryId       String      @db.Uuid
-  unitOfMeasureId  String      @db.Uuid
-  sellingPrice     Decimal     @db.Decimal(19, 4)
-  costPrice        Decimal     @db.Decimal(19, 4)
-  isActive         Boolean     @default(true)
-  productType      ProductType @default(GOODS)
-  trackInventory   Boolean     @default(true)
-  barcode          String?
-  note             String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  id              String      @id @default(uuid()) @db.Uuid
+  tenantId        String      @db.Uuid
+  sku             String
+  name            String
+  description     String?
+  categoryId      String      @db.Uuid
+  unitOfMeasureId String      @db.Uuid
+  sellingPrice    Decimal     @db.Decimal(19, 4)
+  costPrice       Decimal     @db.Decimal(19, 4)
+  isActive        Boolean     @default(true)
+  productType     ProductType @default(GOODS)
+  trackInventory  Boolean     @default(true)
+  barcode         String?
+  note            String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
-  category      Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  unitOfMeasure UnitOfMeasure @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
+  category      Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  unitOfMeasure UnitOfMeasure   @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
   stocks        Stock[]
   movements     StockMovement[]
   productUnits  ProductUnit[]
@@ -152,6 +152,16 @@ model Stock {
   productId   String   @db.Uuid
   warehouseId String   @db.Uuid
   quantity    Decimal  @db.Decimal(19, 6)
+  // Inventory Valuation V1 (Phase 2) — Moving/Weighted Average. Current total
+  // inventory value for this (tenant, product, warehouse); average unit cost
+  // is always DERIVED as totalValue / quantity, never stored, so no
+  // compounding rounding drift accumulates across many small updates.
+  // Maintained atomically alongside quantity under the same row lock in
+  // every service method that mutates this row (Opening Stock post/reverse,
+  // stock receipts, stock issues) — never updated independently. Defaults to
+  // 0 so every pre-Phase-2 code path (and any future caller that omits a
+  // cost) leaves valuation untouched, exactly preserving prior behavior.
+  totalValue  Decimal  @default(0) @db.Decimal(19, 4)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -166,17 +176,17 @@ model Stock {
 }
 
 model StockMovement {
-  id            String             @id @default(uuid()) @db.Uuid
-  tenantId      String             @db.Uuid
-  productId     String             @db.Uuid
-  warehouseId   String             @db.Uuid
+  id            String            @id @default(uuid()) @db.Uuid
+  tenantId      String            @db.Uuid
+  productId     String            @db.Uuid
+  warehouseId   String            @db.Uuid
   type          StockMovementType
-  quantity      Decimal            @db.Decimal(19, 6)
+  quantity      Decimal           @db.Decimal(19, 6)
   referenceType String?
-  referenceId   String?            @db.Uuid
+  referenceId   String?           @db.Uuid
   reason        String?
-  createdBy     String             @db.Uuid
-  createdAt     DateTime           @default(now())
+  createdBy     String            @db.Uuid
+  createdAt     DateTime          @default(now())
 
   // Inventory Design v4, Phase B (Opening Stock reversal). Set only on a
   // reversal movement, pointing back at the original movement it reverses;
@@ -197,6 +207,18 @@ model StockMovement {
   // claim to have reconstructed their true real-world order. See the
   // migration for the exact backfill procedure.
   sequenceNumber BigInt @default(autoincrement())
+
+  // Inventory Valuation V1 (Phase 2) — Moving/Weighted Average. Nullable:
+  // only movements that carry cost information under this phase (OPENING,
+  // PURCHASE receipts that supplied a cost, SALE issues, and their
+  // reversals) populate these; legacy pre-Phase-2 rows and cost-less callers
+  // (e.g. Stock Adjustment, or a receipt that omits unitCost for backward
+  // compatibility) leave both null. unitCost is per BASE unit; totalCost is
+  // the exact value this movement applied to Stock.totalValue (always
+  // recorded as a snapshot at the time of the movement — an issue's unitCost
+  // is never re-derived later from a since-changed Stock average).
+  unitCost  Decimal? @db.Decimal(19, 4)
+  totalCost Decimal? @db.Decimal(19, 4)
 
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
@@ -256,6 +278,12 @@ model OpeningStockLine {
   // ShipmentItem baseQuantity (Phase B §8).
   conversionFactor Decimal  @db.Decimal(19, 6)
   baseQuantity     Decimal  @db.Decimal(19, 6)
+  // Inventory Valuation V1 (Phase 2) — optional unit cost per BASE unit for
+  // this line, snapshotted onto the OPENING StockMovement's unitCost/
+  // totalCost at post() time. Nullable: an opening line without a cost
+  // contributes 0 to Stock.totalValue, exactly preserving pre-Phase-2
+  // behavior for any caller that doesn't supply one.
+  unitCost         Decimal? @db.Decimal(19, 4)
   stockMovementId  String?  @db.Uuid
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

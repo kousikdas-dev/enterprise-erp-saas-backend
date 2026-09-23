@@ -82,7 +82,7 @@ describe('OpeningStockService', () => {
 
       await service.create(actor, {
         effectiveDate: '2026-01-01',
-        lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: uomId }],
+        lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: uomId, unitCost: '5' }],
       });
 
       const created = (prisma.$transaction as jest.Mock).mock.calls; // sanity: transaction ran
@@ -108,7 +108,7 @@ describe('OpeningStockService', () => {
 
       await service.create(actor, {
         effectiveDate: '2026-01-01',
-        lines: [{ productId, warehouseId, quantity: '2', unitOfMeasureId: boxUomId }],
+        lines: [{ productId, warehouseId, quantity: '2', unitOfMeasureId: boxUomId, unitCost: '100' }],
       });
 
       const lineData = (capturedData as { lines: { create: Array<Record<string, unknown>> } }).lines.create[0];
@@ -123,7 +123,7 @@ describe('OpeningStockService', () => {
       const error: ConflictException = await service
         .create(actor, {
           effectiveDate: '2026-01-01',
-          lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: boxUomId }],
+          lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: boxUomId, unitCost: '5' }],
         })
         .catch((e: unknown) => e as ConflictException);
 
@@ -139,7 +139,7 @@ describe('OpeningStockService', () => {
       const error: ConflictException = await service
         .create(actor, {
           effectiveDate: '2026-01-01',
-          lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: boxUomId }],
+          lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: boxUomId, unitCost: '5' }],
         })
         .catch((e: unknown) => e as ConflictException);
 
@@ -154,7 +154,7 @@ describe('OpeningStockService', () => {
       const error: ConflictException = await service
         .create(actor, {
           effectiveDate: '2026-01-01',
-          lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: boxUomId }],
+          lines: [{ productId, warehouseId, quantity: '10', unitOfMeasureId: boxUomId, unitCost: '5' }],
         })
         .catch((e: unknown) => e as ConflictException);
 
@@ -170,9 +170,35 @@ describe('OpeningStockService', () => {
       await expect(
         service.create(actor, {
           effectiveDate: '2026-01-01',
-          lines: [{ productId, warehouseId, quantity: '0', unitOfMeasureId: uomId }],
+          lines: [{ productId, warehouseId, quantity: '0', unitOfMeasureId: uomId, unitCost: '5' }],
         }),
       ).rejects.toThrow('Quantity must be a positive decimal');
+    });
+
+    it('E. rejects a new line with unitCost omitted (mandatory as of Inventory Valuation V1, Phase 2 revised)', async () => {
+      // CreateOpeningStockLineDto.unitCost is now a required field (no
+      // @IsOptional()), so a real HTTP request omitting it is rejected with
+      // 400 by the ValidationPipe before it ever reaches this service. This
+      // test exercises the service-level backstop directly (bypassing the
+      // DTO/HTTP layer, as every test in this file does): resolveLine()
+      // calls parseMoney(dto.unitCost) unconditionally, so even a
+      // hand-built call that skips DTO validation is still rejected.
+      const prisma = basePrisma();
+      const service = buildService({ prisma });
+
+      await expect(
+        service.create(actor, {
+          effectiveDate: '2026-01-01',
+          lines: [
+            {
+              productId,
+              warehouseId,
+              quantity: '10',
+              unitOfMeasureId: uomId,
+            } as unknown as { productId: string; warehouseId: string; quantity: string; unitOfMeasureId: string; unitCost: string },
+          ],
+        }),
+      ).rejects.toThrow('Price must be a non-negative decimal');
     });
   });
 
@@ -189,6 +215,7 @@ describe('OpeningStockService', () => {
         uomName: 'Piece',
         conversionFactor: decimal('1'),
         baseQuantity: decimal('100'),
+        unitCost: null,
         stockMovementId: null,
         ...overrides,
       };
@@ -447,7 +474,9 @@ describe('OpeningStockService', () => {
       const tx = buildTx(OpeningStockStatus.DRAFT, lines);
       tx.$queryRaw
         .mockResolvedValueOnce(headerLockRow(OpeningStockStatus.DRAFT))
-        .mockResolvedValueOnce([{ id: 'stock-existing', quantity: decimal('0') }])
+        .mockResolvedValueOnce([
+          { id: 'stock-existing', quantity: decimal('0'), totalValue: decimal('0') },
+        ])
         .mockResolvedValueOnce([{ id: 'marker-1' }]);
       tx.stockMovement.create.mockResolvedValue({ id: 'mv-1' });
 
@@ -468,7 +497,7 @@ describe('OpeningStockService', () => {
 
       expect(tx.stock.update).toHaveBeenCalledWith({
         where: { id: 'stock-existing' },
-        data: { quantity: decimal('100') },
+        data: { quantity: decimal('100'), totalValue: decimal('0') },
       });
       expect(tx.stock.create).not.toHaveBeenCalled();
     });
@@ -487,6 +516,7 @@ describe('OpeningStockService', () => {
         uomName: 'Piece',
         conversionFactor: decimal('1'),
         baseQuantity: decimal('100'),
+        unitCost: null,
         stockMovementId: 'mv-original',
         ...overrides,
       };
@@ -526,10 +556,14 @@ describe('OpeningStockService', () => {
         sequenceNumber: 5n,
         type: StockMovementType.OPENING,
         createdAt: new Date(),
+        unitCost: decimal('10'),
+        totalCost: decimal('1000'),
       };
       tx.$queryRaw
         .mockResolvedValueOnce([{ id: openingStockId, status: OpeningStockStatus.POSTED }]) // lockHeader
-        .mockResolvedValueOnce([{ id: 'stock-1', quantity: decimal('100') }]); // Stock lock
+        .mockResolvedValueOnce([
+          { id: 'stock-1', quantity: decimal('100'), totalValue: decimal('1000') },
+        ]); // Stock lock
       tx.stockMovement.findMany.mockResolvedValue([original]);
       tx.stockMovement.findFirst.mockResolvedValue(null); // no subsequent activity
 
@@ -551,12 +585,16 @@ describe('OpeningStockService', () => {
             quantity: decimal('100'),
             reversesMovementId: 'mv-original',
             referenceType: 'opening_stock',
+            unitCost: decimal('10'),
+            totalCost: decimal('1000'),
           }),
         }),
       );
       expect(tx.stock.update).toHaveBeenCalledWith({
         where: { id: 'stock-1' },
-        data: { quantity: decimal('0') },
+        // Zero-stock rule: quantity lands exactly on 0 (100 - 100), so
+        // totalValue is forced to exactly 0 too, not 1000 - 1000.
+        data: { quantity: decimal('0'), totalValue: decimal('0') },
       });
       expect(tx.openingStockActiveLine.deleteMany).toHaveBeenCalledWith({
         where: { tenantId, productId, warehouseId },
@@ -717,6 +755,7 @@ describe('OpeningStockService', () => {
           warehouseId,
           quantity: '10',
           unitOfMeasureId: uomId,
+          unitCost: '5',
         }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
@@ -742,8 +781,243 @@ describe('OpeningStockService', () => {
           warehouseId,
           quantity: '10',
           unitOfMeasureId: uomId,
+          unitCost: '5',
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('Inventory Valuation V1 (Phase 2) — Moving Average on Opening Stock', () => {
+    function draftLine(overrides?: Partial<Record<string, unknown>>) {
+      return {
+        id: 'line-1',
+        openingStockId,
+        productId,
+        warehouseId,
+        quantity: decimal('100'),
+        unitOfMeasureId: uomId,
+        uomCode: 'PCS',
+        uomName: 'Piece',
+        conversionFactor: decimal('1'),
+        baseQuantity: decimal('100'),
+        unitCost: null,
+        stockMovementId: null,
+        ...overrides,
+      };
+    }
+
+    function buildTx(status: OpeningStockStatus, lines: Array<Record<string, unknown>>) {
+      return {
+        $queryRaw: jest.fn(),
+        openingStockLine: {
+          findMany: jest.fn().mockResolvedValue(lines),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        openingStockActiveLine: {
+          create: jest.fn().mockResolvedValue({}),
+          findFirst: jest.fn(),
+          deleteMany: jest.fn(),
+        },
+        stockMovement: {
+          create: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([]),
+          findFirst: jest.fn(),
+        },
+        stock: { update: jest.fn(), create: jest.fn() },
+        openingStock: { update: jest.fn().mockResolvedValue({}), findFirst: jest.fn() },
+        __status: status,
+      };
+    }
+
+    function headerLockRow(status: OpeningStockStatus) {
+      return [{ id: openingStockId, status }];
+    }
+
+    function withHeader(
+      prisma: { $transaction: jest.Mock },
+      lines: Array<Record<string, unknown>>,
+    ) {
+      return {
+        ...prisma,
+        openingStock: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            id: openingStockId,
+            tenantId,
+            documentNumber: 'OB-00000001',
+            status: OpeningStockStatus.POSTED,
+            effectiveDate: new Date(),
+            postedAt: new Date(),
+            postedBy: actor.userId,
+            reversedAt: null,
+            reversedBy: null,
+            reversalReason: null,
+            notes: null,
+            createdBy: actor.userId,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            lines,
+          }),
+        },
+      };
+    }
+
+    it('a fresh line with unitCost creates Stock.totalValue = baseQuantity × unitCost and stamps the OPENING movement', async () => {
+      const lines = [draftLine({ unitCost: decimal('10') })]; // 100 units × 10 = 1000
+      const tx = buildTx(OpeningStockStatus.DRAFT, lines);
+      tx.$queryRaw
+        .mockResolvedValueOnce(headerLockRow(OpeningStockStatus.DRAFT))
+        .mockResolvedValueOnce([]) // no existing Stock row
+        .mockResolvedValueOnce([{ id: 'marker-1' }]);
+      tx.stockMovement.create.mockResolvedValue({ id: 'mv-1', type: StockMovementType.OPENING });
+
+      const prisma = withHeader(
+        { $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)) },
+        lines,
+      );
+      const service = buildService({ prisma, audit: { record: jest.fn() } });
+
+      await service.post(actor, openingStockId);
+
+      expect(tx.stockMovement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            unitCost: decimal('10'),
+            totalCost: decimal('1000'),
+          }),
+        }),
+      );
+      expect(tx.stock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ quantity: decimal('100'), totalValue: decimal('1000') }),
+        }),
+      );
+    });
+
+    it('a line without unitCost contributes 0 to totalValue (backward compatible)', async () => {
+      const lines = [draftLine()]; // unitCost null
+      const tx = buildTx(OpeningStockStatus.DRAFT, lines);
+      tx.$queryRaw
+        .mockResolvedValueOnce(headerLockRow(OpeningStockStatus.DRAFT))
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 'marker-1' }]);
+      tx.stockMovement.create.mockResolvedValue({ id: 'mv-1' });
+
+      const prisma = withHeader(
+        { $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)) },
+        lines,
+      );
+      const service = buildService({ prisma, audit: { record: jest.fn() } });
+
+      await service.post(actor, openingStockId);
+
+      expect(tx.stockMovement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ unitCost: null, totalCost: null }),
+        }),
+      );
+      expect(tx.stock.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ totalValue: 0 }) }),
+      );
+    });
+
+    it('UOM conversion: 2 BOX at conversionFactor 24 and unitCost ₹100 per BASE unit → baseQuantity 48, totalCost ₹4,800', async () => {
+      // Worked example from the Phase 2 spec: unitCost is interpreted per
+      // BASE unit, never per the entered (BOX) unit — 48 × 100 = 4800, NOT
+      // 2 × 100 = 200.
+      const lines = [
+        draftLine({
+          quantity: decimal('2'),
+          unitOfMeasureId: boxUomId,
+          uomCode: 'BOX',
+          uomName: 'Box',
+          conversionFactor: decimal('24'),
+          baseQuantity: decimal('48'),
+          unitCost: decimal('100'),
+        }),
+      ];
+      const tx = buildTx(OpeningStockStatus.DRAFT, lines);
+      tx.$queryRaw
+        .mockResolvedValueOnce(headerLockRow(OpeningStockStatus.DRAFT))
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 'marker-1' }]);
+      tx.stockMovement.create.mockResolvedValue({ id: 'mv-1' });
+
+      const prisma = withHeader(
+        { $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)) },
+        lines,
+      );
+      const service = buildService({ prisma, audit: { record: jest.fn() } });
+
+      await service.post(actor, openingStockId);
+
+      expect(tx.stockMovement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            quantity: decimal('48'),
+            unitCost: decimal('100'),
+            totalCost: decimal('4800'),
+          }),
+        }),
+      );
+      expect(tx.stock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ quantity: decimal('48'), totalValue: decimal('4800') }),
+        }),
+      );
+    });
+
+    it('reversal that brings quantity to exactly zero resets totalValue to exactly zero, even with rounding dust', async () => {
+      const lines = [
+        draftLine({ stockMovementId: 'mv-original', baseQuantity: decimal('30') }),
+      ];
+      const tx = {
+        $queryRaw: jest.fn(),
+        openingStockLine: { findMany: jest.fn().mockResolvedValue(lines) },
+        stockMovement: {
+          findMany: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'mv-reversal' }),
+        },
+        stock: { update: jest.fn() },
+        openingStockActiveLine: { deleteMany: jest.fn() },
+        openingStock: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const original = {
+        id: 'mv-original',
+        sequenceNumber: 5n,
+        type: StockMovementType.OPENING,
+        createdAt: new Date(),
+        // Deliberately NOT exactly totalValue/3 to prove the zero-stock rule
+        // forces an exact 0, not whatever the subtraction happens to yield.
+        unitCost: decimal('33.3333'),
+        totalCost: decimal('99.9999'),
+      };
+      tx.$queryRaw
+        .mockResolvedValueOnce([{ id: openingStockId, status: OpeningStockStatus.POSTED }])
+        .mockResolvedValueOnce([
+          { id: 'stock-1', quantity: decimal('30'), totalValue: decimal('100.0000') },
+        ]);
+      tx.stockMovement.findMany.mockResolvedValue([original]);
+
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+        openingStock: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            id: openingStockId, tenantId, documentNumber: 'OB-1', status: OpeningStockStatus.REVERSED,
+            effectiveDate: new Date(), postedAt: new Date(), postedBy: actor.userId,
+            reversedAt: new Date(), reversedBy: actor.userId, reversalReason: null, notes: null,
+            createdBy: actor.userId, createdAt: new Date(), updatedAt: new Date(), lines,
+          }),
+        },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() } });
+
+      await service.reverse(actor, openingStockId, {});
+
+      expect(tx.stock.update).toHaveBeenCalledWith({
+        where: { id: 'stock-1' },
+        data: { quantity: decimal('0'), totalValue: decimal(0) },
+      });
     });
   });
 });

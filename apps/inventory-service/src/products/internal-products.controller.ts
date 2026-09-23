@@ -40,6 +40,7 @@ export class InternalProductsController {
 
     return {
       productId: product.id,
+      trackInventory: product.trackInventory,
       base: {
         unitOfMeasureId: baseUnit.id,
         code: baseUnit.code,

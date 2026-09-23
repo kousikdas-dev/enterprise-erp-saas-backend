@@ -38,18 +38,27 @@ enum TaxComponentType {
 // GL account" resolution, used by the internal journal-postings API so that
 // callers (Purchase, later Sales) never need to know a real Account id.
 // PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX/SALES_REVENUE/
-// ACCOUNTS_RECEIVABLE/OUTPUT_TAX/SALES_DISCOUNT are tenant-wide singletons
-// (externalRefId always ""); PAYMENT_METHOD is per-entity (externalRefId =
-// a master-data PaymentMethod id) and shared by both Purchase and Sales —
-// one mapping per PaymentMethod regardless of which side posts against it.
-// No fallback tier exists for any purpose — an unmapped purpose/externalRefId
-// always fails posting rather than guessing an account (approved design,
-// Phase C1/C2 review; Sales purposes added under the same design in the
-// Sales Accounting Integration phase). SALES_DISCOUNT is a contra-revenue
-// purpose: the mapped Account is expected to be AccountType.REVENUE, debited
-// (rather than credited) when posted — there is no separate CONTRA_REVENUE
-// AccountType; the debit-normal usage is purely a convention of how this
-// purpose is posted, not a schema-level distinction.
+// ACCOUNTS_RECEIVABLE/OUTPUT_TAX/SALES_DISCOUNT/INVENTORY_ASSET/COGS/
+// GOODS_RECEIVED_NOT_INVOICED/PURCHASE_PRICE_VARIANCE/OPENING_BALANCE_EQUITY
+// are tenant-wide singletons (externalRefId always ""); PAYMENT_METHOD is
+// per-entity (externalRefId = a master-data PaymentMethod id) and shared by
+// both Purchase and Sales — one mapping per PaymentMethod regardless of
+// which side posts against it. No fallback tier exists for any purpose —
+// an unmapped purpose/externalRefId always fails posting rather than
+// guessing an account (approved design, Phase C1/C2 review; Sales purposes
+// added under the same design in the Sales Accounting Integration phase).
+// SALES_DISCOUNT is a contra-revenue purpose: the mapped Account is expected
+// to be AccountType.REVENUE, debited (rather than credited) when posted —
+// there is no separate CONTRA_REVENUE AccountType; the debit-normal usage is
+// purely a convention of how this purpose is posted, not a schema-level
+// distinction.
+// INVENTORY_ASSET/COGS/GOODS_RECEIVED_NOT_INVOICED/PURCHASE_PRICE_VARIANCE/
+// OPENING_BALANCE_EQUITY are added in this phase (Inventory Valuation +
+// Inventory Accounting V1 design review) as semantic roles only — no
+// resolution logic, posting logic, or seed data accompanies them yet; they
+// integrate with the existing AccountMapping resolution mechanism exactly
+// like every other purpose above and are configured the same way (via the
+// existing Account Mappings UI/API), one mapping per tenant.
 enum AccountMappingPurpose {
   PURCHASE_EXPENSE
   ACCOUNTS_PAYABLE
@@ -59,6 +68,11 @@ enum AccountMappingPurpose {
   ACCOUNTS_RECEIVABLE
   OUTPUT_TAX
   SALES_DISCOUNT
+  INVENTORY_ASSET
+  COGS
+  GOODS_RECEIVED_NOT_INVOICED
+  PURCHASE_PRICE_VARIANCE
+  OPENING_BALANCE_EQUITY
 }
 
 model Account {

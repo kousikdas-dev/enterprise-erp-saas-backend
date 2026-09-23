@@ -6,6 +6,8 @@ import {
 import { Prisma, StockMovementType } from '../../generated/prisma-client';
 import { ActorContext } from '../auth/actor-context';
 import {
+  moneyToString,
+  parseMoney,
   parsePositiveDecimal,
   quantityToString,
 } from '../common/decimal';
@@ -33,6 +35,8 @@ export type StockReceiptResult = {
     referenceId: string | null;
     createdBy: string;
     createdAt: Date;
+    unitCost: string | null;
+    totalCost: string | null;
   }>;
   stocks: Array<{
     id: string;
@@ -40,6 +44,7 @@ export type StockReceiptResult = {
     productId: string;
     warehouseId: string;
     quantity: string;
+    totalValue: string;
   }>;
 };
 
@@ -63,6 +68,10 @@ export class StockReceiptsService {
       productId: line.productId,
       quantity: parsePositiveDecimal(line.quantity),
       quantityText: quantityToString(parsePositiveDecimal(line.quantity)),
+      // Inventory Valuation V1 (Phase 2) — optional, per BASE unit. Omitted
+      // entirely preserves pre-Phase-2 behavior (0 contribution to
+      // Stock.totalValue); purchase-service does not send this yet.
+      unitCost: line.unitCost !== undefined ? parseMoney(line.unitCost) : null,
     }));
     for (const line of lines) {
       const product = await this.prisma.product.findFirst({
@@ -76,6 +85,7 @@ export class StockReceiptsService {
       lines: lines.map((line) => ({
         productId: line.productId,
         quantity: line.quantityText,
+        unitCost: line.unitCost ? moneyToString(line.unitCost) : undefined,
       })),
     });
 
@@ -99,14 +109,23 @@ export class StockReceiptsService {
       const stocks = [];
       for (const line of lines) {
         const locked = await tx.$queryRaw<
-          Array<{ id: string; quantity: Prisma.Decimal }>
+          Array<{ id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal }>
         >(
-          Prisma.sql`SELECT id, quantity FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${line.productId}::uuid AND "warehouseId" = ${dto.warehouseId}::uuid FOR UPDATE`,
+          Prisma.sql`SELECT id, quantity, "totalValue" FROM stocks WHERE "tenantId" = ${actor.tenantId}::uuid AND "productId" = ${line.productId}::uuid AND "warehouseId" = ${dto.warehouseId}::uuid FOR UPDATE`,
         );
         const current = locked[0]
           ? new Prisma.Decimal(locked[0].quantity.toString())
           : new Prisma.Decimal(0);
         const next = current.plus(line.quantity);
+
+        // Inventory Valuation V1 (Phase 2) — Moving Average receipt:
+        // newValue = oldValue + (receiptQty × receiptCost). A line without
+        // unitCost contributes 0, exactly preserving pre-Phase-2 behavior.
+        const totalCost = line.unitCost ? line.quantity.mul(line.unitCost) : null;
+        const currentValue = locked[0]
+          ? new Prisma.Decimal(locked[0].totalValue.toString())
+          : new Prisma.Decimal(0);
+        const nextValue = currentValue.plus(totalCost ?? 0);
 
         const movement = await tx.stockMovement.create({
           data: {
@@ -118,12 +137,14 @@ export class StockReceiptsService {
             referenceType: REFERENCE_TYPE,
             referenceId: dto.referenceId,
             createdBy: actor.userId,
+            unitCost: line.unitCost,
+            totalCost,
           },
         });
         const stock = locked[0]
           ? await tx.stock.update({
               where: { id: locked[0].id },
-              data: { quantity: next },
+              data: { quantity: next, totalValue: nextValue },
             })
           : await tx.stock.create({
               data: {
@@ -131,6 +152,7 @@ export class StockReceiptsService {
                 productId: line.productId,
                 warehouseId: dto.warehouseId,
                 quantity: next,
+                totalValue: nextValue,
               },
             });
         movements.push(this.toMovement(movement));
@@ -140,6 +162,7 @@ export class StockReceiptsService {
           productId: stock.productId,
           warehouseId: stock.warehouseId,
           quantity: quantityToString(stock.quantity),
+          totalValue: moneyToString(stock.totalValue),
         });
       }
 
@@ -203,6 +226,7 @@ export class StockReceiptsService {
           productId: stock.productId,
           warehouseId: stock.warehouseId,
           quantity: quantityToString(stock.quantity),
+          totalValue: moneyToString(stock.totalValue),
         });
       }
     }
@@ -227,6 +251,8 @@ export class StockReceiptsService {
     referenceId: string | null;
     createdBy: string;
     createdAt: Date;
+    unitCost: Prisma.Decimal | null;
+    totalCost: Prisma.Decimal | null;
   }) {
     return {
       id: row.id,
@@ -239,6 +265,8 @@ export class StockReceiptsService {
       referenceId: row.referenceId,
       createdBy: row.createdBy,
       createdAt: row.createdAt,
+      unitCost: row.unitCost ? moneyToString(row.unitCost) : null,
+      totalCost: row.totalCost ? moneyToString(row.totalCost) : null,
     };
   }
 }

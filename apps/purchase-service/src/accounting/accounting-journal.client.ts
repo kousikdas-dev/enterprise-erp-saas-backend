@@ -22,7 +22,13 @@ export type JournalPostingRole =
   | 'PURCHASE_EXPENSE'
   | 'ACCOUNTS_PAYABLE'
   | 'INPUT_TAX'
-  | 'PAYMENT_METHOD';
+  | 'PAYMENT_METHOD'
+  // Phase 3.1 (GRNI Accounting) — Goods Receipt -> Not-Invoiced accrual only.
+  | 'INVENTORY_ASSET'
+  | 'GOODS_RECEIVED_NOT_INVOICED'
+  // Phase 3.2 (GRNI Clearing / PPV) — Purchase Invoice confirm() clears the
+  // GRNI accrual at receipt cost and posts the invoice/receipt cost delta.
+  | 'PURCHASE_PRICE_VARIANCE';
 
 export interface JournalPostingLineRequest {
   role: JournalPostingRole;
