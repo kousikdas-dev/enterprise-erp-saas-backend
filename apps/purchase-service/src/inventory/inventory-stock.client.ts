@@ -31,6 +31,50 @@ export interface InventoryStockReceiptRequest {
   lines: Array<{ productId: string; quantity: string; unitCost?: string }>;
 }
 
+// Phase 3.5 — inventory-service's stock-returns endpoint, extended to accept
+// this alongside Phase 3.4's 'sales_return'. Subtractive on the inventory
+// side (stock leaves the warehouse back to the vendor); costed at the
+// ORIGINAL PURCHASE movement's unitCost, never client-supplied.
+//
+// Phase 3.6 adds 'purchase_return_reversal': additive (stock comes back in),
+// costed at the ORIGINAL PURCHASE_RETURN movement's own unitCost — same
+// endpoint, same shape, only referenceType and each line's originalMovementId
+// selector differ (there it points at a PurchaseReturnItem's own captured
+// inventoryMovementId instead of a GoodsReceiptItem's).
+export interface InventoryStockPurchaseReturnRequest {
+  referenceType: 'purchase_return' | 'purchase_return_reversal';
+  referenceId: string;
+  warehouseId: string;
+  lines: Array<{
+    productId: string;
+    quantity: string;
+    // The AUTHORITATIVE selector for which original movement this line acts
+    // against — GoodsReceiptItem.inventoryMovementId for 'purchase_return',
+    // PurchaseReturnItem.inventoryMovementId for 'purchase_return_reversal'.
+    // Never resolved by (referenceType, referenceId, productId) lookup.
+    originalMovementId: string;
+  }>;
+}
+
+// Positional per-line movement summary from inventory-service's response.
+// `movements[i]` corresponds to `lines[i]` of the request that produced it —
+// inventory-service iterates and pushes in that exact order. The HTTP body
+// itself is wrapped in the standard {success, statusCode, data, timestamp}
+// envelope every service applies globally via ResponseInterceptor (verified
+// live during Phase 3.5.6 — a controller's own `return result` reads as
+// unenveloped only if you don't also check the app-wide interceptor chain),
+// so callers below always unwrap via `response.data.data`.
+export interface InventoryStockMovementSummary {
+  id: string;
+  productId: string;
+}
+
+export interface InventoryStockReturnMovementSummary
+  extends InventoryStockMovementSummary {
+  unitCost: string | null;
+  totalCost: string | null;
+}
+
 interface InventoryEnvelope<T> {
   success?: boolean;
   data?: T;
@@ -48,27 +92,82 @@ export class InventoryStockClient {
   async applyReceipt(
     actor: ActorContext,
     body: InventoryStockReceiptRequest,
-  ): Promise<{ created: boolean }> {
+  ): Promise<{ created: boolean; movements: InventoryStockMovementSummary[] }> {
     const base = this.config
       .get('INVENTORY_SERVICE_URL', { infer: true })
       .replace(/\/$/, '');
     const secret = this.config.get('INTERNAL_SERVICE_SECRET', { infer: true });
     try {
       const response = await firstValueFrom(
-        this.http.post<InventoryEnvelope<{ created?: boolean }>>(
-          `${base}/api/v1/internal/stock/receipts`,
-          body,
-          {
-            headers: {
-              [INTERNAL_SERVICE_SECRET_HEADER]: secret,
-              [ACTOR_USER_ID_HEADER]: actor.userId,
-              [ACTOR_TENANT_ID_HEADER]: actor.tenantId,
-            },
-            validateStatus: (status) => status === 200 || status === 201,
+        this.http.post<
+          InventoryEnvelope<{
+            movements?: Array<{ id: string; productId: string }>;
+          }>
+        >(`${base}/api/v1/internal/stock/receipts`, body, {
+          headers: {
+            [INTERNAL_SERVICE_SECRET_HEADER]: secret,
+            [ACTOR_USER_ID_HEADER]: actor.userId,
+            [ACTOR_TENANT_ID_HEADER]: actor.tenantId,
           },
-        ),
+          validateStatus: (status) => status === 200 || status === 201,
+        }),
       );
-      return { created: response.status === 201 };
+      return {
+        created: response.status === 201,
+        movements: (response.data.data?.movements ?? []).map((movement) => ({
+          id: movement.id,
+          productId: movement.productId,
+        })),
+      };
+    } catch (error) {
+      this.rethrow(error);
+    }
+  }
+
+  // Phase 3.5 — modeled directly on applyReceipt(): same base URL, headers,
+  // validateStatus, and error mapping; the only difference is the endpoint
+  // path is shared (POST .../stock/returns, same primitive Phase 3.4 built)
+  // and the request/response shapes are the return-specific ones above.
+  async applyReturn(
+    actor: ActorContext,
+    body: InventoryStockPurchaseReturnRequest,
+  ): Promise<{
+    created: boolean;
+    movements: InventoryStockReturnMovementSummary[];
+  }> {
+    const base = this.config
+      .get('INVENTORY_SERVICE_URL', { infer: true })
+      .replace(/\/$/, '');
+    const secret = this.config.get('INTERNAL_SERVICE_SECRET', { infer: true });
+    try {
+      const response = await firstValueFrom(
+        this.http.post<
+          InventoryEnvelope<{
+            movements?: Array<{
+              id: string;
+              productId: string;
+              unitCost: string | null;
+              totalCost: string | null;
+            }>;
+          }>
+        >(`${base}/api/v1/internal/stock/returns`, body, {
+          headers: {
+            [INTERNAL_SERVICE_SECRET_HEADER]: secret,
+            [ACTOR_USER_ID_HEADER]: actor.userId,
+            [ACTOR_TENANT_ID_HEADER]: actor.tenantId,
+          },
+          validateStatus: (status) => status === 200 || status === 201,
+        }),
+      );
+      return {
+        created: response.status === 201,
+        movements: (response.data.data?.movements ?? []).map((movement) => ({
+          id: movement.id,
+          productId: movement.productId,
+          unitCost: movement.unitCost,
+          totalCost: movement.totalCost,
+        })),
+      };
     } catch (error) {
       this.rethrow(error);
     }

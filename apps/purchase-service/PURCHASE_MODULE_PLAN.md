@@ -1,7 +1,7 @@
 # Purchase Module Development Plan & Living Documentation
 
-Status: **Supplier V1 and Purchase Order V1 implemented (backend, gateway, Angular) — pending manual browser verification and user review. A UOM/Inventory conversion gap was identified in the Goods Receipt flow (shared with Sales' Shipment flow). See Section 17: the target architecture is now DIRECTIONALLY APPROVED, but implementation of that fix is NOT YET APPROVED — no Goods Receipt/schema/migration code has been written. See Section 18: Purchase Order V1 was extended into a full Sales-Order-like business document on 2026-09-14 — PO Number, Supplier Reference, Expected Delivery Date, Buyer/Purchaser (Identity user reference), an independently-overridable Payment Terms, and Receiving Warehouse (informational only) are now implemented end-to-end (schema/migration, purchase-service, API Gateway, Angular); currency remains explicitly deferred, unchanged. See Section 19: Goods Receipt V1 (full implementation plan, builds on Section 17) is PLANNING ONLY, not implemented, requiring its own explicit go-ahead — this Section 18 extension deliberately left Goods Receipt untouched and confirmed no conflict with its existing compatibility contract. **Corrected 2026-09-14: Sales Invoice and Sales Payment are ALREADY COMPLETED and validated in `apps/sales-service`** — Sections 20–21 document that completed functionality as reference only (not future work; an earlier version of this document incorrectly described them as future implementation phases — see Change History). Section 22 was expanded 2026-09-14 from a brief roadmap into a detailed, implementation-ready future architecture plan for PHASE A (Purchase Invoice V1), PHASE B (Supplier Payment V1), and PHASE C (Accounts Payable/Accounting Integration) — Purchase Invoice, Accounts Payable, and Supplier Payment remain entirely UNIMPLEMENTED; this expansion is documentation/planning only and authorizes no code, schema, or migration work. The Sales alternate-UOM→Inventory conversion gap (Section 17.7) remains a separate, unscheduled future Sales-side fix, distinct from the current Purchase Goods Receipt work. Currency/multi-currency remains deferred everywhere. Accounting Integration remains roadmap-only, gated behind its own separate architecture review (Section 22.12).**
-Last updated: 2026-09-14
+Status: **Supplier V1, Purchase Order V1, Goods Receipt V1, and Purchase Invoice V1 (Phase A) implemented (backend, gateway, Angular) — pending manual browser verification and user review. See Section 22: Purchase Invoice V1 was implemented on 2026-09-17 after a multi-round architecture review — `PurchaseInvoice`/`PurchaseInvoiceItem` are a new operational billing document referencing a Purchase Order (and, optionally per line, a specific Goods Receipt item); `PurchaseOrderItem` gained an `invoicedQuantity` accumulator, committed only at `CONFIRM` time and reversed on `CONFIRMED`-invoice cancellation, both steps aggregating same-PO-item lines before writing; `confirm()` locks `purchase_invoices → purchase_orders → purchase_order_items` and validates against committed **and** other still-DRAFT invoices' quantities under that lock, closing a two-concurrent-DRAFT-confirmations race identified during review. No accounting posting, no AP, no Supplier Payment (Phase B, still unimplemented), no currency. See Section 19: Goods Receipt V1 (§19.0's nineteen-decision register) was implemented on 2026-09-17 after explicit approval — `GoodsReceiptItem` now snapshots product/UOM identity from the parent Purchase Order line and persists a `baseQuantity` (quantity × the historical PO conversionFactor); Inventory now receives `baseQuantity` only, never the commercial quantity, closing the Section 17 conversion gap for Purchase. `preparePendingReceipt()`/`finalizePosted()` now take the same `FOR UPDATE` locking + in-flight-`PENDING_STOCK` accounting as Sales' `ShipmentsService`; duplicate `purchaseOrderItemId` values within one receipt are rejected. Migration `20260917120000_gr_v1_uom_snapshot` is additive/non-destructive per §19.8. See Section 18: Purchase Order V1 was extended into a full Sales-Order-like business document on 2026-09-14 — PO Number, Supplier Reference, Expected Delivery Date, Buyer/Purchaser (Identity user reference), an independently-overridable Payment Terms, and Receiving Warehouse (informational only) are now implemented end-to-end (schema/migration, purchase-service, API Gateway, Angular); currency remains explicitly deferred, unchanged. **Corrected 2026-09-14: Sales Invoice and Sales Payment are ALREADY COMPLETED and validated in `apps/sales-service`** — Sections 20–21 document that completed functionality as reference only (not future work; an earlier version of this document incorrectly described them as future implementation phases — see Change History). The Sales alternate-UOM→Inventory conversion gap (Section 17.7) remains a separate, unscheduled future Sales-side fix, distinct from the now-implemented Purchase Goods Receipt/Invoice work. Currency/multi-currency remains deferred everywhere. Accounting Integration (Phase C) remains roadmap-only, gated behind its own separate architecture review (Section 22.12).**
+Last updated: 2026-09-17
 
 This file is the persistent source of truth for the Purchase module's architecture and development history. It must be kept up to date by every future contributor/session that modifies this module. See "Change History" at the bottom for chronological updates, and "Architectural Rules / Do Not Break" for constraints that must never be silently violated.
 
@@ -469,7 +469,7 @@ The following rules govern this fix's eventual migration, and are recorded here 
 2. **Never delete transactional history** of any kind to simplify a migration.
 3. **Additive-only, with backfill where possible, never backfill-by-deletion**: the eventual migration adds only new, nullable columns to `goods_receipt_items` (§17.4's schema block) — no `DROP COLUMN`, no type narrowing, no new `NOT NULL` without a default.
 4. **Backfill logic for any environment that already has `goods_receipt_items` rows at implementation time** (specified now for completeness, not applicable to the current local DB — see §17.10):
-   - `baseQuantity`/`conversionFactor` for pre-existing rows: backfill `conversionFactor = 1`, `baseQuantity = quantity`. This is the **only truthful assumption possible** — prior to this fix, every existing receipt was sent to Inventory as raw `quantity` with an implicit `conversionFactor = 1`, so this backfill exactly reproduces what Inventory actually already recorded historically. It does **not** and must **not** attempt to retroactively correct any `Stock.quantity` value.
+   - **SUPERSEDED 2026-09-17 by §19.8.3 (approved decision D12) — do not follow this bullet.** It originally read: "`baseQuantity`/`conversionFactor` for pre-existing rows: backfill `conversionFactor = 1`, `baseQuantity = quantity`." The approved GR V1 architecture **forbids fabricating a historical `conversionFactor`**: `conversionFactor` is only ever copied from the parent `PurchaseOrderItem` (and may legitimately remain `NULL`), and `baseQuantity` is backfilled by §19.8.3's two explicit branches — `quantity` for already-`POSTED` rows (a record of what Inventory actually received), a real conversion for `PENDING_STOCK` rows where the frozen factor exists, and `NULL` (plus an explicit `post()` rejection) where it does not. The one part of this bullet that still holds: the backfill must **not** retroactively correct any `Stock.quantity` value.
    - `productSku`/`productName`/`unitOfMeasureId`/`uomCode` for pre-existing rows: backfill via a join back to the parent `PurchaseOrderItem` (`purchaseOrderItemId`), which still holds this data — no value is invented.
 5. **Already-applied migrations must never be edited or rewritten.** `20260819120000_purchase_domain_v1`, `20260913183953_supplier_v1_details_and_addresses`, and `20260913191233_purchase_order_v1_uom_discount_tax_snapshot` are final as applied. Any corrective or additive change — including everything in this section — must ship as a **new** migration file appended after them, never as an edit to an existing one.
 
@@ -487,8 +487,8 @@ Accounting/AP integration, Purchase Invoice, and supplier-payment posting remain
 
 ### 17.13 Approval status
 
-- **Target architecture (§17.4–§17.9)**: directionally approved by the user, 2026-09-14.
-- **Implementation**: **not approved.** No schema, migration, service, controller, Angular, or test code for this section exists. A separate, explicit go-ahead is required before any of §17.4's schema change or §17.4/§17.6's service-layer changes are written.
+- **Target architecture (§17.4–§17.9)**: directionally approved by the user, 2026-09-14; **finalized and fully approved 2026-09-17 as Section 19** (decision register §19.0). Section 19 is now the authoritative specification — where the two differ, Section 19 wins. The differences are: `productId` is added to the `GoodsReceiptItem` snapshot set (§19.3.1), `finalizePosted()` gains its own lock set (§19.4), duplicate-line and PO/tenant-membership validation are made explicit (§19.5), and §17.9 rule 4's `conversionFactor = 1` backfill is withdrawn (§19.8.3).
+- **Implementation**: **approved and implemented 2026-09-17.** See Section 19.15 and the "Goods Receipt V1 implemented" Change History entry — `GoodsReceiptItem`'s schema change and the `preparePendingReceipt()`/`post()`/`finalizePosted()` service-layer changes specified in §19.3–§19.6 are now live.
 
 ---
 
@@ -643,9 +643,39 @@ The implementation must remain additive/non-destructive and must not truncate or
 
 ---
 
-## 19. Goods Receipt V1 — Implementation Plan
+## 19. Goods Receipt V1 — Approved Architecture & Implementation Plan
 
-> **Status: PLANNING ONLY (2026-09-14). Not approved for implementation. No schema, migration, service, controller, Angular, or test code for this section exists. This section specifies how Goods Receipt V1 will be built once implementation is explicitly approved, strictly following Section 17's already-approved UOM/Inventory target architecture — it does not alter or reinterpret Section 17, it implements it.**
+> **Status: IMPLEMENTED (2026-09-17) — see the "Goods Receipt V1 implemented" Change History entry for exact detail.** The architecture below (§19.0's decision register) was approved on 2026-09-17 and implemented the same day after a separate, explicit implementation go-ahead. §19.15 records the actual implementation status in place of the original pre-implementation placeholder text.
+>
+> This section is the authoritative, final specification for Goods Receipt V1: where it differs from Section 17's earlier directional design, **this section wins** (the only substantive difference is the migration backfill rule — see §19.0 D12 and §19.8.3, which supersede §17.9 rule 4's "backfill `conversionFactor = 1`").
+>
+> This section deliberately separates: **what was already implemented before this phase** (§19.2, verified by direct code read prior to implementation), **the approved architecture** (§19.3–§19.7), **how it was implemented** (§19.9–§19.10), **how it was validated** (§19.12), **what is out of scope** (§19.13), and **what limitations are knowingly accepted** (§19.14).
+
+### 19.0 Approved Decision Register (2026-09-17)
+
+The nineteen decisions below are the approved architecture. Every later subsection implements them; nothing here may be reinterpreted, relaxed, or "improved" during implementation without a new explicit approval.
+
+| # | Decision | Where specified |
+|---|---|---|
+| D1 | `GoodsReceiptItem` snapshots `productId`, `productSku`, `productName`, `unitOfMeasureId`, `uomCode`, `uomName`, `conversionFactor`, `baseQuantity` | §19.3.1 |
+| D2 | `quantity` remains the commercial-UOM receiving quantity | §19.3.2 |
+| D3 | `baseQuantity = quantity × historical PO conversionFactor` | §19.3.2, §19.3.3 |
+| D4 | Conversion happens exactly once, at the Purchase → Inventory boundary | §19.3.3 |
+| D5 | Inventory receives ONLY the persisted `baseQuantity` | §19.3.3, §19.6 |
+| D6 | `post()`/retry MUST use persisted `GoodsReceiptItem.baseQuantity` and MUST NEVER recalculate from live `ProductUnit`/UOM data | §19.3.4 |
+| D7 | `apps/inventory-service/**` is OUT OF SCOPE and requires no changes | §19.6, §19.13 |
+| D8 | Sales Shipment/UOM is OUT OF SCOPE | §19.13 |
+| D9 | Purchase Invoice / AP / Supplier Payment is OUT OF SCOPE | §19.13 |
+| D10 | Migration strategy: nullable → deterministic backfill → validation → `NOT NULL`, **only where the actual migration history safely supports it** | §19.8 |
+| D11 | Migration is strictly non-destructive: no `TRUNCATE`, no deletion, no historical quantity rewriting, no retroactive Inventory correction | §19.8.1 |
+| D12 | Never fabricate a historical `conversionFactor`. A pre-existing row lacking required UOM/conversion data is handled by an explicitly documented safe-failure/nullable strategy — never a silent default of `1` | §19.8.3 |
+| D13 | Reject duplicate `purchaseOrderItemId` values within one `CreateGoodsReceiptDto` | §19.5 |
+| D14 | Every `purchaseOrderItemId` must belong to the selected `purchaseOrderId` **and** tenant | §19.5 |
+| D15 | Adopt the Sales Shipment concurrency pattern (lock sets and ordering as specified) | §19.4 |
+| D16 | Preserve existing Inventory idempotency/retry behavior | §19.6 |
+| D17 | The create-timeout / idempotency-key gap is OUT OF SCOPE — documented as a known limitation | §19.14 |
+| D18 | `warehouseId` remains an Inventory-owned UUID reference — no Purchase-side warehouse entity or FK | §19.3.5 |
+| D19 | Existing PO V1 functionality must remain unchanged | §19.13 |
 
 ### 19.1 Business Purpose and Relationship
 
@@ -653,127 +683,362 @@ Goods Receipt V1 formalizes the receiving step of the Purchase flow:
 
 `Purchase Order → Goods Receipt → Inventory`
 
-A Goods Receipt records that some or all of a Purchase Order's ordered quantity has physically arrived at a warehouse, and is the single point where Purchase-side commercial quantities are converted to Inventory's base-UOM stock quantities, per Section 17.
+A Goods Receipt records that some or all of a Purchase Order's ordered quantity physically arrived at a warehouse. It is the **single** point where Purchase-side commercial quantities are converted into Inventory's base-UOM stock quantities (D4).
 
-### 19.2 Goods Receipt Header
+### 19.2 Already-Implemented Behavior (verified by direct code read, 2026-09-17)
 
-- **GR Number** — system-generated tenant-scoped document number; the business-document identity, separate from the database UUID (mirrors PO Number, Section 18.2).
-- **Purchase Order** — reference to the source `PurchaseOrder` (`purchaseOrderId`, already the model's parent relation).
-- **Supplier snapshot/reference** — the GR does not re-select a supplier; it inherits/records the PO's supplier reference for traceability so a receipt is self-describing without always joining back to the PO for basic identification.
-- **Warehouse** — the destination/receiving warehouse (`warehouseId`, already existing, unchanged semantics — never the supplier's Dispatch address, per Section 2/16).
-- **Receipt Date** — `receivedAt`, already existing.
-- **Status** — existing `PENDING_STOCK|POSTED` enum, unchanged.
-- **Notes** — optional free text, where appropriate, mirroring PO Notes (Section 18.2).
+Goods Receipt is **not** greenfield. The following already exists and works today; GR V1 modifies it, it does not create it from nothing. Verified in this session by reading each file listed.
 
-### 19.3 Goods Receipt Lines
+**Schema — `apps/purchase-service/prisma/schema.prisma`** (created by migration `20260819120000_purchase_domain_v1`):
 
-- **PO item reference** — `purchaseOrderItemId` (existing).
-- **Product SKU/name snapshot** — new, copied from the parent `PurchaseOrderItem` at receipt-creation time (Section 17.4/17.8).
-- **UOM snapshot** — `unitOfMeasureId`/`uomCode`/`uomName`, copied from the parent `PurchaseOrderItem` (Section 17.4).
-- **conversionFactor snapshot** — copied from the parent `PurchaseOrderItem`, never re-resolved (Section 17.4 invariant 5).
-- **Received quantity** — `quantity`, stored in the PO's selected commercial UOM (Section 17.4 invariant 2) — unchanged from today.
-- **baseQuantity** — derived once at creation (`quantity × conversionFactor`), the only value ever sent to Inventory (Section 17.4 invariant 7).
+- `GoodsReceipt{ id, tenantId, purchaseOrderId, warehouseId, status (PENDING_STOCK|POSTED), receivedAt?, createdAt, updatedAt }`, relation to `PurchaseOrder` (`onDelete: Restrict`), indexes on `tenantId`, `purchaseOrderId`, `[tenantId, status]`.
+- `GoodsReceiptItem{ id, tenantId, goodsReceiptId, purchaseOrderItemId, quantity Decimal(19,6), createdAt, updatedAt }` — **no product snapshot, no UOM snapshot, no `conversionFactor`, no `baseQuantity`.**
+- `warehouseId` is already a plain `String @db.Uuid` with **no** relation/FK — an Inventory-owned reference (already matches D18; nothing to change).
 
-### 19.4 UOM Architecture — Must Follow Approved Section 17
+**Service — `apps/purchase-service/src/goods-receipts/goods-receipts.service.ts`**:
 
-Goods Receipt V1 implements Section 17's already-approved target architecture exactly, with no deviation:
+- `create()` → `preparePendingReceipt()` (creates the `PENDING_STOCK` receipt) → `InventoryStockClient.applyReceipt()` → `finalizePosted()`. The `GoodsReceipt` UUID is generated in `create()` with `randomUUID()` and used as Inventory's `referenceId`.
+- `preparePendingReceipt()` runs in a plain `prisma.$transaction`: loads the PO with items (tenant-filtered), rejects a PO not in `CONFIRMED`/`PARTIALLY_RECEIVED`, and per line checks `qty > poItem.quantity − poItem.receivedQuantity` → `ConflictException`. **No `SELECT … FOR UPDATE` locks. No accounting for other in-flight `PENDING_STOCK` receipts. No duplicate-line check.**
+- `finalizePosted()` runs in a second `prisma.$transaction`: re-reads the receipt, is idempotent when already `POSTED`, accumulates `poItem.receivedQuantity += item.quantity`, re-checks over-receipt, recomputes PO status (`RECEIVED` when every line is fully received, else `PARTIALLY_RECEIVED`), sets `status = POSTED` + `receivedAt = now()`, then records the `goods-receipt.posted` audit event. **No `SELECT … FOR UPDATE` locks.**
+- `post()` is the retry path for a `PENDING_STOCK` receipt: returns immediately if already `POSTED`, otherwise rebuilds Inventory lines by joining each `GoodsReceiptItem` back to its `PurchaseOrderItem` (to obtain `productId`), re-calls `applyReceipt()`, then `finalizePosted()`.
+- **Both `preparePendingReceipt()` and `post()` send `quantityToString(item.quantity)` — the raw commercial-UOM quantity — to Inventory. This is the defect GR V1 fixes (Section 17.2).**
+- `list()`/`getById()` are tenant-filtered; `getById()` 404s cross-tenant.
 
-- PO `quantity` remains in the selected commercial UOM (Section 17.4 invariant 1) — unchanged.
-- GR `quantity` remains in that same commercial UOM (Section 17.4 invariant 2) — never pre-converted at the document level.
-- `PurchaseOrderItem.receivedQuantity` accumulates GR `quantity` values directly, in the same commercial UOM — never mixed with base-UOM values (Section 17.4 invariant 3).
-- Conversion to base UOM happens **exactly once**, at the Purchase → Inventory boundary, using the historically-frozen `conversionFactor` snapshot (Section 17.4 invariants 4, 5, 7).
-- Inventory receives **base-UOM quantity only** (`baseQuantity`) — Inventory itself is unchanged (Section 17.4 invariant 6).
-- The `post()` retry path rebuilds Inventory lines from the already-persisted `baseQuantity` column — it never recomputes and never re-resolves `conversionFactor` from current `ProductUnit`/`InventoryProductClient` (Section 17.4 invariant 5).
-- Base-UOM lines must use `conversionFactor = 1` (Section 17.5 worked example).
-- **New validation rule, not previously stated in Section 17**: if a PO line's selected UOM is an alternate (non-base) UOM and its `conversionFactor` is missing or invalid (`<= 0`, non-numeric) at the moment a Goods Receipt line is prepared, that receipt line must be **rejected** with a validation error — it must never silently default to `conversionFactor = 1`, since that would silently under-post Inventory. This is a defensive backstop for receipt time on top of the UOM validation `mapLines()` already performs at PO create/update time; it does not modify or relax anything Section 17 already specifies.
+**Other already-implemented pieces**:
 
-### 19.5 Receiving Behavior
+- `dto/goods-receipt.dto.ts` — `CreateGoodsReceiptDto{ purchaseOrderId, warehouseId, items[] }`, lines `{ purchaseOrderItemId, quantity: string }`; no duplicate-line validation.
+- `dto/goods-receipt-response.ts` — `toGoodsReceiptResponse()` maps header + items (`id`, `tenantId`, `goodsReceiptId`, `purchaseOrderItemId`, `quantity`, timestamps only).
+- `goods-receipts.controller.ts` — `POST /`, `POST /:id/post`, `GET /`, `GET /:id`, all behind `ActorGuard` + `@CurrentActor()`.
+- `apps/purchase-service/src/inventory/inventory-stock.client.ts` — `applyReceipt()` posts `{ referenceType: 'goods_receipt', referenceId, warehouseId, lines: [{ productId, quantity }] }` to inventory-service `POST /api/v1/internal/stock/receipts` with the internal-secret + actor headers; maps 404/409/400 and unreachable-service errors.
+- API Gateway — `apps/api-gateway/src/purchase/goods-receipts.controller.ts` (create/post/list/get, guarded by `GOODS_RECEIPTS_CREATE`/`GOODS_RECEIPTS_READ`) forwarding via `PurchaseForwardService`, and `dto/goods-receipt.dto.ts` (request + response Swagger DTOs; `GoodsReceiptItemDto` currently exposes only `id`, `purchaseOrderItemId`, `quantity`).
+- Angular — `apps/web/src/app/features/purchase/goods-receipts/goods-receipt-list.component.{ts,html}` (list + create modal + retry-post action, `canCreate` gated on `goods-receipts.create`), `goods-receipts/goods-receipt.service.ts`, and the `GoodsReceipt`/`GoodsReceiptItem`/`CreateGoodsReceiptRequest` interfaces in `models/purchase.models.ts`.
+- Tests — `goods-receipts.service.spec.ts` currently holds 3 specs (over-receipt rejection, idempotent `post()` of an already-`POSTED` receipt, 404 on missing receipt).
+- **Permissions already exist** (`GOODS_RECEIPTS_CREATE`, `GOODS_RECEIPTS_READ`) and are wired in the gateway and in the Angular permission constants — GR V1 needs **no new permission constants**.
 
-- **Full receipt** — a single GR whose lines fully cover each PO line's remaining quantity.
-- **Partial receipt** — a GR covering less than the remaining quantity; `receivedQuantity` accumulates, PO status becomes `PARTIALLY_RECEIVED`.
-- **Multiple partial receipts** — repeated partial receipts accumulate until `receivedQuantity = quantity`, at which point PO status becomes `RECEIVED` (existing `finalizePosted()` behavior, unchanged).
-- **Remaining quantity** — `remaining = poItem.quantity − poItem.receivedQuantity`, computed in commercial-UOM terms (unchanged from today, Section 17.4 invariant 3).
-- **Over-receipt prevention** — a GR line must never be accepted if it would push `receivedQuantity` above `quantity` for that PO line, accounting for other in-flight `PENDING_STOCK` receipts (§19.6).
-- **Receipt against confirmed/receivable PO only** — a GR may only be created against a PO in `CONFIRMED` or `PARTIALLY_RECEIVED` status (existing rule, unchanged).
-- **PO status transitions** — `CONFIRMED → PARTIALLY_RECEIVED → RECEIVED`, driven by `finalizePosted()` on GR posting (existing, unchanged).
-- **`receivedQuantity` updates** — accumulate directly from GR line `quantity` values, in commercial-UOM terms, exactly as today (Section 17.4 invariant 3).
+**Summary of the four gaps GR V1 closes**: (a) no UOM conversion before Inventory; (b) no product/UOM snapshot on the receipt line; (c) no row locking / no in-flight `PENDING_STOCK` accounting in `preparePendingReceipt()` or `finalizePosted()`; (d) no duplicate-line rejection.
 
-### 19.6 Concurrency
+### 19.3 Approved GR V1 Architecture
 
-Per Section 17.6's already-approved requirement, Goods Receipt V1 closes Purchase's concurrency gap relative to Sales' `ShipmentsService`:
+#### 19.3.1 `GoodsReceiptItem` snapshot fields (D1)
 
-- `preparePendingReceipt()` must take `SELECT ... FOR UPDATE` row locks on the `purchase_orders` row and all `purchase_order_items` rows for that order, inside its existing transaction — mirroring `ShipmentsService.preparePendingShipment()`.
-- Locks must be taken in a **consistent order** (the parent `purchase_orders` row before its `purchase_order_items` rows, `purchase_order_items` locked by ascending `id`) to avoid introducing new deadlock risk between concurrent receipt-creation requests.
-- A new `pendingQuantitiesByPurchaseOrderItem()` helper (mirroring `ShipmentsService.pendingQuantitiesByOrderItem()` exactly) must sum quantities already committed to other still-`PENDING_STOCK` Goods Receipts for the same PO item, and that sum must be subtracted from `remaining` alongside `receivedQuantity`, before a new receipt line is accepted — directly preventing the over-receipt race identified in Section 17.3/17.6.
-- No schema change is required for this — purely a `goods-receipts.service.ts` logic change, symmetric with the existing Sales implementation.
+Target model shape. All eight new columns are added; `quantity` is untouched.
 
-### 19.7 Inventory Integration
+```prisma
+model GoodsReceiptItem {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  goodsReceiptId      String   @db.Uuid
+  purchaseOrderItemId String   @db.Uuid
 
-- Only `baseQuantity` is ever sent to `InventoryStockClient.applyReceipt()` — never `quantity` (Section 17.4 invariant 7).
-- The existing idempotency mechanism (`stock_receipt_applications`, keyed `(tenantId, referenceType, referenceId)`, payload-hash guarded) is preserved unchanged.
-- Retry behavior: the `post()` retry path rebuilds Inventory lines from the persisted `baseQuantity` column, never recomputing `quantity × conversionFactor` again and never re-resolving `conversionFactor` (Section 17.4 invariant 5).
-- `apps/inventory-service/**` is **not modified** in this phase — Inventory continues to receive base-UOM quantities only, exactly as today (Section 17.4 invariant 6).
-- `apps/sales-service/**` is **not modified** in this phase — Sales' identical UOM gap (Section 17.7) remains explicitly out of scope for Purchase work.
+  // UNCHANGED — commercial/PO UOM receiving quantity, e.g. "1" (BOX). (D2)
+  quantity Decimal @db.Decimal(19, 6)
 
-### 19.8 Historical Snapshot Rules
+  // NEW — product identity snapshot, copied verbatim from the parent
+  // PurchaseOrderItem at receipt-creation time. Never re-fetched from
+  // Product / inventory-service. (D1)
+  productId   String @db.Uuid   // final target: NOT NULL (see §19.8)
+  productSku  String            // final target: NOT NULL (see §19.8)
+  productName String            // final target: NOT NULL (see §19.8)
 
-Identical to Section 17.8: `productSku`, `productName`, `unitOfMeasureId`, `uomCode`, `uomName`, `conversionFactor` are copied verbatim from the parent `PurchaseOrderItem` at GR-line-creation time — never re-fetched from `Product`/`ProductUnit`/inventory-service. `baseQuantity` is a derived value (`quantity × conversionFactor`), computed once and stored for traceability/idempotency, not a snapshot.
+  // NEW — UOM snapshot, copied verbatim from the parent PurchaseOrderItem.
+  // Nullable, mirroring PurchaseOrderItem's own nullable UOM columns. (D1, D12)
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
 
-### 19.9 Tenant Isolation and Authorization
+  // NEW — derived once at creation: quantity × conversionFactor.
+  // The ONLY value ever sent to Inventory. Nullable at DB level for
+  // legacy rows only; the service never writes NULL. (D3, D5, D12)
+  baseQuantity Decimal? @db.Decimal(19, 6)
 
-- Every Goods Receipt query/mutation goes through `ActorGuard` → `@CurrentActor()` → explicit `tenantId` filtering in every Prisma query, and a `require()`-style tenant-scoped helper (cross-tenant access → 404), matching the repo-wide pattern (Section 1.6, Section 11).
-- Existing Goods-Receipt-equivalent permissions are reused; no new permission constants are anticipated unless the pre-implementation reconciliation (§19.15) finds a genuine gap in the current `GoodsReceiptsController` routes.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-### 19.10 Migration Strategy
+  goodsReceipt      GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
 
-Governed entirely by Section 17.9's already-approved non-destructive rules, restated here for Goods Receipt V1 specifically:
+  @@index([tenantId])
+  @@index([goodsReceiptId])
+  @@index([purchaseOrderItemId])
+  @@map("goods_receipt_items")
+}
+```
 
-- Additive/non-destructive only: the eventual migration adds only new, nullable columns to `goods_receipt_items` (the Section 17.4 schema block) — no `DROP COLUMN`, no type narrowing, no new `NOT NULL` without a default.
-- Existing Goods Receipts and Goods Receipt Items are preserved — never truncated, deleted, or reset (Section 17.9 rule 1; Section 17.10's explicit disavowal of the earlier one-time local `TRUNCATE` as a precedent applies here too).
-- Backfill for any environment with pre-existing `goods_receipt_items` rows follows Section 17.9 rule 4 exactly: `conversionFactor = 1`, `baseQuantity = quantity` (the only truthful assumption, since Inventory has always received raw `quantity` to date), and `productSku`/`productName`/`unitOfMeasureId`/`uomCode` backfilled via a join to the parent `PurchaseOrderItem`.
-- Historical `Stock`/`StockMovement` quantities in inventory-service are never retroactively modified — the backfill corrects only Purchase-side records, matching what Inventory already actually recorded.
-- Already-applied migrations (`20260819120000_purchase_domain_v1`, `20260913183953_supplier_v1_details_and_addresses`, `20260913191233_purchase_order_v1_uom_discount_tax_snapshot`) are never edited or rewritten — any Goods Receipt V1 migration ships as a new migration file appended after them (Section 17.9 rule 5).
+All snapshot values are copied from the **parent `PurchaseOrderItem`** — never from `Product`, `ProductUnit`, `InventoryProductClient.getUomOptions()`, or any other live master-data source. `productId` is added specifically so `post()` no longer has to join back to `PurchaseOrderItem` to rebuild an Inventory line (§19.2).
 
-### 19.11 API Gateway Requirements
+No new index is added in V1; the existing three cover every query GR V1 performs.
 
-Mirror any new/changed `GoodsReceiptItem` response fields (`productSku`, `productName`, UOM snapshot, `conversionFactor`, `baseQuantity`) at `apps/api-gateway/src/purchase/dto/` response DTOs, matching the existing `PurchaseForwardService` generic-proxy pattern — no gateway route/permission changes are anticipated unless the pre-implementation reconciliation (§19.15) finds a gap.
+#### 19.3.2 Quantity and UOM invariants (D2, D3)
 
-### 19.12 Angular UI Requirements
+1. `PurchaseOrderItem.quantity` stays in the selected purchasing UOM — unchanged from PO V1 (D19).
+2. `GoodsReceiptItem.quantity` is the **commercial-UOM** receiving quantity (e.g. `1` when the PO line is in BOX). It is never pre-converted at the document level.
+3. `PurchaseOrderItem.receivedQuantity` accumulates `GoodsReceiptItem.quantity` values directly — both in the same commercial UOM. A base-UOM number is never added to `receivedQuantity`.
+4. `baseQuantity = quantity × conversionFactor`, where `conversionFactor` is the **historical factor frozen on the parent `PurchaseOrderItem`** at PO create/update time — not today's `ProductUnit.conversionFactor`.
+5. `remaining = poItem.quantity − poItem.receivedQuantity − (other in-flight PENDING_STOCK quantities)`, computed entirely in commercial-UOM terms (§19.4).
 
-The Goods Receipt UI should be structured as a proper business document, not a raw quantity-entry form, consistent with the PO V1/Section 18 document pattern:
+Worked examples (unchanged from §17.5, restated as the approved contract):
 
-1. **GR Header** — GR Number, Purchase Order reference, Supplier reference/snapshot, Warehouse, Receipt Date, Status, Notes.
-2. **Receipt Lines** — Product (SKU/name), UOM, PO quantity, already-received quantity, remaining quantity, quantity being received (in commercial UOM), with the computed `baseQuantity` shown read-only/informational.
-3. Clear labeling that the entered quantity is in the PO line's commercial UOM (e.g. "Receive (BOX)") to avoid user confusion about which unit is being entered — the UI must never ask the user to enter a base-UOM quantity directly.
+| Scenario | PO line | GR line `quantity` | `conversionFactor` | `baseQuantity` → Inventory | `receivedQuantity` after |
+|---|---|---|---|---|---|
+| Base UOM | `10` PCS | `10` | `1` | `10` | `10` (PCS) |
+| Alternate UOM | `2` BOX | `2` | `10` | `20` (PCS) | `2` (BOX) |
+| Partial #1 | `2` BOX | `1` | `10` | `10` | `1` (BOX) → `PARTIALLY_RECEIVED` |
+| Partial #2 | `2` BOX | `1` | `10` | `10` (total `20`) | `2` (BOX) → `RECEIVED` |
+| Master data changed to `12` after PO creation | `2` BOX | `1` | `10` (frozen on PO item) | `10`, **not** `12` | `1` (BOX) |
 
-### 19.13 Validation Requirements
+#### 19.3.3 Conversion boundary (D4, D5)
 
-- GR line quantity must be `> 0`.
-- GR line quantity, combined with already-received and other in-flight `PENDING_STOCK` quantities, must not exceed the PO line's `quantity` (§19.5, §19.6).
-- A GR may only reference PO items belonging to the referenced, same-tenant Purchase Order.
-- A GR may only be created against a PO in a receivable status (`CONFIRMED`/`PARTIALLY_RECEIVED`).
-- Per §19.4's new rule: an alternate-UOM PO line with a missing/invalid `conversionFactor` must reject GR-line creation rather than default to `1`.
+- Conversion happens **exactly once**, in `preparePendingReceipt()`, at the moment the `GoodsReceiptItem` row is created: `baseQuantity := qty.mul(poItem.conversionFactor)`.
+- The value is **persisted** on the row and is the only quantity ever placed on an `InventoryStockClient.applyReceipt()` line.
+- No other layer (controller, gateway, Angular, Inventory) converts anything. Angular may display `baseQuantity` read-only; it must never compute it and must never ask the user for a base-UOM quantity.
 
-### 19.14 Test Plan
+#### 19.3.4 `post()` / retry rule (D6)
 
-New/extended Jest specs (hand-built plain-object Prisma/audit mocks, matching repo convention — Section 1.6, Section 13) must cover:
+- `post()` rebuilds Inventory lines as `{ productId: item.productId, quantity: quantityToString(item.baseQuantity) }` **from the persisted `GoodsReceiptItem` columns only**.
+- It must never recompute `quantity × conversionFactor`, never read `ProductUnit`, never call `InventoryProductClient`, and never join back to `PurchaseOrderItem` for quantity or UOM data.
+- If a row's persisted `baseQuantity` is `NULL` (only possible for a legacy pre-migration row — §19.8.3), `post()` **rejects with `ConflictException`** naming the receipt/line. It must not fall back to `quantity`, and must not assume `conversionFactor = 1` (D12).
 
-- Base UOM receipt (`conversionFactor = 1`) — `baseQuantity = quantity`.
-- Alternate UOM receipt — `baseQuantity = quantity × conversionFactor`, matching Section 17.5's worked example.
-- Partial receipt and multiple partial receipts, confirming `receivedQuantity` stays in commercial-UOM terms and PO status transitions correctly.
-- Conversion-factor-changed-after-PO-creation scenario (Section 17.5) — a GR created after a master-data `ProductUnit.conversionFactor` edit must still use the factor frozen on the PO item.
-- Retry (`post()`) using the already-stored `baseQuantity` — must not recompute or re-resolve `conversionFactor`.
-- Concurrent receiving / over-receipt prevention — two concurrent `create()` calls against the same PO item must not together exceed the ordered quantity.
-- Tenant isolation — cross-tenant access to a PO/GR returns 404.
-- Idempotency — repeated `post()` retries against the same GR do not double-apply to Inventory.
-- Regression coverage for existing GR behavior (creation, `PENDING_STOCK → POSTED` transition, `finalizePosted()` bookkeeping) to confirm nothing already-working is broken by the UOM change.
+#### 19.3.5 `warehouseId` (D18)
+
+`GoodsReceipt.warehouseId` stays a plain `String @db.Uuid` soft reference to an inventory-service-owned warehouse: no Prisma relation, no FK, no Purchase-side `Warehouse` model, no synchronous existence check (matching the repo-wide soft-reference convention, Section 16). It also remains strictly distinct from `PurchaseOrder.warehouseId` (informational default) and from the supplier's `DISPATCH` address (Section 16) — GR V1 changes none of this.
+
+### 19.4 Concurrency — Sales Shipment Pattern (D15)
+
+GR V1 adopts `ShipmentsService`'s proven pattern verbatim (`apps/sales-service/src/shipments/shipments.service.ts`, read in this session as the reference implementation).
+
+**`preparePendingReceipt()` — required order of operations:**
+
+1. `SELECT id, status::text FROM purchase_orders WHERE id = … AND "tenantId" = … FOR UPDATE` → 404 if absent; 409 if status is not `CONFIRMED`/`PARTIALLY_RECEIVED`.
+2. Load the PO with items via Prisma (tenant-filtered).
+3. `SELECT id FROM purchase_order_items WHERE "purchaseOrderId" = … AND "tenantId" = … FOR UPDATE` (all lines of that PO, in one statement).
+4. Sum other still-`PENDING_STOCK` Goods Receipts for the same PO via a new `pendingQuantitiesByPurchaseOrderItem(tx, tenantId, purchaseOrderId)` helper — the exact mirror of `pendingQuantitiesByOrderItem()` (`goodsReceiptItem.findMany` where `goodsReceipt: { purchaseOrderId, tenantId, status: PENDING_STOCK }`, reduced into a `Map<purchaseOrderItemId, Decimal>`).
+5. Validate each line: tenant/PO membership (D14), duplicate check (D13), positive quantity, `conversionFactor` validity, and `qty > quantity − receivedQuantity − pending` → `ConflictException`. As in Sales, accumulate each accepted line back into the pending map so two lines in the *same* DTO cannot jointly over-receive.
+6. Create the `GoodsReceipt` + items as `PENDING_STOCK`, with the full snapshot (§19.3.1) and computed `baseQuantity`.
+7. Return Inventory lines built from `baseQuantity`.
+
+**`finalizePosted()` — required order of operations:**
+
+1. `SELECT id, status::text, "purchaseOrderId" FROM goods_receipts WHERE id = … AND "tenantId" = … FOR UPDATE` → 404 if absent; return the existing row if already `POSTED` (idempotent); 409 if not `PENDING_STOCK`.
+2. `SELECT id FROM purchase_orders WHERE id = … AND "tenantId" = … FOR UPDATE`.
+3. Load the receipt with items + PO items via Prisma.
+4. `SELECT id FROM purchase_order_items WHERE "purchaseOrderId" = … AND "tenantId" = … FOR UPDATE`.
+5. Accumulate `receivedQuantity` (commercial UOM), re-check over-receipt, recompute PO status, set `POSTED` + `receivedAt` — logic otherwise unchanged from today.
+
+**Lock-ordering rule (must be preserved by every future change):** always acquire locks parent-first in the order `goods_receipts` → `purchase_orders` → `purchase_order_items`, never in the reverse direction. `preparePendingReceipt()` simply starts at step 2 of that chain because its `GoodsReceipt` row does not exist yet (it is created inside the same transaction). Within `purchase_order_items`, lock the whole PO's line set in one statement (as Sales does) rather than row-by-row, so concurrent transactions cannot interleave line locks. This ordering is identical to Sales', which is already exercised by existing production code paths.
+
+### 19.5 Validation Requirements
+
+Service-layer (`preparePendingReceipt()` unless noted):
+
+- **D13 — duplicate lines**: two or more DTO lines with the same `purchaseOrderItemId` → `BadRequestException` ("Duplicate purchase order item in goods receipt"). Rejected outright; quantities are **not** silently merged. Enforced before any quantity math, independently of the DTO-level check.
+- **D14 — membership**: every `purchaseOrderItemId` must be a line of the requested `purchaseOrderId` **and** carry the actor's `tenantId`. A non-member, cross-PO, or cross-tenant id → `NotFoundException` (never 403, matching the repo-wide "cross-tenant reads as not found" rule). The existing `itemsById` lookup plus the `poItem.tenantId !== actor.tenantId` check already implements this and is retained.
+- PO status must be `CONFIRMED` or `PARTIALLY_RECEIVED` → otherwise `ConflictException` (existing behavior, unchanged).
+- Line `quantity` must parse as a positive decimal (`parsePositiveDecimal`, existing).
+- Over-receipt: `qty > quantity − receivedQuantity − pendingPendingStock` → `ConflictException` (§19.4).
+- **`conversionFactor` integrity**: the parent `PurchaseOrderItem`'s `conversionFactor` must be present and `> 0` whenever the line carries a UOM selection. Missing/zero/negative/non-numeric → `BadRequestException`. It must **never** silently default to `1` (D12). Reuse `parseConversionFactor()` from `apps/purchase-service/src/common/decimal.ts`, added during PO V1 for the identical rule on the PO side.
+  - Base-UOM lines legitimately carry `conversionFactor = 1`.
+  - A legacy PO line predating the UOM columns may carry `unitOfMeasureId = NULL` **and** `conversionFactor = NULL`; that is treated as "no UOM was ever selected", so the factor is `1` — permitted **only when `unitOfMeasureId` is also `NULL`**, because no conversion exists to fabricate. If `unitOfMeasureId` is set but `conversionFactor` is `NULL`, the line is rejected — this is exactly the case D12 forbids guessing.
+
+DTO-layer (`CreateGoodsReceiptDto`): unchanged field set; add a duplicate-`purchaseOrderItemId` constraint so the request fails fast with a 400 before reaching the service.
+
+Gateway DTO: mirror the same duplicate-line validator so the gateway rejects it identically (the gateway is a validating proxy, per the existing `PurchaseForwardService` pattern).
+
+### 19.6 Inventory Integration and Idempotency (D5, D7, D16)
+
+- Only `baseQuantity` is ever sent to `InventoryStockClient.applyReceipt()` — never `quantity`.
+- The request shape, endpoint, headers, and error mapping in `inventory-stock.client.ts` are **unchanged** — only the numeric value on each line changes.
+- Inventory's existing idempotency (`stock_receipt_applications`, keyed `(tenantId, referenceType, referenceId)`, payload-hash guarded, `referenceType = 'goods_receipt'`, `referenceId = GoodsReceipt.id`) is preserved exactly.
+- Because `post()` replays from the persisted `baseQuantity`, the replayed payload is **identical** to the original attempt — which is precisely why D6 matters: a recomputed payload could differ after a master-data edit and would then be rejected by Inventory's payload-hash guard as a mismatch (409), turning a recoverable retry into a permanent failure.
+- `apps/inventory-service/**` requires **no changes at all** (D7): its ledger keeps storing base-UOM quantities with no UOM awareness, exactly as today.
+
+### 19.7 Historical Snapshot Rules
+
+`productId`, `productSku`, `productName`, `unitOfMeasureId`, `uomCode`, `uomName`, `conversionFactor` are copied verbatim from the parent `PurchaseOrderItem` at GR-line-creation time and are immutable thereafter. They are never re-fetched from `Product`/`ProductUnit`/inventory-service, and never re-resolved on the `post()` retry path.
+
+`baseQuantity` is **not** a snapshot but a derived value, computed once at creation and persisted for traceability and idempotent replay.
+
+Intended consequence: a Goods Receipt row is fully self-describing, and every historical receipt is immune to later master-data edits.
+
+### 19.8 Migration Strategy (D10, D11, D12)
+
+One new migration directory, appended after `20260914100000_po_v1_document_fields`, e.g. `apps/purchase-service/prisma/migrations/2026MMDDHHMMSS_gr_v1_uom_snapshot/`. Already-applied migrations are never edited (Section 17.9 rule 5).
+
+#### 19.8.1 Non-negotiable constraints (D11)
+
+- No `TRUNCATE` of any table, ever. Section 17.10's disavowal of the earlier one-time local truncate applies in full.
+- No `DELETE` of transactional rows.
+- No rewriting of existing `goods_receipt_items.quantity`, `purchase_order_items.quantity`, or `receivedQuantity` values.
+- No retroactive correction of inventory-service `Stock`/`StockMovement` rows — historically under-posted stock (the pre-fix behavior) is a business/operations matter, corrected by a deliberate stock adjustment if at all, never by this migration.
+- No `DROP COLUMN`, no type narrowing, no column rename.
+
+#### 19.8.2 Four-step shape (D10)
+
+`prisma migrate diff` generates step 1 only; steps 2–4 are **hand-written** into the same migration file and hand-reviewed before `prisma migrate deploy` — the same generate-then-hand-review workflow already used for `20260914100000_po_v1_document_fields`.
+
+1. **Add all eight columns as nullable** — `ALTER TABLE "goods_receipt_items" ADD COLUMN "productId" UUID, ADD COLUMN "productSku" TEXT, ADD COLUMN "productName" TEXT, ADD COLUMN "unitOfMeasureId" UUID, ADD COLUMN "uomCode" TEXT, ADD COLUMN "uomName" TEXT, ADD COLUMN "conversionFactor" DECIMAL(19,6), ADD COLUMN "baseQuantity" DECIMAL(19,6);`
+2. **Deterministic backfill from the parent `purchase_order_items`** (§19.8.3) — a single `UPDATE … FROM` join on `purchaseOrderItemId`; nothing is invented from outside the database.
+3. **Validation** — assert the columns about to be tightened contain no `NULL`, aborting the migration transaction (a clean rollback that changes nothing) rather than proceeding; separately `RAISE NOTICE` the count of rows that must stay nullable.
+4. **`SET NOT NULL` only where step 3 proves it is safe** — see the feasibility table below.
+
+#### 19.8.3 Per-column backfill and `NOT NULL` feasibility (D10, D12)
+
+Feasibility is dictated by the actual migration history, which was read in this session:
+
+- `purchase_order_items."productId"` is `NOT NULL` since `20260819120000_purchase_domain_v1`.
+- `purchase_order_items."productSku"`/`"productName"` are `NOT NULL` since `20260913191233_purchase_order_v1_uom_discount_tax_snapshot`.
+- `purchase_order_items."unitOfMeasureId"`/`"uomCode"`/`"uomName"`/`"conversionFactor"` were added **nullable** by that same migration, so pre-UOM PO lines can legitimately hold `NULL` there.
+- `goods_receipt_items."purchaseOrderItemId"` is `NOT NULL` with an FK to `purchase_order_items`, so every GR item is guaranteed exactly one parent PO item to read from.
+
+| Column | Backfill source for pre-existing rows | Can become `NOT NULL` in this migration? |
+|---|---|---|
+| `productId` | `poi."productId"` | **Yes** — parent is `NOT NULL`, FK guarantees a parent exists |
+| `productSku` | `poi."productSku"` | **Yes** — same reason |
+| `productName` | `poi."productName"` | **Yes** — same reason |
+| `unitOfMeasureId` | `poi."unitOfMeasureId"` (may be `NULL`) | **No** — stays nullable, mirroring the parent column |
+| `uomCode` | `poi."uomCode"` (may be `NULL`) | **No** — stays nullable |
+| `uomName` | `poi."uomName"` (may be `NULL`) | **No** — stays nullable |
+| `conversionFactor` | `poi."conversionFactor"` (may be `NULL`) — **never defaulted to `1`** | **No** — stays nullable (D12) |
+| `baseQuantity` | Two documented branches below | **No in V1** — see the deferred-promotion note |
+
+**`baseQuantity` backfill — two explicit branches, no fabrication:**
+
+- **Already-`POSTED` legacy receipts**: `baseQuantity := quantity`. This is not an assumed conversion — it is the recorded fact that the pre-fix code path sent the raw `quantity` to Inventory, so the column truthfully reflects what Inventory actually received. `conversionFactor` is still **not** set to `1`; it is only ever copied from the parent PO line and may remain `NULL`.
+- **`PENDING_STOCK` legacy receipts** (nothing sent to Inventory yet): `baseQuantity := quantity × poi."conversionFactor"` **only where `poi."conversionFactor" IS NOT NULL`**, or where the PO line has no UOM at all (`unitOfMeasureId IS NULL`, so no conversion exists and `quantity` is already base-denominated). Otherwise `baseQuantity` is **left `NULL`** — the documented safe-failure strategy D12 requires.
+- A row left with `NULL baseQuantity` is not silently usable: `post()` rejects it with a `ConflictException` (§19.3.4), so the only possible outcome is an explicit, visible operator decision — never a wrong quantity sent to Inventory.
+- The migration emits the count of rows left with `NULL baseQuantity`; this document carries the audit query to list them:
+  ```sql
+  SELECT gri.id, gri."goodsReceiptId", gr.status, gri."purchaseOrderItemId"
+  FROM goods_receipt_items gri
+  JOIN goods_receipts gr ON gr.id = gri."goodsReceiptId"
+  WHERE gri."baseQuantity" IS NULL;
+  ```
+- Separately, the following query lists historically under-posted receipts (alternate UOM, `conversionFactor <> 1`, already `POSTED`) for **business review only** — the migration never corrects them (D11):
+  ```sql
+  SELECT gri.id, gri."goodsReceiptId", gri.quantity, poi."conversionFactor"
+  FROM goods_receipt_items gri
+  JOIN goods_receipts gr ON gr.id = gri."goodsReceiptId"
+  JOIN purchase_order_items poi ON poi.id = gri."purchaseOrderItemId"
+  WHERE gr.status = 'POSTED' AND poi."conversionFactor" IS NOT NULL AND poi."conversionFactor" <> 1;
+  ```
+
+**Deferred `NOT NULL` promotion for `baseQuantity`**: the service layer never writes `NULL` for a newly created row, so every post-migration row is populated. A follow-up migration may promote `baseQuantity` (and optionally the UOM columns) to `NOT NULL` once an environment's audit query above returns zero rows — that promotion is deliberately **not** part of GR V1, because it cannot be guaranteed safe across environments from the migration history alone (D10's "where safely supported" clause).
+
+**Note on the current local database**: the Change History entry for `20260914100000_po_v1_document_fields` records that `purchase_orders`/`purchase_order_items`/`goods_receipts`/`goods_receipt_items` held **zero rows** at that time. If that is still true when GR V1 is implemented, every backfill branch is a no-op and all four steps apply trivially. The strategy above is nonetheless written to be correct against a populated database and must not be simplified away on the grounds that the local DB happens to be empty.
+
+**Supersedes**: §17.9 rule 4's instruction to backfill `conversionFactor = 1` for pre-existing rows is **withdrawn** by D12 and replaced by this subsection. `conversionFactor` is never fabricated.
+
+### 19.9 Implementation Steps (ordered)
+
+1. Re-read the current implementation (§19.2's file list) and reconcile it against this section before touching anything — no existing code is assumed correct merely because it exists.
+2. `schema.prisma`: add the eight columns to `GoodsReceiptItem` per §19.3.1, initially nullable.
+3. Generate the migration (`prisma migrate diff`), then hand-write steps 2–4 of §19.8.2 into the same `migration.sql`; hand-review the whole file for additive-only correctness; apply with `prisma migrate deploy`; `prisma generate`.
+4. Tighten `schema.prisma` to non-optional for `productId`/`productSku`/`productName` so the Prisma model matches the migrated database exactly.
+5. `goods-receipts.service.ts` — `preparePendingReceipt()`: add the `FOR UPDATE` locks and `pendingQuantitiesByPurchaseOrderItem()` (§19.4), the duplicate-line and membership checks (§19.5), the `conversionFactor` validation (§19.5), the snapshot copy, and the `baseQuantity` computation; build Inventory lines from `baseQuantity`.
+6. `goods-receipts.service.ts` — `post()`: rebuild Inventory lines from the persisted `productId`/`baseQuantity`, drop the PO-item join, reject `NULL baseQuantity` with a `ConflictException`.
+7. `goods-receipts.service.ts` — `finalizePosted()`: add the three `FOR UPDATE` locks in the specified order; leave the `receivedQuantity`/status logic unchanged.
+8. `dto/goods-receipt.dto.ts`: add the duplicate-`purchaseOrderItemId` validator.
+9. `dto/goods-receipt-response.ts`: expose the new line fields (`productId`, `productSku`, `productName`, `unitOfMeasureId`, `uomCode`, `uomName`, `conversionFactor`, `baseQuantity`), serializing decimals with the existing `quantityToString` convention.
+10. API Gateway: mirror the new response fields and the duplicate-line validator in `apps/api-gateway/src/purchase/dto/goods-receipt.dto.ts`. No route or permission change.
+11. Angular: extend `GoodsReceiptItem` in `models/purchase.models.ts`; surface product/UOM/`baseQuantity` read-only in `goods-receipt-list.component.{ts,html}`, labelling the entry field with the PO line's commercial UOM (e.g. "Receive (BOX)") and showing the resulting base quantity as informational. The UI never computes the conversion and never asks for a base-UOM quantity.
+12. Tests (§19.11), then the full validation sweep (§19.12), then a Change History entry in this document.
+
+### 19.10 Exact Files Expected to Change
+
+**purchase-service**
+- `apps/purchase-service/prisma/schema.prisma` — `GoodsReceiptItem` only.
+- `apps/purchase-service/prisma/migrations/2026MMDDHHMMSS_gr_v1_uom_snapshot/migration.sql` — new.
+- `apps/purchase-service/src/goods-receipts/goods-receipts.service.ts`
+- `apps/purchase-service/src/goods-receipts/dto/goods-receipt.dto.ts`
+- `apps/purchase-service/src/goods-receipts/dto/goods-receipt-response.ts`
+- `apps/purchase-service/src/goods-receipts/goods-receipts.service.spec.ts`
+
+**API Gateway**
+- `apps/api-gateway/src/purchase/dto/goods-receipt.dto.ts`
+- (`apps/api-gateway/src/purchase/goods-receipts.controller.ts` — expected **unchanged**; it already forwards the whole body/response. Touch only if §19.9 step 1 finds a genuine gap.)
+
+**Angular (apps/web)**
+- `apps/web/src/app/features/purchase/models/purchase.models.ts`
+- `apps/web/src/app/features/purchase/goods-receipts/goods-receipt-list.component.ts`
+- `apps/web/src/app/features/purchase/goods-receipts/goods-receipt-list.component.html`
+- (`apps/web/src/app/features/purchase/goods-receipts/goods-receipt.service.ts` — expected **unchanged**; typed against the models above.)
+
+**This document**
+- `apps/purchase-service/PURCHASE_MODULE_PLAN.md` — status line, §19.15 implementation status, and a new Change History entry.
+
+**Explicitly NOT changed by GR V1**: `apps/inventory-service/**`, `apps/sales-service/**`, `apps/accounting-service/**`, `apps/master-data-service/**`, `libs/common/src/rbac/permissions.ts`, `apps/purchase-service/src/purchase-orders/**`, `apps/purchase-service/src/suppliers/**`, `apps/purchase-service/src/inventory/inventory-stock.client.ts`, and every already-applied migration directory.
+
+### 19.11 Test Plan
+
+Extend `apps/purchase-service/src/goods-receipts/goods-receipts.service.spec.ts` using hand-built plain-object Prisma/audit mocks (repo convention — no `jest-mock-extended`, no `Test.createTestingModule`; §1.6, §13). The mock `tx` must now also stub `$queryRaw` (for the `FOR UPDATE` statements) and `goodsReceiptItem.findMany` (for the pending-quantity helper).
+
+Required cases:
+
+1. **Base UOM** — `conversionFactor = 1` → `baseQuantity = quantity`; Inventory receives `quantity`.
+2. **Alternate UOM** — PO line `2` BOX @ factor `10`, receive `2` → persisted `quantity = 2`, `baseQuantity = 20`; Inventory receives `20`, never `2`.
+3. **Snapshot copy** — all eight fields persisted from the parent PO item; no `InventoryProductClient`/master-data call is made during receipt creation.
+4. **Partial + multiple partial receipts** — `receivedQuantity` accumulates in commercial UOM (`1`, then `2` — never `10`/`20`); PO status `PARTIALLY_RECEIVED` → `RECEIVED`.
+5. **Master-data factor changed after PO creation** — the GR still uses the PO item's frozen `10`, not the new `12`.
+6. **`post()` retry uses persisted `baseQuantity`** — assert the Inventory payload equals the stored `baseQuantity` and that no recomputation/master-data lookup occurs.
+7. **`post()` with `NULL baseQuantity`** (legacy row) → `ConflictException`, and `applyReceipt` is **not** called.
+8. **Duplicate `purchaseOrderItemId` in one DTO** → `BadRequestException`; nothing is created; `applyReceipt` not called (D13).
+9. **`purchaseOrderItemId` from another PO / another tenant** → `NotFoundException` (D14).
+10. **Cross-tenant `getById`/`post`** → `NotFoundException` (existing coverage retained).
+11. **Over-receipt vs. `receivedQuantity`** → `ConflictException` (existing spec retained).
+12. **Over-receipt vs. other in-flight `PENDING_STOCK` receipts** — the pending map returns a quantity that makes the new line exceed `remaining` → `ConflictException` (the race §17.6 identified).
+13. **Two lines in the same DTO against the same remaining quantity** — jointly exceeding → rejected (the accumulate-into-pending-map behavior).
+14. **Locking** — assert `$queryRaw` was invoked for `purchase_orders` then `purchase_order_items` in `preparePendingReceipt()`, and for `goods_receipts` → `purchase_orders` → `purchase_order_items`, in that order, in `finalizePosted()`.
+15. **UOM-selected line with missing/zero/negative `conversionFactor`** → `BadRequestException`, never a silent `1` (D12).
+16. **Legacy PO line with no UOM at all** (`unitOfMeasureId` and `conversionFactor` both `NULL`) → accepted, treated as factor `1`, `baseQuantity = quantity`.
+17. **Idempotency** — `post()` on an already-`POSTED` receipt returns it without calling Inventory (existing spec retained).
+18. **Regression** — `PENDING_STOCK → POSTED` transition, `finalizePosted()` bookkeeping, and the `goods-receipt.posted` audit payload remain unchanged.
+
+No Angular TestBed specs — none exist anywhere in this repo; consistent with every prior phase (§1.6, §13).
+
+### 19.12 Expected Validation
+
+Run, and record actual results in the Change History entry:
+
+1. `npx prisma format && npx prisma validate --schema=apps/purchase-service/prisma/schema.prisma` — before generating the migration.
+2. Hand-review the generated `migration.sql`: additive-only, all four §19.8.2 steps present, no `DROP`/`TRUNCATE`/`DELETE`/rename, no rewrite of existing quantities.
+3. `npm run prisma:migrate:purchase` (or `prisma migrate diff` + `prisma migrate deploy`, as used for the PO V1 document-fields migration when `migrate dev` cannot run non-interactively) against local `purchase_db`, then `npm run prisma:generate:purchase`.
+4. Post-migration DB checks: the §19.8.3 audit queries (expect `0` rows for `NULL baseQuantity` on a populated DB, or an explicitly documented list), plus `SELECT count(*)` on all four purchase tables **before and after** to prove no row was lost.
+5. `npx jest apps/purchase-service` — all green, including the existing 50 PO/supplier tests plus the new GR cases.
+6. `npx jest apps/api-gateway/src/purchase` — all green (gateway guard/DTO regression).
+7. `npx tsc --noEmit` clean for `apps/purchase-service` and `apps/api-gateway`.
+8. `ng build --configuration=development` for `apps/web` — no TypeScript/template errors (pre-existing Sass deprecation warnings are expected and unrelated).
+9. `git diff --check` — no whitespace errors (pre-existing LF/CRLF warnings expected on Windows).
+10. Manual browser verification (explicitly required before GR V1 is called done): create a receipt against an alternate-UOM PO line and confirm Inventory stock increases by `quantity × conversionFactor`; perform a partial receipt and confirm `receivedQuantity` advances in commercial UOM; retry `/post` after an Inventory outage and confirm the same `baseQuantity` is replayed without double-applying; confirm cross-tenant isolation.
+
+### 19.13 Out of Scope (D7, D8, D9, D17, D18, D19)
+
+- **inventory-service** (`apps/inventory-service/**`) — no schema, DTO, service, or endpoint change. Its ledger stays UOM-unaware and keeps receiving base-UOM quantities (D7).
+- **Sales Shipment / Sales UOM** (`apps/sales-service/**`) — Sales carries the identical conversion gap (§17.7); fixing it is a separate, unscheduled Sales-side phase. GR V1 borrows Sales' concurrency pattern but changes no Sales file (D8).
+- **Purchase Invoice, Accounts Payable, Supplier Payment, accounting/journal posting** (Section 22, Phases A–C) — untouched (D9).
+- **Create-timeout / idempotency-key handling** — see §19.14 (D17).
+- **Purchase-side warehouse entity, FK, or existence validation** — `warehouseId` stays a soft Inventory-owned UUID reference (D18).
+- **PO V1 behavior** — no change to PO numbering, the calculation pipeline, snapshots, DTOs, controller, or the Angular PO screens. GR V1 reads `PurchaseOrderItem` and writes only `receivedQuantity`, exactly as today (D19).
+- **Currency/multi-currency** — deferred everywhere, unchanged.
+- **Retroactive correction of historically under-posted stock** — explicitly not attempted by code or migration (§19.8.1); a business decision, actioned via a deliberate stock adjustment if at all.
+- **GR header document fields** — GR Number, a supplier snapshot on the receipt header, and receipt Notes were described in the pre-approval draft of this section but are **not** part of the approved decision register (§19.0). They are deferred to a separate, explicitly approved phase; GR V1 keeps the existing header shape (`purchaseOrderId`, `warehouseId`, `status`, `receivedAt`).
+
+### 19.14 Known Limitations (accepted for V1)
+
+1. **Create-timeout / missing client idempotency key (D17)** — `create()` mints a fresh `GoodsReceipt` UUID per request and uses it as Inventory's `referenceId`. If the client times out and retries `create()`, a **second** receipt with a **different** `referenceId` is produced, which Inventory's idempotency table cannot recognize as a duplicate, so stock can be applied twice (bounded by the remaining ordered quantity, which §19.4's locking + pending-quantity accounting now enforces correctly). Closing this requires a client-supplied idempotency key plumbed through the gateway — explicitly **out of scope** for GR V1 and deliberately not designed here.
+2. **`baseQuantity` remains nullable at the database level** for legacy rows (§19.8.3). Newly created rows are always populated by the service; the `NOT NULL` promotion is deferred to a follow-up migration after a per-environment audit.
+3. **UOM snapshot columns stay nullable**, mirroring `PurchaseOrderItem`'s own nullable UOM columns — a deliberate consequence of the real migration history, not an oversight (D10).
+4. **Historically under-posted stock is not corrected** (§19.8.1, D11). The audit query in §19.8.3 exposes affected receipts for business review.
+5. **Sales still under-posts on alternate-UOM shipments** (§17.7, D8) until the symmetric Sales fix is undertaken. The repo is knowingly asymmetric in the interim.
+6. **Concurrent `create()` calls are serialized by row locks**, introducing some lock contention on a hot PO — accepted, identical to Sales' existing behavior.
+7. **No existence validation for `warehouseId`** against inventory-service (D18) — a receipt can name a deleted/unknown warehouse and will fail at the Inventory call rather than at validation time. Pre-existing, repo-wide soft-reference behavior, unchanged.
 
 ### 19.15 Implementation Status
 
-Section 19 is **planning only**. No schema, migration, service, controller, Angular, or test code exists for it. Implementation requires its own explicit go-ahead, separate from this documentation update, and is the same body of work as Section 17 — Section 17 defines the target architecture, Section 19 defines the full document/API/UI/test plan around it. Before implementation, Claude must inspect the already-implemented PO V1/GR code and reconcile it against Sections 17 and 19, exactly as required for Section 18 (§18.9) — no existing implementation should be assumed correct merely because it is already present.
+**Architecture: APPROVED (2026-09-17). Implementation: COMPLETE (2026-09-17)** — see the "Goods Receipt V1 implemented" Change History entry for exact file-by-file detail, verification results, and known limitations.
+
+Before implementation, the current code (§19.2's file list) was re-read and reconciled against this section, per §19.9 step 1 — nothing was assumed correct merely because it already existed. `GoodsReceiptItem` now carries all eight snapshot/derived fields (§19.3.1); `preparePendingReceipt()`/`finalizePosted()` take the Sales Shipment locking pattern (§19.4); duplicate-line and PO/tenant-membership validation are enforced (§19.5); Inventory receives `baseQuantity` only (§19.6); migration `20260917120000_gr_v1_uom_snapshot` applied additively per §19.8. `apps/inventory-service/**`, `apps/sales-service/**`, `apps/accounting-service/**`, and existing PO V1/Supplier functionality were not touched.
 
 ---
-
 ## 20. Sales Invoice — Completed / Existing Sales Reference
 
 > **Status: COMPLETED AND VALIDATED (corrected 2026-09-14). Sales Invoice is already implemented and validated in `apps/sales-service/src/sales-invoices/` — it is NOT a future phase. An earlier version of this section incorrectly described it as a "future Sales-module roadmap item"; that was wrong and is corrected here (see Change History). This section documents existing, already-implemented behavior — confirmed by direct code read — for cross-module reference only (in particular, as the concrete precedent for the future Purchase Invoice phase, Section 22). Nothing in this section proposes new Sales Invoice work, and nothing here authorizes any change to `apps/sales-service/**`.**
@@ -870,9 +1135,15 @@ Section 21 is reference documentation of **completed** Sales functionality. No S
 
 ---
 
-## 22. Purchase Invoice / Supplier Payment / Accounts Payable — Future Architecture Plan (Phases A–C, Not Implemented)
+## 22. Purchase Invoice / Supplier Payment / Accounts Payable — Future Architecture Plan (Phases A–C)
 
-> **Status: HIGH-LEVEL FUTURE ARCHITECTURE — EXPANDED FOR PLANNING (2026-09-14, expanded from the prior brief roadmap). Purchase Invoice, Supplier Payment, and Accounts Payable/Accounting Integration are NOT implemented anywhere in this repository — no schema, migration, DTO, service, controller, Angular, or test code exists for any of them. This section exists so a future Claude session can prepare an implementation plan without rediscovering the architecture from scratch; it is not itself an implementation plan and does not authorize any code, schema, or migration work. Organized into three sequential phases — PHASE A (Purchase Invoice V1), PHASE B (Supplier Payment V1), PHASE C (Accounts Payable / Accounting Integration) — each requiring its own separate, explicit implementation go-ahead. Sales Invoice/Sales Payment (Sections 20–21) are used throughout as the primary reference for already-proven operational-document behavior, adapted for Purchase rather than copied verbatim; Purchase-specific relationships (PO/GR references, three-way matching) have no Sales precedent and are marked accordingly.**
+> **Status: PHASE A (Purchase Invoice V1) IMPLEMENTED 2026-09-17 — see the "Purchase Invoice V1 implemented" Change History entry for exact detail. PHASE B (Supplier Payment V1) and PHASE C (Accounts Payable / Accounting Integration) remain entirely unimplemented and require their own separate, explicit implementation go-ahead.**
+>
+> Phase A closed three previously-open business decisions through explicit user review before implementation: the finalized status is named **CONFIRMED** (not `SENT`/`POSTED`/`APPROVED`/`ISSUED`); `goodsReceiptItemId` on an invoice line is **optional**, with quantity validation always staying at the aggregate `purchaseOrderItemId` level; and tax is **copied forward** from the referenced `PurchaseOrderItem` (rate/code structure only, recomputed against the invoice's own `lineSubtotal`) rather than re-resolved via `AccountingTaxCodeClient` — meaning Purchase Invoice V1 makes **no external HTTP call of any kind** during line resolution. No approval workflow was added (straight `DRAFT → CONFIRMED`, matching every other document in this module), and no numeric cost/tax/discount tolerance was invented (flag-only, zero tolerance, per the already-documented §22.5 default).
+>
+> `PurchaseOrderItem` gained a new `invoicedQuantity` accumulator, committed only at `CONFIRM` time (never at DRAFT creation/edit) and reversed on `CONFIRMED`-invoice cancellation — both operations aggregate a single invoice's own same-PO-item lines *before* writing, and cancellation correctly rejects if the reversal would drive the value negative. `confirm()` additionally accounts for *other* still-`DRAFT` invoices' quantities under the lock (a stricter guarantee than Goods Receipt's equivalent check), closing the two-concurrent-DRAFT-confirmations race a first-round review of this design identified. Sections 22.2–22.8 below are retained as the original planning-stage proposal for historical reference; where the implemented behavior differs from that proposal, the Change History entry and this status block are authoritative.
+>
+> PHASE B/C's original framing (below, largely unedited from the 2026-09-14 planning pass) still describes Supplier Payment and Accounts Payable as entirely unimplemented — that remains accurate.
 
 ### 22.1 Overview and Phase Breakdown
 
@@ -1417,5 +1688,95 @@ The complete Sales flow — including Sales Invoice and Customer Payment (`Sales
 - **Known limitations/technical debt**: Manual end-to-end browser verification (create/edit a PO with all new fields, confirm/cancel flows, cross-tenant isolation) has not been performed in this session — the currently running Docker containers still serve the previous build. No Goods Receipt V1 (Section 19) work was performed; Goods Receipt's existing compatibility contract (`PurchaseOrderItem.quantity`/`receivedQuantity`/`productId`) was verified unchanged and unaffected, not modified. No architectural conflict was discovered during implementation requiring escalation — none of the "STOP and report" conditions in the task instructions were triggered.
 - **Anything deliberately NOT changed**: Purchase Invoice, Supplier Payment, Accounts Payable, Accounting journal posting (Section 22, Phases A–C) — untouched. Sales Invoice/Sales Payment (Sections 20–21) — untouched, reference-only as already established. Goods Receipt logic/schema (Section 19) — untouched. Currency/multi-currency — not introduced anywhere. `apps/sales-service/**`, `apps/inventory-service/**`, `apps/accounting-service/**` — untouched. `libs/common/src/rbac/permissions.ts` — no new permission constants needed, existing `PURCHASE_ORDERS_*` permissions already cover the expanded payload. PO V1's already-correct calculation pipeline (Section 18.5) — verified correct, not altered.
 - **Commit hash**: `528b078` (`feat(purchase): add purchase order v1`)
+
+### 2026-09-17 — Section 19 rewritten as the APPROVED Goods Receipt V1 architecture (documentation-only, plan doc updated, no code changes)
+- **Phase/feature**: The user approved the final Goods Receipt V1 architecture for implementation *planning* and supplied a nineteen-decision register. Section 19 was rewritten from a pre-approval draft into the authoritative, implementation-ready specification. **Explicitly no implementation**: no schema, migration, DTO, service, controller, gateway, Angular, or test code was written, and nothing was staged or committed.
+- **What was changed**: Before editing, the current implementation was re-read directly — `apps/purchase-service/prisma/schema.prisma` (`GoodsReceipt`/`GoodsReceiptItem`/`PurchaseOrderItem`), `src/goods-receipts/goods-receipts.service.ts`, `dto/goods-receipt.dto.ts`, `dto/goods-receipt-response.ts`, `goods-receipts.controller.ts`, `goods-receipts.service.spec.ts`, `src/inventory/inventory-stock.client.ts`, all four `prisma/migrations/*/migration.sql` files, `apps/api-gateway/src/purchase/goods-receipts.controller.ts` + `dto/goods-receipt.dto.ts`, `apps/web/src/app/features/purchase/goods-receipts/*` + `models/purchase.models.ts`, and `apps/sales-service/src/shipments/shipments.service.ts` as the concurrency reference. Findings were written into the new §19.2 ("already-implemented behavior") so the plan distinguishes what exists from what is being approved.
+  - **Section 19** now contains: §19.0 approved decision register (D1–D19, each mapped to the subsection implementing it); §19.2 verified already-implemented behavior; §19.3 approved architecture (eight snapshot fields incl. `productId`, quantity/UOM invariants, the single Purchase→Inventory conversion boundary, the `post()`-uses-persisted-`baseQuantity` rule, `warehouseId` as a soft Inventory-owned reference); §19.4 the adopted Sales Shipment concurrency pattern with explicit lock sets for `preparePendingReceipt()`/`finalizePosted()` and a stated lock-ordering rule; §19.5 validation (duplicate-line rejection, PO/tenant membership, `conversionFactor` integrity); §19.6 Inventory integration/idempotency; §19.8 the nullable → deterministic backfill → validation → `NOT NULL` migration strategy with a per-column feasibility table derived from the real migration history, a two-branch `baseQuantity` backfill that never fabricates a factor, and two audit queries; §19.9–§19.10 ordered implementation steps and the exact file list; §19.11 an 18-case test plan; §19.12 the expected validation sweep; §19.13 out-of-scope items; §19.14 known limitations; §19.15 implementation status.
+  - **Section 17** was touched in exactly two places for consistency: §17.9 rule 4's "backfill `conversionFactor = 1`" bullet is marked **SUPERSEDED** by §19.8.3/D12 (with its original text preserved inline and its still-valid "never retroactively correct `Stock.quantity`" clause retained), and §17.13's approval status now records that Section 19 is the authoritative specification and lists the four points where it differs from §17's directional design.
+  - **Document header** status line and `Last updated` date updated to reflect "GR V1 architecture APPROVED 2026-09-17, implementation not started and not yet authorized".
+- **Why**: The user explicitly approved the GR V1 architecture and asked for the living plan to reflect it — clearly separating already-implemented behavior, the approved architecture, implementation steps, migration strategy, tests, out-of-scope items, and known limitations — while forbidding any code, schema, migration, or commit work in this task.
+- **Files modified**: `apps/purchase-service/PURCHASE_MODULE_PLAN.md` **only**. No other file in the repository was created, modified, staged, or committed.
+- **Database/schema/migration changes**: **None.** No `schema.prisma` edit, no migration directory, no SQL executed, no database touched.
+- **API changes**: None.
+- **Frontend changes**: None.
+- **Tests added/changed**: None (the test plan is specified in §19.11 but not written).
+- **Verification results**: `git status --short` confirmed only `apps/purchase-service/PURCHASE_MODULE_PLAN.md` changed by this task (alongside the two pre-existing, unrelated working-tree modifications that were already present when the task started: `prisma/migrations/migration_lock.toml`'s comment-text change and `goods-receipts.service.spec.ts`). `git diff --check` reported no whitespace errors. No build/test/migration commands were run — this task changed documentation only.
+- **Architectural decisions**: Where the approved register and the older Section 17 draft conflicted, the register wins and Section 17 was annotated rather than silently rewritten, preserving the audit trail. `productId` was added to the snapshot set specifically so `post()` no longer joins back to `PurchaseOrderItem`. `NOT NULL` is claimed only for `productId`/`productSku`/`productName`, because only those three have `NOT NULL` parent columns in the actual migration history; the UOM columns and `baseQuantity` stay nullable with an explicit safe-failure path (`post()` rejects a `NULL baseQuantity`) rather than a fabricated default of `1`. GR header document fields (GR Number, supplier snapshot, Notes) that appeared in the pre-approval draft were **moved out of scope**, since they are absent from the approved register — flagged in §19.13 for the user to correct on review if that was not intended.
+- **Known limitations/technical debt**: Documented in §19.14 — chiefly the create-timeout/idempotency-key gap (explicitly out of scope per D17), `baseQuantity` remaining nullable at the database level for legacy rows, the un-fixed symmetric Sales UOM gap, and the absence of retroactive correction for historically under-posted stock.
+- **Anything deliberately NOT changed**: All source code, schema, and migrations across every service; `apps/inventory-service/**`, `apps/sales-service/**`, `apps/accounting-service/**`; Sections 18 and 20–23 of this document; and git state (nothing staged, committed, or pushed).
+- **Commit hash**: not committed — awaiting user review.
+
+### 2026-09-17 — Goods Receipt V1 implemented (backend, gateway, Angular)
+- **Phase/feature**: Full implementation of Goods Receipt V1 per Section 19's approved architecture (§19.0's nineteen-decision register), executed after explicit user approval to implement (not merely plan). Closes the Purchase-side UOM/Inventory conversion gap identified in Section 17 — the corresponding Sales-side gap (§17.7) remains separately unimplemented and out of scope, as documented.
+- **What was changed**: Before writing any code, the current implementation was re-read directly per §19.9 step 1 (`schema.prisma`'s `GoodsReceipt`/`GoodsReceiptItem`/`PurchaseOrderItem` models, `goods-receipts.service.ts`, both DTO files, the controller, `inventory-stock.client.ts`, all four existing migration files, the API Gateway controller/DTO, the Angular model/service/component/template, and `ShipmentsService` as the concurrency reference) and confirmed to match §19.2's description exactly — nothing had changed since the plan was written, and nothing was assumed correct without this re-check.
+  - **Schema/migration**: `GoodsReceiptItem` gained `productId`/`productSku`/`productName` (all `NOT NULL`, backfilled from and matching the parent `PurchaseOrderItem`'s own `NOT NULL` columns), `unitOfMeasureId`/`uomCode`/`uomName`/`conversionFactor` (nullable, mirroring the parent's own nullable UOM columns), and `baseQuantity` (nullable at the DB level for legacy-row safety, never written as `NULL` by the service). New migration `20260917120000_gr_v1_uom_snapshot` follows the exact nullable → deterministic backfill → validation → `NOT NULL` shape specified in §19.8.2: step 1 (the `ADD COLUMN` block) was generated via `prisma migrate diff` against the live schema and reproduced verbatim, not hand-edited; steps 2–4 (backfill from the parent PO item, a `DO $$` validation block that aborts the whole migration transaction if any row is left without a backfillable product snapshot, and `SET NOT NULL` on exactly the three columns the feasibility table in §19.8.3 proves safe) were hand-written and hand-reviewed. The migration never fabricates a `conversionFactor` (D12): a `PENDING_STOCK` legacy row whose PO line has a UOM selected but no frozen factor is deliberately left with `baseQuantity = NULL` rather than guessing `1`.
+  - **purchase-service**: `goods-receipts.service.ts` rewritten — `preparePendingReceipt()` now takes `SELECT ... FOR UPDATE` locks on `purchase_orders` then `purchase_order_items` (raw SQL, mirroring `ShipmentsService.preparePendingShipment()`), sums other in-flight `PENDING_STOCK` receipts via a new `pendingQuantitiesByPurchaseOrderItem()` helper (exact mirror of `pendingQuantitiesByOrderItem()`), rejects duplicate `purchaseOrderItemId` values within one request before any quantity math (D13), validates PO/tenant membership (D14, via the existing tenant-scoped `itemsById` lookup), resolves `conversionFactor` via the existing `parseConversionFactor()` (reused from `common/decimal.ts`, added during PO V1) — never defaulting to `1` unless the PO line genuinely has no UOM selected at all — and persists the full product/UOM snapshot plus `baseQuantity = quantity × conversionFactor` (rounded to 6 decimal places, HALF_UP) on each new `GoodsReceiptItem` row. `post()` no longer joins back to `PurchaseOrderItem` for `productId`; it rebuilds Inventory lines strictly from each item's persisted `productId`/`baseQuantity`, rejecting with `ConflictException` (not a silent fallback) if `baseQuantity` is `NULL`. `finalizePosted()` gained its own lock set (`goods_receipts` → `purchase_orders` → `purchase_order_items`, in that order) but its `receivedQuantity`/PO-status bookkeeping logic is byte-for-byte unchanged — it still accumulates in commercial-UOM terms from `item.quantity`, never `item.baseQuantity`. `dto/goods-receipt.dto.ts` gained a `@NoDuplicatePurchaseOrderItems()` custom class-validator decorator on the `items` array (400 at the DTO layer, ahead of the service-layer defense-in-depth check). `dto/goods-receipt-response.ts` now serializes the eight new item fields, using the same conditional `quantityToString(...) : null` pattern already established for `PurchaseOrderItem.conversionFactor` in `purchase-order-response.ts`. `goods-receipts.controller.ts`/`goods-receipts.module.ts` were not modified — no route or DI changes were needed.
+  - **API Gateway**: `dto/goods-receipt.dto.ts` mirrors the same duplicate-line validator and the eight new `GoodsReceiptItemDto` response fields with Swagger decorators. `goods-receipts.controller.ts` was not modified — it already forwards the full DTO body/response through via `PurchaseForwardService` (unchanged).
+  - **Angular**: `purchase.models.ts`'s `GoodsReceiptItem` interface extended with the eight new fields. `goods-receipt-list.component.html`: the create-modal line table gained a UOM column and an inline UOM suffix on the quantity input (both read from the *selected PO line's own* UOM — informational context only, computed nowhere client-side); the detail-modal line table now shows Product (from the response's own `productSku`/`productName` snapshot, replacing the old `poItemProduct()` PO-join lookup for that view), UOM, received quantity, and a read-only "Base qty (to Inventory)" column with an explanatory note, plus a visible "missing — post blocked" marker for the (expected-empty-in-practice) legacy-`NULL`-`baseQuantity` case. The UI never computes `quantity × conversionFactor` itself and never asks the operator for a base-UOM quantity, matching §19.3.3/§19.9 step 11 exactly. `goods-receipt-list.component.ts` and `goods-receipt.service.ts` required no changes — both were already typed generically enough to carry the extended model through.
+- **Why**: The user explicitly approved Section 19's architecture for implementation, so Goods Receipt V1 closes the Purchase-side Inventory under-posting gap (Section 17.2) for alternate-UOM lines, while adopting Sales' proven concurrency pattern to close the over-receipt race Section 17.6 identified, and preserving every already-implemented PO V1/Supplier/Inventory/Sales/Accounting behavior untouched.
+- **Files modified**:
+  - Backend (purchase-service): `prisma/schema.prisma` (extended `GoodsReceiptItem` only); new migration `prisma/migrations/20260917120000_gr_v1_uom_snapshot/`; `src/goods-receipts/goods-receipts.service.ts` (rewritten per above); `src/goods-receipts/dto/goods-receipt.dto.ts` (duplicate-line validator); `src/goods-receipts/dto/goods-receipt-response.ts` (extended); `src/goods-receipts/goods-receipts.service.spec.ts` (extended, +20 tests covering all 18 cases in §19.11, some split into clearly-labeled sub-cases for independent assertions).
+  - API Gateway: `src/purchase/dto/goods-receipt.dto.ts` (extended request/response DTOs, Swagger, duplicate-line validator). `src/purchase/goods-receipts.controller.ts` was not modified.
+  - Angular (apps/web): `src/app/features/purchase/models/purchase.models.ts` (extended `GoodsReceiptItem`); `src/app/features/purchase/goods-receipts/goods-receipt-list.component.html` (UOM columns, base-qty display, product snapshot in the detail view).
+  - Nothing under `apps/purchase-service/src/purchase-orders/**`, `apps/purchase-service/src/suppliers/**`, `apps/inventory-service/**`, `apps/sales-service/**`, `apps/accounting-service/**`, `apps/master-data-service/**`, `libs/common/**`, or any already-applied migration was touched.
+- **Database/schema/migration changes**: New migration `20260917120000_gr_v1_uom_snapshot`, generated via `prisma migrate diff` (step 1 only, against the live local `purchase_db`) and hand-completed with the §19.8.2 backfill/validation/`SET NOT NULL` steps, applied via `prisma migrate deploy`. `purchase_orders`/`purchase_order_items`/`goods_receipts`/`goods_receipt_items` were confirmed via direct `SELECT count(*)` to hold **zero rows both before and after** this migration — the backfill/validation logic ran (and is written to be correct against a populated database per §19.8.3's explicit instruction not to simplify it away on the grounds of an empty local DB) but had no rows to act on. The two audit queries from §19.8.3 were run post-migration and both returned zero rows (no `NULL baseQuantity` rows; no historically-under-posted `POSTED` receipts) — expected, given the empty tables. No `TRUNCATE`, `DELETE`, or rewrite of any existing `quantity`/`receivedQuantity` value occurred (D11). `suppliers`/`purchase_orders` and every other table were otherwise untouched. Already-applied migrations (`20260819120000_purchase_domain_v1` through `20260914100000_po_v1_document_fields`) were not edited — confirmed via `_prisma_migrations`, which now lists this migration as the fifth, appended after them.
+- **API changes**: `POST /v1/goods-receipts` now rejects a request containing duplicate `purchaseOrderItemId` values (400). Response shape for each `GoodsReceiptItem` gains `productId`, `productSku`, `productName`, `unitOfMeasureId`, `uomCode`, `uomName`, `conversionFactor`, `baseQuantity`. No route or permission changes — the existing `GOODS_RECEIPTS_CREATE`/`GOODS_RECEIPTS_READ` permissions already cover the expanded payload, exactly as §19.2 anticipated.
+- **Frontend changes**: Goods Receipt create modal now shows each line's UOM and labels the quantity input with that UOM; the detail view now shows Product, UOM, received quantity, and the computed base quantity actually sent to Inventory, with an explanatory note that the base quantity is informational-only.
+- **Tests added/changed**: `goods-receipts.service.spec.ts` rewritten with 23 `it()` blocks (up from 3) covering every case in §19.11: base-UOM and alternate-UOM `baseQuantity` computation (cases 1–2); full snapshot-copy assertion (3); partial and multiple-partial receipts with commercial-UOM `receivedQuantity` accumulation and PO status transitions (4); frozen-conversionFactor-survives-a-hypothetical-later-master-data-edit (5, by construction — the service never calls any UOM-resolution client at receipt time, so there is nothing to re-resolve); `post()` retry rebuilding strictly from persisted `baseQuantity` (6); `post()` rejecting a `NULL baseQuantity` legacy row (7); duplicate-line rejection (8); cross-PO and cross-tenant `purchaseOrderItemId` rejection (9, 9b); cross-tenant/missing-receipt 404s on `getById`/`post` (10, 10b); over-receipt against `receivedQuantity` (11, the original spec, retained); over-receipt against other in-flight `PENDING_STOCK` receipts (12, the Section 17.6 race); two same-PO-item lines in one DTO, shown to be rejected as duplicates before the quantity-overflow arithmetic path is ever reached (13, with a comment explaining why this is now a *stronger* guarantee than Sales' pending-map-only approach); lock-ordering assertions for both `preparePendingReceipt()` (14) and `finalizePosted()` (14b), using a `sqlText()` helper to normalize Prisma's two different `$queryRaw` call shapes (a `Prisma.Sql` object vs. a raw tagged-template strings array) for readable assertions; missing/zero/negative `conversionFactor` on a UOM-selected line, each rejected without ever defaulting to `1` (15a/b/c); a legacy no-UOM-at-all PO line accepted with an implicit factor of 1 (16); idempotent `post()` of an already-`POSTED` receipt (17, the original spec, retained); and a full `PENDING_STOCK → POSTED` regression check including the `goods-receipt.posted` audit payload (18). All tests use hand-built plain-object Prisma/audit mocks (no `jest-mock-extended`, no `Test.createTestingModule`), matching repo convention.
+- **Verification results** (§19.12, run in order, actual results):
+  1. `npx prisma format && npx prisma validate --schema=apps/purchase-service/prisma/schema.prisma` — passed both times (before and after generating the migration).
+  2. Generated `migration.sql` hand-reviewed: additive-only, all four §19.8.2 steps present in order, no `DROP`/`TRUNCATE`/`DELETE`/rename, no rewrite of existing `quantity`/`receivedQuantity` values.
+  3. Applied via `prisma migrate deploy` (schema-only `prisma migrate dev` was not attempted non-interactively, following the same precedent as the PO V1 document-fields migration) against local `purchase_db`; `npx prisma generate` succeeded.
+  4. Post-migration DB checks: both §19.8.3 audit queries returned 0 rows; `SELECT count(*)` on all four purchase tables was identical before and after (0/0/0/0 both times) — confirmed no row was lost, fabricated, or altered.
+  5. `npx jest apps/purchase-service` → **70/70 passed** (up from 50; +20 net new tests, all in `goods-receipts.service.spec.ts`).
+  6. `npx jest apps/api-gateway/src/purchase` → **3/3 passed** (unaffected guard tests, confirming the gateway DTO changes didn't break existing coverage).
+  7. `npx tsc --noEmit -p apps/purchase-service/tsconfig.app.json` → clean (exit 0). `npx tsc --noEmit -p apps/api-gateway/tsconfig.app.json` → clean (exit 0).
+  8. `ng build --configuration=development` for `apps/web` → exit 0, no TypeScript/template errors (only the pre-existing, unrelated Sass `darken()` deprecation warnings from the theme stylesheet).
+  9. `git diff --check` → exit 0, no whitespace errors (only the pre-existing LF/CRLF line-ending warnings on Windows, same as every prior entry).
+  10. Manual browser verification was **not** performed in this session (Docker containers still serve the previous build) — see Known Limitations, same disclosure pattern as every prior implementation entry.
+- **Architectural decisions**: A stray `prisma format` side-effect that re-aligned unrelated whitespace on two pre-existing `PurchaseOrder` field declarations was caught in review and reverted before finalizing, so the schema diff touches only `GoodsReceiptItem` — disclosed here rather than silently left in, per this document's "no unrelated cleanup" convention. `parseConversionFactor()` was reused as-is from PO V1 rather than duplicated, per Section 16's "extend existing patterns instead of inventing new ones" rule. `baseQuantity` is rounded to 6 decimal places (`ROUND_HALF_UP`) at the application layer rather than left to implicit database rounding on insert, for deterministic, environment-independent behavior. Test case 13 (§19.11) is annotated to explain that D13's unconditional duplicate rejection makes the literal "two lines jointly exceeding" arithmetic path unreachable for same-PO-item lines — the test still asserts the required outcome (rejection) and documents why the mechanism differs from Sales' precedent.
+- **Known limitations/technical debt**: Everything specified in §19.14 remains true post-implementation and is restated here for completeness rather than re-derived: (1) the `create()`/retry timeout-idempotency-key gap (D17, explicitly out of scope) — a client retry after a timeout can still produce a second `GoodsReceipt` with a different Inventory `referenceId`, though the new locking now correctly bounds the total to the ordered quantity; (2) `baseQuantity` and the UOM snapshot columns remain nullable at the database level for legacy-row safety, with `NOT NULL` promotion deferred to a future migration pending a per-environment audit; (3) historically under-posted stock (pre-fix `POSTED` receipts, none exist in this local DB) is not retroactively corrected, by design (D11); (4) Sales' symmetric alternate-UOM conversion gap (§17.7) remains unfixed and out of scope. Manual end-to-end browser verification (create a receipt against an alternate-UOM PO line, confirm Inventory stock increases by `quantity × conversionFactor`, perform a partial receipt, retry `/post` after a simulated Inventory outage, confirm cross-tenant isolation) has not been performed in this session — the currently running Docker containers still serve the previous build.
+- **Anything deliberately NOT changed**: `apps/inventory-service/**` (D7) — confirmed untouched by `git diff --stat`. `apps/sales-service/**` (D8) — confirmed untouched. `apps/accounting-service/**`, `apps/master-data-service/**` — untouched. Purchase Invoice/AP/Supplier Payment (Section 22, D9) — untouched. `apps/purchase-service/src/purchase-orders/**`, `apps/purchase-service/src/suppliers/**` (D19) — confirmed untouched by `git diff --stat`; PO V1's calculation pipeline, numbering, and snapshot rules were not touched or re-verified beyond confirming their test suite still passes unmodified. `warehouseId` — left exactly as the existing plain soft `String @db.Uuid` reference, no Purchase-side warehouse entity or FK added (D18). Every already-applied migration — confirmed untouched via `git diff --stat` and `_prisma_migrations`. `libs/common/src/rbac/permissions.ts` — no new permission constants needed.
+- **Commit hash**: (not yet committed)
+
+### 2026-09-17 — Purchase Invoice V1 (Phase A) implemented (backend, gateway, Angular)
+- **Phase/feature**: Full implementation of Purchase Invoice V1 — Section 22, Phase A — the next operational document in the Purchase flow (`Supplier → Purchase Order → Goods Receipt → Purchase Invoice → Supplier Payment`), executed after a multi-round architecture review that resolved every open business decision Section 22's original planning text had explicitly left unanswered, plus two correctness corrections caught during that review before any code was written. Supplier Payment (Phase B) and Accounts Payable/Accounting Integration (Phase C) remain entirely out of scope and unimplemented.
+- **What was changed**: Before writing any code, the current repo state was re-read directly — Section 19 (completed Goods Receipt V1), Section 22.1–22.18, the current `PurchaseOrder`/`PurchaseOrderItem`/`GoodsReceiptItem` schema and `purchase-orders.service.ts`'s `mapLines()`/`sumTotals()`/`snapshotSupplier()` pipeline, and `apps/sales-service`'s `SalesInvoice`/`SalesPayment` schema, service, and controller as architectural precedent (confirmed Sales Invoice has **no** quantity-accumulation or three-way-matching concept at all — it clones a whole `SalesOrder` 1:1 — so Purchase Invoice's concurrency/matching design was adapted from Goods Receipt's locking pattern instead, not copied from Sales).
+  - **Decisions resolved by explicit review before implementation** (Section 22 had deliberately left these open): finalized status name is **`CONFIRMED`** (not `SENT`/`POSTED`/`APPROVED`/`ISSUED`); `goodsReceiptItemId` on an invoice line is **optional**, quantity validation always staying at the aggregate `purchaseOrderItemId` level; tax is **copied forward** from the referenced `PurchaseOrderItem` (rate/code structure only, recomputed against the invoice's own `lineSubtotal` — never a verbatim dollar-amount copy, since the invoice's commercial values can legitimately differ from the PO's) rather than re-resolved via `AccountingTaxCodeClient`; **no approval workflow** was added (straight `DRAFT → CONFIRMED`); **no numeric tolerance** was invented for cost/tax/discount mismatch (flag-only, zero tolerance, per Section 22.5's own already-documented default).
+  - **Two corrections applied before implementation, both caught during architecture review**: (1) `confirm()`'s quantity check must account for **other still-DRAFT invoices'** quantities for the same PO item, not just the already-committed `invoicedQuantity`, under the `purchase_invoices → purchase_orders → purchase_order_items` lock — closing a race where two independently-created DRAFT invoices could each individually pass validation and then jointly over-invoice if confirmed back-to-back without this check (stricter than Goods Receipt's equivalent, which only re-checks the committed value under lock — a deliberate, disclosed trade-off: a large stale DRAFT invoice can now block a different invoice's confirmation until edited down or cancelled). (2) `CONFIRMED`-invoice cancellation must **aggregate** a cancelled invoice's own lines by `purchaseOrderItemId` **before** reversing `invoicedQuantity` — a first draft of this logic computed `newInvoicedQuantity` per line against a value that would go stale across two lines of the same PO item, which would have silently produced the wrong result (e.g. lines of 4 and 3 against a starting `invoicedQuantity` of 7 would have landed on 4, not 0) rather than throwing; the corrected version sums same-PO-item lines first, then issues exactly one `purchaseOrderItem.update()` per affected PO item.
+  - **Schema/migration**: `PurchaseOrderItem` gained `invoicedQuantity` (`Decimal(19,6) NOT NULL DEFAULT 0` — safe unconditionally, since `0` truthfully means "never invoiced" for any pre-existing row, matching Section 22.15's explicit fallback rule). New models `PurchaseInvoice`, `PurchaseInvoiceItem`, `PurchaseInvoiceItemTaxComponent`, and enums `PurchaseInvoiceStatus` (`DRAFT|CONFIRMED|CANCELLED`)/`PurchaseInvoicePaymentStatus` (`UNPAID|PARTIALLY_PAID|PAID`) — field sets exactly matching the header/line lists specified for this task, with `balanceDue` deliberately **not** persisted (always `total - amountPaid`, mirroring `SalesInvoice`). New migration `20260917150000_purchase_invoice_v1`, generated verbatim via `prisma migrate diff` (no hand-written backfill was needed — the one altered column is unconditionally-safe `NOT NULL DEFAULT 0`, unlike Goods Receipt V1's migration, which needed a genuine nullable-then-tighten sequence for columns with no safe universal default).
+  - **purchase-service**: New `src/purchase-invoices/` module — `purchase-invoices.service.ts` implements `create()`/`update()`/`confirm()`/`cancel()`/`list()`/`getById()`. `resolveLines()` (the `mapLines()` analogue) validates each line's `purchaseOrderItemId` (must belong to the selected PO + tenant) and, when supplied, its `goodsReceiptItemId` (existence + tenant via the `findFirst` `where` clause, parent-GR `purchaseOrderId` match, and the GR item's own `purchaseOrderItemId` cross-check against the invoice line) — all local DB reads, **zero external HTTP calls**, since UOM is never re-resolved (Section 17.4 invariant 5, extended here) and tax is copied forward rather than re-resolved. Snapshot source is explicit and field-scoped: supplier fields from the PO's own frozen header snapshot; product/UOM fields from `GoodsReceiptItem` when a GR reference is supplied, otherwise from `PurchaseOrderItem`; tax rate/code structure always from `PurchaseOrderItem`. A duplicate-line rule rejects an exact `(purchaseOrderItemId, goodsReceiptItemId ?? null)` pair while explicitly *permitting* two lines against the same PO item with different GR references (a deliberate divergence from Goods Receipt's blanket duplicate rule, since GR-reference is optional here) — quantities across such same-PO-item lines are correctly accumulated against the shared bound, both in `assertAvailableQuantity()`'s soft check and in `confirm()`'s hard check. `assertAvailableQuantity()` is the shared three-way quantity gate (used unlocked via `this.prisma` at create()/update() time as an advisory fail-fast check, and locked via `tx` at `confirm()` time as the authoritative check) checking `committed invoicedQuantity + other-DRAFT-invoices' quantity + this invoice's own running total + this line ≤ receivedQuantity` (primary) and `≤ orderedQuantity` (defense-in-depth). `draftQuantitiesByPurchaseOrderItem()` mirrors `GoodsReceiptsService.pendingQuantitiesByPurchaseOrderItem()` exactly, adapted for DRAFT invoices. `cancel()` on a DRAFT invoice touches no PO/PO-item table at all (nothing was ever committed); on a CONFIRMED invoice it takes the same lock order as `confirm()` (`purchase_invoices → purchase_orders → purchase_order_items`, so the two operations can never deadlock against each other), rejects if `amountPaid > 0` (a forward-compatible guard — Phase A never sets this field itself), aggregates the cancelled invoice's own lines per PO item, and rejects with `ConflictException` rather than silently clamping if a reversal would drive `invoicedQuantity` negative. Three-way cost/tax/discount matching (Section 22.5) is computed **on read**, not persisted: `toPurchaseInvoiceResponse()` now optionally accepts a `purchaseOrderItemId → PurchaseOrderItem` map and attaches `costMismatch`/`discountMismatch`/`taxMismatch` booleans per line (flag-only, zero tolerance, never blocks); the service's new `toResponse()`/`toResponses()` helpers batch this lookup in a single `id IN (...)` query regardless of how many invoices/lines are involved, so `list()` never does N+1 queries. `dto/purchase-invoice.dto.ts`/`dto/purchase-invoice-response.ts` follow the same shape/validation conventions as `goods-receipt.dto.ts`/`purchase-order-response.ts`. `purchase-invoices.module.ts` needs no `InventoryClientModule`/`AccountingClientModule` import at all (a direct, disclosed consequence of the GR-optional and tax-copied-forward decisions) — `PrismaService`/`IdentityAuditClient` are already `@Global()`.
+  - **One additive change to the existing PurchaseOrder response, disclosed**: `purchase-order-response.ts` now also exposes `invoicedQuantity` per item (read-only; only `purchase-invoices.service.ts` writes it) — required so the Angular Purchase Invoice screen can show received-vs-already-invoiced-vs-remaining without a second query. `purchase-orders.service.ts` itself (calculation pipeline, lifecycle, numbering) was **not** touched; the existing `purchase-orders.service.spec.ts` mock builder was extended with a default `invoicedQuantity` field (a required, purely mechanical fix — the new response field would otherwise be `undefined` in every existing PO test).
+  - **API Gateway**: New `dto/purchase-invoice.dto.ts` and `purchase-invoices.controller.ts`, mirroring `purchase-orders.controller.ts`'s exact structure (thin forward-only routes, `RequirePermissions`, Swagger decorators) — including the three mismatch-flag fields for documentation completeness. `purchase-order.dto.ts`'s response DTO also gained `invoicedQuantity` to match the backend. Registered in `purchase-admin.module.ts`.
+  - **Angular**: New `purchase-invoices/` feature — `purchase-invoice.service.ts` (list/getById/create/update/confirm/cancel), `purchase-invoice-list.component.ts`/`.html` (list + create modal with PO-line selection showing ordered/received/already-invoiced/remaining and an optional GR-item picker per line + detail modal with confirm/cancel actions and inline cost/tax/discount-mismatch badges). `purchase.models.ts` extended with `PurchaseInvoice`/`PurchaseInvoiceItem`/request types and the new `invoicedQuantity` field on `PurchaseOrderItem`. Registered in `purchase.module.ts` (route + declaration) and `sidebar.component.html` (nav link).
+  - **Permissions**: New `PURCHASE_INVOICES_CREATE/READ/UPDATE/CONFIRM/CANCEL` constants added to `libs/common/src/rbac/permissions.ts`, `apps/identity-service/prisma/seed.ts` (auto-attaches to the admin role via the existing seed loop — the seed script was re-run against local `identity_db` and the five new rows confirmed present), and `apps/web/src/app/core/permissions/permissions.constants.ts`.
+- **Why**: The user approved Purchase Invoice V1's architecture across three review rounds (initial plan, a two-point correction to CONFIRM concurrency and CONFIRMED cancellation, and a final correction to cancellation aggregation, GR-item validation, and explicit snapshot sourcing), then explicitly approved implementation of that final architecture and its 31-case test plan.
+- **Files modified**:
+  - Backend (purchase-service): `prisma/schema.prisma` (extended `PurchaseOrderItem`; new `PurchaseInvoice`/`PurchaseInvoiceItem`/`PurchaseInvoiceItemTaxComponent` + 2 enums); new migration `prisma/migrations/20260917150000_purchase_invoice_v1/`; new `src/purchase-invoices/` (module, controller, service, dto/purchase-invoice.dto.ts, dto/purchase-invoice-response.ts, service.spec.ts); `src/purchase.module.ts` (registers the new module); `src/purchase-orders/dto/purchase-order-response.ts` (adds `invoicedQuantity`); `src/purchase-orders/purchase-orders.service.spec.ts` (mock default field, mechanical).
+  - API Gateway: new `src/purchase/dto/purchase-invoice.dto.ts`, `src/purchase/purchase-invoices.controller.ts`; `src/purchase/purchase-admin.module.ts` (registers it); `src/purchase/dto/purchase-order.dto.ts` (adds `invoicedQuantity`).
+  - Permissions: `libs/common/src/rbac/permissions.ts`, `apps/identity-service/prisma/seed.ts`, `apps/web/src/app/core/permissions/permissions.constants.ts`.
+  - Angular (apps/web): new `src/app/features/purchase/purchase-invoices/` (service, component, template); `src/app/features/purchase/models/purchase.models.ts` (extended); `src/app/features/purchase/purchase.module.ts` (route/declaration); `src/app/Layout/Components/sidebar/sidebar.component.html` (nav link).
+  - Nothing under `apps/purchase-service/src/purchase-orders/purchase-orders.service.ts` (logic itself), `apps/purchase-service/src/suppliers/**`, `apps/purchase-service/src/goods-receipts/**`, `apps/purchase-service/src/inventory/**`, `apps/purchase-service/src/accounting/**`, `apps/inventory-service/**`, `apps/sales-service/**`, `apps/accounting-service/**`, `apps/master-data-service/**`, or any already-applied migration was touched.
+- **Database/schema/migration changes**: New migration `20260917150000_purchase_invoice_v1`, applied via `prisma migrate deploy` against local `purchase_db` — additive-only (`CREATE TYPE` x2, `ALTER TABLE purchase_order_items ADD COLUMN invoicedQuantity ... NOT NULL DEFAULT 0`, `CREATE TABLE` x3, indexes, FKs). No hand-written backfill/validation steps were needed (unlike Goods Receipt V1's migration) since the one altered column has a universally-safe default. `SELECT count(*)` on all six purchase-domain tables was identical before and after (all zero, both times) — no row was lost, fabricated, or altered. `_prisma_migrations` confirms this is the sixth migration, appended after `20260917120000_gr_v1_uom_snapshot`; no existing migration file was edited.
+- **API changes**: New `POST/GET/PATCH /v1/purchase-invoices[/:id]`, `POST /v1/purchase-invoices/:id/confirm`, `POST /v1/purchase-invoices/:id/cancel`, gated by the five new `purchase-invoices.*` permissions. `GET /v1/purchase-orders[/:id]`'s existing response gains `items[].invoicedQuantity` (additive, read-only).
+- **Frontend changes**: New "Purchase Invoices" screen under Purchase — list with status/total/balance-due, create modal with per-PO-line quantity/unit-cost/discount/optional-GR-item inputs and live ordered/received/already-invoiced/remaining columns, detail view with per-line cost/tax/discount-mismatch badges and Confirm/Cancel actions.
+- **Tests added/changed**: `purchase-invoices.service.spec.ts` — **41 `it()` blocks** covering all 31 approved cases (several split into clearly-labeled sub-cases for independent assertions, matching the convention already established for Goods Receipt V1's spec): DRAFT creation against valid PO/GR (1), DRAFT-vs-CONFIRM-time `invoicedQuantity` timing (2), multi-GR lines (3), over-received/over-ordered rejection (4, 5), the two-concurrent-DRAFT-confirms race (6), a DRAFT blocked purely by another DRAFT's outstanding quantity (7), same-PO-item multi-line accumulation both at create-time and confirm-time (8, plus a dedicated confirm aggregation test), exact-duplicate-pair rejection with a non-duplicate same-PO-item-different-GR contrast (9, 9b), cross-PO/cross-tenant/invalid-GR-reference rejection in all four required shapes (10a–10e), snapshot preservation and no-live-refetch-by-construction (11, 12), cost/tax/discount mismatch flags including the always-false-in-practice tax case explained by tax being copied rather than independently entered (13, 14, 15), full calculation-flow verification with an exact worked example (16), tax-component persistence (18), default `paymentStatus`/`amountPaid` (19), DRAFT editing and CONFIRMED-locks-editing (15-draft, 16-draft), lock-ordering assertions for `confirm()` (14, reusing the GR spec's `sqlText()` normalization pattern), DRAFT cancellation touching no PO/PO-item table (19-cancel), single-line and the corrected two-line-same-PO-item aggregate CONFIRMED cancellation with a follow-up invoice proving the freed capacity is real (20, plus the dedicated aggregation regression test), the `amountPaid > 0` cancellation guard (21), the negative-`invoicedQuantity` integrity guard (22), and a batched-`list()` regression test confirming the mismatch lookup never runs N+1 (25). All hand-built plain-object Prisma/audit mocks, matching repo convention.
+- **Verification results** (run in order, actual results):
+  1. `npx prisma format && npx prisma validate --schema=apps/purchase-service/prisma/schema.prisma` — passed.
+  2. Generated `migration.sql` reviewed: additive-only, no `DROP`/`TRUNCATE`/`DELETE`/rename, no rewrite of existing values.
+  3. Applied via `prisma migrate deploy` against local `purchase_db`; `npx prisma generate` succeeded.
+  4. Post-migration DB checks: `SELECT count(*)` on all six purchase tables identical before/after (0 each, both times).
+  5. `npx jest apps/purchase-service` → **111/111 passed** (up from 70 after Goods Receipt V1; +41 net new tests, all in `purchase-invoices.service.spec.ts`). One pre-existing PO test-mock gap (missing `invoicedQuantity` default) was found and fixed as a mechanical consequence of the additive PO-response change, not a logic change.
+  6. `npx jest apps/api-gateway/src/purchase` → **3/3 passed**.
+  7. `npx jest apps/identity-service apps/api-gateway` (broader regression sweep, since `permissions.ts`/`seed.ts` are shared files) → 104/105 passed; the one failure (`api-gateway.module.spec.ts`, a `MASTER_DATA_SERVICE_URL` environment-validation error) was confirmed via `git stash`/re-run to fail **identically on pristine `master`** — a pre-existing, environment-specific issue unrelated to this change, not newly introduced.
+  8. `npx tsc --noEmit -p apps/purchase-service/tsconfig.app.json` → clean. `npx tsc --noEmit -p apps/api-gateway/tsconfig.app.json` → clean.
+  9. `ng build --configuration=development` for `apps/web` → exit 0, no TypeScript/template errors (only the pre-existing, unrelated Sass `darken()` deprecation warnings).
+  10. `git diff --check` → exit 0, no whitespace errors (only the pre-existing LF/CRLF warnings on Windows).
+  11. Manual browser verification was **not** performed in this session — see Known Limitations, same disclosure pattern as every prior implementation entry.
+- **Architectural decisions**: Where Section 22's original planning text and the final, reviewed architecture differ, the Change History/status-block text is authoritative and Sections 22.2–22.8 are left as the historical planning record rather than rewritten in place, mirroring how Section 17 was annotated (not silently rewritten) when Section 19 superseded it. `resolveLines()` deliberately performs zero external HTTP calls — a direct, disclosed structural consequence of the GR-optional and tax-copied-forward decisions, not an independent simplification. Mismatch flags are computed on read (via a batched `id IN (...)` PO-item lookup) rather than persisted as new columns, since Section 22.4's approved field list did not include them — the more conservative, less-invasive reading of "computed on read" from the approved plan. `invoiceNumber` uses a `PINV-` prefix, distinct from Sales Invoice's `INV-` and PO's `PO-` (a naming choice, not specified by any approval round, easily changed).
+- **Known limitations/technical debt**: (1) A large, stale, or abandoned DRAFT invoice reserves capacity against its PO item's `receivedQuantity` the moment it exists, and can block a *different* invoice's `confirm()` even though the blocking DRAFT was never itself confirmed — an explicitly approved, deliberate trade-off (favoring stronger over-invoicing prevention over confirm-time permissiveness) with no automatic DRAFT expiry/cleanup in V1; an operator must edit down or cancel a stale DRAFT to free the capacity it holds. (2) `taxMismatch` can never actually be triggered by user input in this exact implementation, since tax is entirely PO-derived with no independent-entry path in `CreatePurchaseInvoiceItemDto` — the field exists for structural completeness/forward-compatibility and is verified to correctly report `false` in the normal case. (3) No accounting/journal posting, no Accounts Payable, no Supplier Payment (Phase B) — Phase A is operational-only by design (Section 22.11). (4) No currency/exchange-rate support, unchanged from every other section of this document. (5) Manual end-to-end browser verification (create an invoice against a PO with a GR, confirm it, verify `invoicedQuantity` on the PO, cancel it, verify reversal, confirm cross-tenant isolation) has not been performed in this session — the currently running Docker containers still serve the previous build.
+- **Anything deliberately NOT changed**: `apps/inventory-service/**`, `apps/sales-service/**`, `apps/accounting-service/**`, `apps/master-data-service/**` — confirmed untouched via `git diff --stat`. `apps/purchase-service/src/purchase-orders/purchase-orders.service.ts` (the PO calculation/lifecycle logic itself, as opposed to its response DTO) — confirmed untouched. `apps/purchase-service/src/suppliers/**`, `apps/purchase-service/src/goods-receipts/**`, `apps/purchase-service/src/inventory/**`, `apps/purchase-service/src/accounting/**` — confirmed untouched. Every already-applied migration, including `20260917120000_gr_v1_uom_snapshot` from the prior session — confirmed untouched via `git diff --stat` and `_prisma_migrations`. Supplier Payment (Phase B) and Accounts Payable/Accounting Integration (Phase C) — untouched, still fully unimplemented.
+- **Commit hash**: (not yet committed)
 
 <!-- Next entry goes here for the next Purchase-module change. -->

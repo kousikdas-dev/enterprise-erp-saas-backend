@@ -26,10 +26,20 @@ enum StockMovementType {
   ADJUSTMENT_OUT
   // Phase 3.4 (Inventory Return Support) — stock coming back in against a
   // specific, identified original SALE movement (see
-  // StockMovement.originalMovementId). Never used for Purchase Return
-  // (deferred to a later phase, which would add its own PURCHASE_RETURN
-  // value rather than overload this one).
+  // StockMovement.originalMovementId).
   SALE_RETURN
+  // Phase 3.5 (Purchase Return) — stock going back out to a supplier against
+  // a specific, identified original PURCHASE movement. Subtractive (mirrors
+  // an issue), unlike SALE_RETURN's additive direction — see
+  // StockReturnsService's RETURN_CONFIG.
+  PURCHASE_RETURN
+  // Phase 3.6 (Purchase Return reversal) — undoes a specific, identified
+  // PURCHASE_RETURN movement: stock comes back in (additive, mirrors a
+  // receipt), costed at that PURCHASE_RETURN movement's own unitCost
+  // verbatim. The only StockMovementType other than Opening Stock's own
+  // reversal to ever set StockMovement.reversesMovementId — see
+  // StockReturnsService's RETURN_CONFIG.
+  PURCHASE_RETURN_REVERSAL
 }
 
 // Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is
@@ -238,11 +248,14 @@ model StockMovement {
   originalMovementId String? @db.Uuid
 
   // Running total of quantity already returned AGAINST this movement —
-  // meaningful only on SALE (and, in a later phase, PURCHASE) rows; stays 0
-  // on every other row, including SALE_RETURN rows themselves (a return is
-  // never itself returned against). Enforced under a FOR UPDATE lock on
+  // meaningful on SALE and PURCHASE rows (returns) and, since Phase 3.6, on
+  // PURCHASE_RETURN rows too (a reversal is itself a "return against" the
+  // PURCHASE_RETURN movement, using this same generic field/check). Stays 0
+  // on SALE_RETURN and PURCHASE_RETURN_REVERSAL rows — neither is ever
+  // itself returned/reversed against. Enforced under a FOR UPDATE lock on
   // this row: returnedQuantity + returnQty <= quantity, atomically, so
-  // concurrent partial returns against the same sale can never overshoot.
+  // concurrent partial returns/reversals against the same original movement
+  // can never overshoot.
   returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
 
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)

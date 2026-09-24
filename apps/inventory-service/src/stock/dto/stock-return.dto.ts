@@ -18,17 +18,23 @@ export class StockReturnLineDto {
   @IsString()
   quantity!: string;
 
-  // Phase 3.4 (Inventory Return Support) — the AUTHORITATIVE selector for
-  // which original SALE movement this line returns against. StockReturnsService
-  // never resolves the original movement by (referenceType, referenceId,
+  // Phase 3.4/3.5 (Inventory Return Support) — the AUTHORITATIVE selector for
+  // which original movement (a SALE for sales_return, a PURCHASE for
+  // purchase_return) this line returns against. StockReturnsService never
+  // resolves the original movement by (referenceType, referenceId,
   // productId) — only by this id, locked and validated directly.
   @IsUUID()
   originalMovementId!: string;
 }
 
 export class CreateStockReturnDto {
-  @IsIn(['sales_return'])
-  referenceType!: 'sales_return';
+  // Phase 3.5 adds 'purchase_return' alongside Phase 3.4's 'sales_return'.
+  // Phase 3.6 adds 'purchase_return_reversal' — reversing a PURCHASE_RETURN
+  // movement itself (additive, sets StockMovement.reversesMovementId). Each
+  // maps to its own original-movement type and stock direction — see
+  // StockReturnsService's RETURN_CONFIG.
+  @IsIn(['sales_return', 'purchase_return', 'purchase_return_reversal'])
+  referenceType!: 'sales_return' | 'purchase_return' | 'purchase_return_reversal';
 
   @IsUUID()
   referenceId!: string;

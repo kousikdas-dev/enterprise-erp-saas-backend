@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { PurchaseInvoicesModule } from './purchase-invoices/purchase-invoices.module';
+import { PurchaseReturnsModule } from './purchase-returns/purchase-returns.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     PurchaseOrdersModule,
     GoodsReceiptsModule,
     PurchaseInvoicesModule,
+    PurchaseReturnsModule,
     MessagingModule.register(),
   ],
 })

@@ -582,6 +582,22 @@ export class PurchaseInvoicesService {
         }
 
         if (existing.status === PurchaseInvoiceStatus.CONFIRMED) {
+          // Phase 3.5 (Purchase Return) — a CONFIRMED invoice with any line
+          // already consumed (in whole or in part) by a MATCHED_INVOICE
+          // Purchase Return allocation can never be cancelled. cancel()
+          // below unconditionally reverses this invoice's FULL original
+          // AP/GRNI/PPV amounts; a prior Purchase Return already posted its
+          // own, separate reversal for the returned portion, so cancelling
+          // on top would double-reverse the accounting effect for that
+          // quantity. There is no partial-cancel logic to handle this
+          // correctly, so it is rejected outright, before any lock beyond
+          // the invoice row itself is taken.
+          if (existing.items.some((item) => item.returnedQuantity.gt(0))) {
+            throw new ConflictException(
+              'Cannot cancel a purchase invoice that has a Purchase Return recorded against one of its lines',
+            );
+          }
+
           await tx.$queryRaw`
             SELECT id FROM purchase_orders
             WHERE id = ${existing.purchaseOrderId}::uuid AND "tenantId" = ${actor.tenantId}::uuid

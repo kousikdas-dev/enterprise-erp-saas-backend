@@ -181,6 +181,8 @@ describe('GoodsReceiptsService', () => {
         ),
       },
       purchaseOrder: { update: jest.fn() },
+      // Phase 3.5 — persists GoodsReceiptItem.inventoryMovementId.
+      goodsReceiptItem: { update: jest.fn().mockResolvedValue({}) },
       __queryRawCalls: queryRawCalls,
     };
   }
@@ -218,7 +220,20 @@ describe('GoodsReceiptsService', () => {
       },
     };
     const inventory = {
-      applyReceipt: extra.applyReceipt ?? jest.fn().mockResolvedValue({ created: true }),
+      // Phase 3.5 — default mock returns one synthetic movement per line,
+      // in the same order (mirrors StockReceiptsService's real positional
+      // guarantee), so zipMovementIds() has something to zip against.
+      applyReceipt:
+        extra.applyReceipt ??
+        jest.fn((_actor: unknown, body: { lines: Array<{ productId: string }> }) =>
+          Promise.resolve({
+            created: true,
+            movements: body.lines.map((line, index) => ({
+              id: `movement-${index}`,
+              productId: line.productId,
+            })),
+          }),
+        ),
     };
     const accountingJournal = {
       post:
@@ -574,6 +589,163 @@ describe('GoodsReceiptsService', () => {
         lines: [{ productId, quantity: '20.000000' }],
       }),
     );
+  });
+
+  // --- 6b. Phase 3.5 — persists GoodsReceiptItem.inventoryMovementId -------
+  it('6b. post() persists the Inventory movement id returned for each line onto GoodsReceiptItem.inventoryMovementId', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: receiptId,
+      tenantId: actor.tenantId,
+      purchaseOrderId: poId,
+      warehouseId,
+      status: GoodsReceiptStatus.PENDING_STOCK,
+      receivedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      items: [
+        {
+          id: 'gri1',
+          tenantId: actor.tenantId,
+          goodsReceiptId: receiptId,
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('2'),
+          baseQuantity: decimal('20'),
+          productId,
+          productSku: 'SKU-1',
+          productName: 'Widget',
+          unitOfMeasureId: uomId,
+          uomCode: 'BOX',
+          uomName: 'Box',
+          conversionFactor: decimal('10'),
+          inventoryMovementId: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    const finalizeTx = buildFinalizeTx({
+      receiptId,
+      purchaseOrderId: poId,
+      initialStatus: GoodsReceiptStatus.PENDING_STOCK,
+      receiptItems: [
+        {
+          id: 'gri1',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('2'),
+          baseQuantity: decimal('20'),
+          inventoryMovementId: null,
+        },
+      ],
+      poItems: [{ id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('0') }],
+      postedResult: postedResponse(),
+    });
+    const applyReceipt = jest.fn().mockResolvedValue({
+      created: true,
+      movements: [{ id: 'movement-abc', productId }],
+    });
+    const { service } = buildService(null, finalizeTx, { findFirst, applyReceipt });
+
+    await service.post(actor, receiptId);
+
+    expect(finalizeTx.goodsReceiptItem.update).toHaveBeenCalledWith({
+      where: { id: 'gri1' },
+      data: { inventoryMovementId: 'movement-abc' },
+    });
+  });
+
+  it('6c. post() never overwrites an already-set GoodsReceiptItem.inventoryMovementId', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: receiptId,
+      tenantId: actor.tenantId,
+      purchaseOrderId: poId,
+      warehouseId,
+      status: GoodsReceiptStatus.PENDING_STOCK,
+      receivedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      items: [
+        {
+          id: 'gri1',
+          tenantId: actor.tenantId,
+          goodsReceiptId: receiptId,
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('2'),
+          baseQuantity: decimal('20'),
+          productId,
+          productSku: 'SKU-1',
+          productName: 'Widget',
+          unitOfMeasureId: uomId,
+          uomCode: 'BOX',
+          uomName: 'Box',
+          conversionFactor: decimal('10'),
+          inventoryMovementId: 'already-set',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    const finalizeTx = buildFinalizeTx({
+      receiptId,
+      purchaseOrderId: poId,
+      initialStatus: GoodsReceiptStatus.PENDING_STOCK,
+      receiptItems: [
+        {
+          id: 'gri1',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('2'),
+          baseQuantity: decimal('20'),
+          inventoryMovementId: 'already-set',
+        },
+      ],
+      poItems: [{ id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('0') }],
+      postedResult: postedResponse(),
+    });
+    const applyReceipt = jest.fn().mockResolvedValue({
+      created: false,
+      movements: [{ id: 'movement-replay', productId }],
+    });
+    const { service } = buildService(null, finalizeTx, { findFirst, applyReceipt });
+
+    await service.post(actor, receiptId);
+
+    expect(finalizeTx.goodsReceiptItem.update).not.toHaveBeenCalled();
+  });
+
+  it('6d. post() rejects when Inventory returns a different number of movements than lines sent', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: receiptId,
+      tenantId: actor.tenantId,
+      purchaseOrderId: poId,
+      warehouseId,
+      status: GoodsReceiptStatus.PENDING_STOCK,
+      receivedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      items: [
+        {
+          id: 'gri1',
+          tenantId: actor.tenantId,
+          goodsReceiptId: receiptId,
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('2'),
+          baseQuantity: decimal('20'),
+          productId,
+          productSku: 'SKU-1',
+          productName: 'Widget',
+          unitOfMeasureId: uomId,
+          uomCode: 'BOX',
+          uomName: 'Box',
+          conversionFactor: decimal('10'),
+          inventoryMovementId: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    const applyReceipt = jest.fn().mockResolvedValue({ created: true, movements: [] });
+    const { service } = buildService(null, null, { findFirst, applyReceipt });
+
+    await expect(service.post(actor, receiptId)).rejects.toBeInstanceOf(ConflictException);
   });
 
   // --- 7. post() with NULL baseQuantity (legacy row) ----------------------

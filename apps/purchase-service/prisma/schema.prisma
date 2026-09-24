@@ -270,6 +270,9 @@ model GoodsReceipt {
 
   purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   items         GoodsReceiptItem[]
+  // Phase 3.5 (Purchase Return) — a Purchase Return is scoped to exactly one
+  // GoodsReceipt (see PurchaseReturn's own model comment for the rationale).
+  purchaseReturns PurchaseReturn[]
 
   @@index([tenantId])
   @@index([purchaseOrderId])
@@ -325,6 +328,27 @@ model GoodsReceiptItem {
   // for historical rows (D12-style rule, mirrors baseQuantity/conversionFactor).
   unitCost Decimal? @db.Decimal(19, 4)
 
+  // Phase 3.5 (Purchase Return) — base-UOM quantity returned via
+  // UNMATCHED_RECEIPT allocations only (the portion of this line that was
+  // never invoiced). Deliberately NOT named `returnedQuantity`: that name is
+  // already taken, with a DIFFERENT scope, by
+  // PurchaseInvoiceGoodsReceiptMatch.returnedQuantity (matched-bucket
+  // returns only) one join away — see that model's comment for the full
+  // two-counter split. Invariant:
+  // (invoiceMatch?.matchedQuantity ?? 0) + unmatchedReturnedQuantity <= baseQuantity.
+  unmatchedReturnedQuantity Decimal @default(0) @db.Decimal(19, 6)
+  // Phase 3.5 (Purchase Return) — soft reference (no FK; inventory-service
+  // is a separate database, mirrors every other cross-service reference in
+  // this schema) to the specific inventory-service StockMovement (type
+  // PURCHASE) created when this receipt line was posted. This is the
+  // AUTHORITATIVE selector a Purchase Return sends to inventory-service's
+  // stock-returns endpoint as `originalMovementId` — never resolved by
+  // (referenceType, referenceId, productId) lookup, per that endpoint's own
+  // design. NULL for every row created before this phase (legacy receipts
+  // cannot be returned via the new primitive — a known, documented
+  // limitation, not backfilled).
+  inventoryMovementId       String? @db.Uuid
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -335,6 +359,10 @@ model GoodsReceiptItem {
   // item (see PurchaseInvoiceGoodsReceiptMatch below), created lazily the
   // first time this item is matched by a PurchaseInvoiceItem.
   invoiceMatch         PurchaseInvoiceGoodsReceiptMatch?
+  // Phase 3.5 (Purchase Return) — a receipt line may be referenced by more
+  // than one PurchaseReturnItem over time (partial returns), each write-once
+  // via its own PurchaseReturnItemAllocation rows.
+  purchaseReturnItems  PurchaseReturnItem[]
 
   @@index([tenantId])
   @@index([goodsReceiptId])
@@ -493,6 +521,18 @@ model PurchaseInvoiceItem {
   lineSubtotal Decimal @db.Decimal(19, 4)
   lineTotal    Decimal @db.Decimal(19, 4)
 
+  // Phase 3.5 (Purchase Return) — base-UOM quantity of THIS invoice line
+  // ("slice") consumed by MATCHED_INVOICE PurchaseReturnItemAllocation rows.
+  // Invariant: returnedQuantity <= quantity × conversionFactor. Oldest-first
+  // matched-bucket allocation consumes slices ordered by the parent
+  // PurchaseInvoice.confirmedAt, draining each slice's own remaining
+  // capacity (quantity × conversionFactor − returnedQuantity) before moving
+  // to the next. Also consulted by PurchaseInvoicesService.cancel(), which
+  // must reject cancelling a CONFIRMED invoice while any of its items has
+  // returnedQuantity > 0 (cancelling would otherwise double-reverse the
+  // accounting effect a Purchase Return already posted for that quantity).
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -500,6 +540,9 @@ model PurchaseInvoiceItem {
   purchaseOrderItem PurchaseOrderItem                 @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
   goodsReceiptItem  GoodsReceiptItem?                 @relation(fields: [goodsReceiptItemId], references: [id], onDelete: Restrict)
   taxComponents     PurchaseInvoiceItemTaxComponent[]
+  // Phase 3.5 (Purchase Return) — write-once historical allocation rows that
+  // consumed part of this slice; never updated after creation.
+  returnAllocations PurchaseReturnItemAllocation[]
 
   @@index([tenantId])
   @@index([purchaseInvoiceId])
@@ -529,24 +572,37 @@ model PurchaseInvoiceItemTaxComponent {
 
 // Phase 3.2 (GRNI Clearing / PPV) — source of truth for how much of a
 // GoodsReceiptItem's baseQuantity has been claimed by CONFIRMED
-// PurchaseInvoiceItems (matchedQuantity) or, in a future phase, Purchase
-// Returns (returnedQuantity — always 0 until that phase exists). One row per
-// GoodsReceiptItem, created lazily on first match. No FIFO/cost-layer
-// concept: this is a flat running total, mirroring
-// PurchaseOrderItem.invoicedQuantity. No monetary column is stored — GRNI
-// clearing value is always recomputed at posting time from
-// GoodsReceiptItem.unitCost, never persisted redundantly.
+// PurchaseInvoiceItems (matchedQuantity). One row per GoodsReceiptItem,
+// created lazily on first match. No FIFO/cost-layer concept: this is a flat
+// running total, mirroring PurchaseOrderItem.invoicedQuantity. No monetary
+// column is stored — GRNI clearing value is always recomputed at posting
+// time from GoodsReceiptItem.unitCost, never persisted redundantly.
 //
-// Invariant `matchedQuantity + returnedQuantity <= baseQuantity` is
-// enforced only in application code (baseQuantity lives on a different
-// table), while holding a FOR UPDATE lock on both this row and its parent
-// GoodsReceiptItem row. Lock-order rule for every current and future flow
-// that touches this table: acquire goods_receipt_items THEN
+// Phase 3.5 (Purchase Return) correction: matchedQuantity represents base
+// quantity CURRENTLY claimed by CONFIRMED invoices and is permanent with
+// respect to returns — a Purchase Return never decrements it (only invoice
+// cancellation does; that is a genuinely different event). returnedQuantity
+// is therefore scoped to MATCHED-bucket returns only (base qty returned via
+// MATCHED_INVOICE PurchaseReturnItemAllocation rows against invoice slices
+// that reference a GoodsReceiptItem this row is keyed to), bounded by
+// `returnedQuantity <= matchedQuantity` — NOT by baseQuantity directly. The
+// complementary "never-invoiced" bucket has its own, separate counter,
+// GoodsReceiptItem.unmatchedReturnedQuantity, bounded by
+// `matchedQuantity + GoodsReceiptItem.unmatchedReturnedQuantity <= baseQuantity`.
+// A single shared counter cannot correctly serve both buckets at once (a
+// unit of "returned" would mean two different things depending on which
+// bucket it came from) — see GoodsReceiptItem.unmatchedReturnedQuantity's
+// own comment for the full split.
+//
+// Lock-order rule for every current and future flow that touches this
+// table: acquire goods_receipt_items THEN
 // purchase_invoice_goods_receipt_matches, always last in the transaction's
 // lock chain, always in ascending id order when locking more than one row.
-// PurchaseInvoicesService.confirm()/cancel() follow this today; a future
-// Purchase Return implementation MUST follow the same order to avoid
-// deadlocking against Invoice Confirm.
+// PurchaseInvoicesService.confirm()/cancel() follow this today;
+// PurchaseReturnsService.confirm() follows the same order, additionally
+// locking purchase_invoice_items (a table PurchaseInvoicesService never
+// locks) between goods_receipt_items and this table when a MATCHED_INVOICE
+// allocation is needed — never after this table.
 model PurchaseInvoiceGoodsReceiptMatch {
   id                 String   @id @default(uuid()) @db.Uuid
   tenantId           String   @db.Uuid
@@ -554,12 +610,13 @@ model PurchaseInvoiceGoodsReceiptMatch {
 
   // Base-UOM quantity matched to CONFIRMED PurchaseInvoiceItems so far.
   // Accumulated only at PurchaseInvoice CONFIRM time, reversed on CONFIRMED
-  // invoice cancellation — mirrors PurchaseOrderItem.invoicedQuantity.
+  // invoice cancellation — mirrors PurchaseOrderItem.invoicedQuantity. Never
+  // touched by a Purchase Return (Phase 3.5) — see the model comment above.
   matchedQuantity Decimal @default(0) @db.Decimal(19, 6)
-  // Base-UOM quantity returned via Purchase Return. Always 0 in Phase 3.2 —
-  // Purchase Return is not implemented yet; this column exists now so the
-  // capacity check above is correct on day one and no future migration is
-  // needed to add it.
+  // Phase 3.5 (Purchase Return) — base-UOM quantity returned via
+  // MATCHED_INVOICE allocations only (the matched bucket). Bound:
+  // returnedQuantity <= matchedQuantity. See the model comment above for
+  // the full two-bucket/two-counter split.
   returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
 
   createdAt DateTime @default(now())
@@ -605,4 +662,190 @@ model SupplierPayment {
   @@index([tenantId])
   @@index([purchaseInvoiceId])
   @@map("supplier_payments")
+}
+
+// ============================================================================
+// Purchase Return V1 (Phase 3.5). No approval workflow: DRAFT -> CONFIRMED
+// directly, mirroring GoodsReceipt's two-state PENDING_STOCK -> POSTED shape
+// (no CANCELLED state in this phase — reversal is a distinct later phase,
+// Phase 3.6, that creates its own offsetting records rather than mutating
+// these). Moving Average only; inventory-service remains the sole valuation
+// authority (Purchase Return never adds accounting-service dependencies to
+// inventory-service, and never re-derives a cost inventory-service already
+// computed).
+//
+// A Purchase Return is scoped to exactly one GoodsReceipt (never a whole
+// PurchaseOrder): inventory-service's stock-returns endpoint accepts a
+// single warehouseId per call, and GoodsReceipt is already single-warehouse,
+// so scoping a return to one receipt avoids a multi-warehouse/multi-call
+// grouping problem a PO-scoped return would need to solve instead. Lines can
+// still reference any GoodsReceiptItem belonging to that one receipt.
+//
+// Allocation priority (PurchaseReturnsService.confirm()): first consume the
+// receipt line's unmatched (never-invoiced) capacity at GoodsReceiptItem.
+// unitCost, then consume matched-invoice slices oldest-first at each
+// slice's own net-of-discount cost, splitting the difference to
+// PURCHASE_PRICE_VARIANCE. See GoodsReceiptItem.unmatchedReturnedQuantity
+// and PurchaseInvoiceGoodsReceiptMatch.returnedQuantity for the two
+// independent capacity counters this relies on, and
+// PurchaseReturnItemAllocation below for the write-once per-bucket record of
+// what was actually allocated.
+// ============================================================================
+
+enum PurchaseReturnStatus {
+  DRAFT
+  CONFIRMED
+  // Phase 3.6 — undoes a CONFIRMED return's effects on Inventory and the two
+  // return-quantity counters (never CANCELLED: mirrors Opening Stock's own
+  // vocabulary for "undo a posted inventory-affecting document," not
+  // Purchase Invoice's pre-effect CANCELLED).
+  REVERSED
+}
+
+// Mirrors PurchaseInvoicePostingStatus's exact four-value shape (Phase 3.6
+// adds REVERSED). No third "reversal failed" value: a failed reversal
+// attempt deliberately leaves this at POSTED, exactly like
+// PurchaseInvoicesService.attemptInvoiceReversal() — see reverse()'s own
+// doc comment in purchase-returns.service.ts.
+enum PurchaseReturnPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
+enum PurchaseReturnAllocationType {
+  UNMATCHED_RECEIPT
+  MATCHED_INVOICE
+}
+
+model PurchaseReturn {
+  id             String               @id @default(uuid()) @db.Uuid
+  tenantId       String               @db.Uuid
+  returnNumber   String
+  goodsReceiptId String               @db.Uuid
+  // Copied verbatim from goodsReceipt.warehouseId at creation time, never
+  // re-fetched — same "snapshot, never re-derive" convention as every other
+  // cross-document field in this schema. The single value sent to
+  // inventory-service's stock-returns endpoint for every line in this return.
+  warehouseId    String               @db.Uuid
+  status         PurchaseReturnStatus @default(DRAFT)
+  reason         String?
+  returnedAt     DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  // Purchase-side cache of accounting-service's own posting state, mirroring
+  // the exact GoodsReceipt/PurchaseInvoice pattern. No FK to accounting_db
+  // (separate database; soft reference). The authoritative idempotency
+  // guard is accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never this column.
+  accountingPostingStatus PurchaseReturnPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                     @db.Uuid
+
+  // Phase 3.6 — populated only once the accounting reversal succeeds
+  // (mirrors PurchaseInvoice.reversalJournalEntryId exactly). NULL while
+  // status is REVERSED but the accounting reversal hasn't (yet) succeeded —
+  // retryable via retryAccountingReversal(), same shape as the invoice flow.
+  reversalJournalEntryId String?   @db.Uuid
+  reversedAt             DateTime?
+  reversalReason         String?
+
+  goodsReceipt GoodsReceipt         @relation(fields: [goodsReceiptId], references: [id], onDelete: Restrict)
+  items        PurchaseReturnItem[]
+
+  @@unique([tenantId, returnNumber])
+  @@index([tenantId])
+  @@index([goodsReceiptId])
+  @@index([tenantId, status])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnItem {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @db.Uuid
+  purchaseReturnId   String  @db.Uuid
+  goodsReceiptItemId String  @db.Uuid
+
+  // Product/UOM snapshot — copied verbatim from the parent GoodsReceiptItem
+  // at creation time, never re-fetched (same convention as
+  // GoodsReceiptItem/PurchaseInvoiceItem's own snapshots).
+  productId        String   @db.Uuid
+  productSku       String
+  productName      String
+  unitOfMeasureId  String?  @db.Uuid
+  uomCode          String?
+  uomName          String?
+  conversionFactor Decimal? @db.Decimal(19, 6)
+
+  quantity     Decimal @db.Decimal(19, 6) // commercial UOM, same unit as the GR line — never converted
+  // Derived once at creation: quantity × conversionFactor. The ONLY value
+  // ever sent to Inventory (mirrors GoodsReceiptItem.baseQuantity's own rule).
+  baseQuantity Decimal @db.Decimal(19, 6)
+
+  // Phase 3.6 (Purchase Return reversal, prerequisite) — soft reference to
+  // the PURCHASE_RETURN StockMovement this line's own applyReturn() call
+  // created, captured positionally from Inventory's response in confirm()
+  // (mirrors GoodsReceiptItem.inventoryMovementId's own zip-not-lookup rule
+  // above). Required so a future reversal can target the exact movement to
+  // reverse, by id, never by (referenceType, referenceId, productId) lookup.
+  // NULL only for rows confirmed before this phase existed — a known,
+  // documented limitation, not backfilled.
+  inventoryMovementId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchaseReturn   PurchaseReturn                 @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  goodsReceiptItem GoodsReceiptItem               @relation(fields: [goodsReceiptItemId], references: [id], onDelete: Restrict)
+  allocations      PurchaseReturnItemAllocation[]
+
+  @@index([tenantId])
+  @@index([purchaseReturnId])
+  @@index([goodsReceiptItemId])
+  @@map("purchase_return_items")
+}
+
+// Write-once historical record of how one PurchaseReturnItem's quantity was
+// split between the unmatched-receipt and matched-invoice cost buckets at
+// CONFIRM time. NEVER updated after creation — Phase 3.6 reversal creates
+// new offsetting records elsewhere and must not touch these rows (hence no
+// updatedAt column here, unlike every other model in this schema).
+model PurchaseReturnItemAllocation {
+  id                    String                       @id @default(uuid()) @db.Uuid
+  tenantId              String                       @db.Uuid
+  purchaseReturnItemId  String                       @db.Uuid
+  allocationType        PurchaseReturnAllocationType
+  // Set only for MATCHED_INVOICE allocations — the specific invoice line
+  // ("slice") this allocation consumed.
+  purchaseInvoiceItemId String?                      @db.Uuid
+
+  baseQuantity      Decimal  @db.Decimal(19, 6)
+  // Snapshot of GoodsReceiptItem.unitCost at allocation time. Always set:
+  // both allocation types return inventory value at receipt cost.
+  receiptUnitCost   Decimal  @db.Decimal(19, 4)
+  receiptCostAmount Decimal  @db.Decimal(19, 4)
+  // MATCHED_INVOICE only — the slice's own net-of-discount unit cost
+  // (lineSubtotal / (quantity × conversionFactor)), consistent with
+  // PurchaseInvoicesService.buildInvoicePostingRequest's existing use of
+  // lineSubtotal as "the invoice cost" for PPV.
+  invoiceUnitCost   Decimal? @db.Decimal(19, 4)
+  invoiceCostAmount Decimal? @db.Decimal(19, 4)
+  // MATCHED_INVOICE only, signed: invoiceCostAmount − receiptCostAmount.
+  // Positive reverses part of an original unfavorable variance (Cr PPV);
+  // negative reverses part of an original favorable variance (Dr PPV) — the
+  // exact opposite-sign mirror of buildInvoicePostingRequest's own ppvTotal
+  // convention. Tax-exclusive: Phase 3.5 explicitly defers Input Tax
+  // reversal to a later phase (no taxAmount column here).
+  ppvAmount         Decimal? @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+
+  purchaseReturnItem  PurchaseReturnItem   @relation(fields: [purchaseReturnItemId], references: [id], onDelete: Restrict)
+  purchaseInvoiceItem PurchaseInvoiceItem? @relation(fields: [purchaseInvoiceItemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([purchaseReturnItemId])
+  @@index([purchaseInvoiceItemId])
+  @@map("purchase_return_item_allocations")
 }

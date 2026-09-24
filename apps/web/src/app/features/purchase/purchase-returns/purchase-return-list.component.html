@@ -1,0 +1,289 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Purchase Returns</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 200px;"
+        placeholder="Filter…"
+        [(ngModel)]="filter" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Return
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Flow: Goods Receipt (<code>POSTED</code>, accounted) → Purchase Return <code>DRAFT</code> →
+      <code>CONFIRMED</code> (allocated against unmatched/matched-invoice quantity, applied to
+      Inventory, posted to Accounting). Retry posting if the accounting journal temporarily fails.
+    </p>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No purchase returns yet."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Return #</th>
+              <th>Goods receipt</th>
+              <th class="text-center">Status</th>
+              <th class="text-center">Accounting</th>
+              <th class="text-center">Lines</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.returnNumber }}</code></td>
+              <td>{{ receiptLabel(item.goodsReceiptId) }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="postingStatusBadgeClass(item.accountingPostingStatus)">
+                  {{ item.accountingPostingStatus }}
+                </span>
+              </td>
+              <td class="text-center">{{ item.items?.length || 0 }}</td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canConfirm && item.status === 'DRAFT'"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  [disabled]="actionId === item.id"
+                  (click)="confirmReturn(item)">
+                  {{ actionId === item.id ? 'Confirming…' : 'Confirm' }}
+                </button>
+                <button
+                  *ngIf="canRetryPosting(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  [disabled]="actionId === item.id"
+                  title="The original accounting posting failed — retry it"
+                  (click)="retryAccountingPosting(item)">
+                  {{ actionId === item.id ? 'Retrying…' : 'Retry Posting' }}
+                </button>
+                <button
+                  *ngIf="canReverseReturn(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary me-1"
+                  [disabled]="actionId === item.id"
+                  (click)="reverseReturn(item)">
+                  {{ actionId === item.id ? 'Reversing…' : 'Reverse' }}
+                </button>
+                <button
+                  *ngIf="canRetryReversal(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning"
+                  [disabled]="actionId === item.id"
+                  title="The original accounting reversal failed — retry it"
+                  (click)="retryAccountingReversal(item)">
+                  {{ actionId === item.id ? 'Retrying…' : 'Retry Reversal' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Create Purchase Return</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-8 mb-3">
+          <label class="form-label" for="prGr">Goods receipt</label>
+          <select
+            id="prGr"
+            class="form-select"
+            formControlName="goodsReceiptId"
+            (change)="onGoodsReceiptChange(form.controls.goodsReceiptId.value || '')">
+            <option value="">Select a posted, accounted receipt…</option>
+            <option *ngFor="let r of eligibleReceipts" [value]="r.id">
+              {{ r.id | slice:0:8 }}… — {{ warehouseLabel(r.warehouseId) }}
+            </option>
+          </select>
+          <div class="form-text">Only POSTED receipts whose accounting posting also succeeded are listed.</div>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="prReason">Reason (optional)</label>
+          <input id="prReason" type="text" class="form-control" formControlName="reason" maxlength="500" />
+        </div>
+      </div>
+
+      <div *ngIf="selectedReceipt as receipt" class="mb-2">
+        <div class="small text-muted mb-2">
+          Warehouse: {{ warehouseLabel(receipt.warehouseId) }}
+        </div>
+        <div class="table-responsive" formArrayName="items">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Return</th>
+                <th>Product</th>
+                <th>UOM</th>
+                <th class="text-end">Remaining returnable</th>
+                <th style="min-width: 130px;">Return qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+                <td>
+                  <input class="form-check-input" type="checkbox" formControlName="include" />
+                </td>
+                <td>{{ line.value.productSku }} — {{ line.value.productName }}</td>
+                <td>{{ line.value.uomCode || '—' }}</td>
+                <td class="text-end"><code>{{ line.value.maxRemaining | qty }}</code></td>
+                <td>
+                  <div class="input-group input-group-sm">
+                    <input class="form-control form-control-sm" formControlName="quantity" />
+                    <span class="input-group-text" *ngIf="line.value.uomCode as uom">{{ uom }}</span>
+                  </div>
+                  <div class="text-danger small" *ngIf="line.get('quantity')?.touched && line.get('quantity')?.invalid">
+                    Max 6 decimal places.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="form-text" *ngIf="lines.length === 0">
+          No returnable quantity remains on this goods receipt.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid || lines.length === 0">
+        {{ saving ? 'Creating…' : 'Create return' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Purchase return details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as pr">
+    <dl class="row">
+      <dt class="col-sm-4">Return #</dt><dd class="col-sm-8"><code>{{ pr.returnNumber }}</code></dd>
+      <dt class="col-sm-4">Goods receipt</dt><dd class="col-sm-8">{{ receiptLabel(pr.goodsReceiptId) }}</dd>
+      <dt class="col-sm-4">Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(pr.warehouseId) }}</dd>
+      <dt class="col-sm-4">Reason</dt><dd class="col-sm-8">{{ pr.reason || '—' }}</dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8"><span class="badge" [ngClass]="statusBadgeClass(pr.status)">{{ pr.status }}</span></dd>
+      <dt class="col-sm-4">Accounting</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="postingStatusBadgeClass(pr.accountingPostingStatus)">
+          {{ pr.accountingPostingStatus }}
+        </span>
+      </dd>
+      <dt class="col-sm-4" *ngIf="pr.journalEntryId">Journal entry</dt>
+      <dd class="col-sm-8" *ngIf="pr.journalEntryId"><code>{{ pr.journalEntryId }}</code></dd>
+      <dt class="col-sm-4" *ngIf="pr.reversedAt">Reversed at</dt>
+      <dd class="col-sm-8" *ngIf="pr.reversedAt">{{ pr.reversedAt }}</dd>
+      <dt class="col-sm-4" *ngIf="pr.reversalReason">Reversal reason</dt>
+      <dd class="col-sm-8" *ngIf="pr.reversalReason">{{ pr.reversalReason }}</dd>
+      <dt class="col-sm-4" *ngIf="pr.reversalJournalEntryId">Reversal journal entry</dt>
+      <dd class="col-sm-8" *ngIf="pr.reversalJournalEntryId"><code>{{ pr.reversalJournalEntryId }}</code></dd>
+    </dl>
+
+    <div class="table-responsive" *ngFor="let line of pr.items">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th colspan="2">{{ line.productSku }} — {{ line.productName }}</th>
+          </tr>
+          <tr>
+            <th>UOM</th>
+            <th class="text-end">Return qty</th>
+            <th class="text-end">Base qty</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{{ line.uomCode || '—' }}</td>
+            <td class="text-end"><code>{{ line.quantity | qty }}</code></td>
+            <td class="text-end"><code>{{ line.baseQuantity | qty }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <table class="table table-sm" *ngIf="line.allocations?.length">
+        <thead>
+          <tr>
+            <th>Allocation</th>
+            <th class="text-end">Base qty</th>
+            <th class="text-end">Receipt cost</th>
+            <th class="text-end">Invoice cost</th>
+            <th class="text-end">PPV</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let alloc of line.allocations">
+            <td>{{ alloc.allocationType }}</td>
+            <td class="text-end"><code>{{ alloc.baseQuantity | qty }}</code></td>
+            <td class="text-end"><code>{{ alloc.receiptCostAmount }}</code></td>
+            <td class="text-end"><code>{{ alloc.invoiceCostAmount || '—' }}</code></td>
+            <td class="text-end"><code>{{ alloc.ppvAmount || '—' }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button
+      *ngIf="canConfirm && viewing?.status === 'DRAFT'"
+      type="button"
+      class="btn btn-success me-auto"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && confirmReturn(viewing)">
+      {{ actionId === viewing?.id ? 'Confirming…' : 'Confirm' }}
+    </button>
+    <button
+      *ngIf="viewing && canRetryPosting(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && retryAccountingPosting(viewing)">
+      {{ actionId === viewing?.id ? 'Retrying…' : 'Retry Posting' }}
+    </button>
+    <button
+      *ngIf="viewing && canReverseReturn(viewing)"
+      type="button"
+      class="btn btn-outline-secondary"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && reverseReturn(viewing)">
+      {{ actionId === viewing?.id ? 'Reversing…' : 'Reverse' }}
+    </button>
+    <button
+      *ngIf="viewing && canRetryReversal(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && retryAccountingReversal(viewing)">
+      {{ actionId === viewing?.id ? 'Retrying…' : 'Retry Reversal' }}
+    </button>
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

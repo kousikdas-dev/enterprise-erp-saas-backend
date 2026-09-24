@@ -134,6 +134,11 @@ describe('PurchaseInvoicesService', () => {
       taxAmount: decimal('0'),
       lineSubtotal: decimal('10'),
       lineTotal: decimal('10'),
+      // Phase 3.5 (Purchase Return) — base-UOM qty of this line consumed by
+      // MATCHED_INVOICE allocations. Defaults to 0 (mirrors the real
+      // schema default); a small number of cancel() tests override this to
+      // exercise the new guard.
+      returnedQuantity: decimal('0'),
       createdAt: new Date(),
       updatedAt: new Date(),
       taxComponents: [] as unknown[],
@@ -1346,6 +1351,127 @@ describe('PurchaseInvoicesService', () => {
 
     await expect(service.cancel(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
     expect(tx.__poItemUpdateCalls).toHaveLength(0);
+  });
+
+  // --- Phase 3.5 (Purchase Return) — cancel() guard against returnedQuantity ---
+  it('23. cancel() rejects a CONFIRMED invoice when one of its lines has been consumed by a Purchase Return (returnedQuantity > 0)', async () => {
+    const tx = buildCancelTx({
+      invoiceId,
+      purchaseOrderId: poId,
+      status: PurchaseInvoiceStatus.CONFIRMED,
+      invoiceItems: [
+        fullInvoiceItem({
+          id: 'pii1',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('4'),
+          returnedQuantity: decimal('1'),
+        }),
+      ],
+      poItems: [{ id: poItemId, invoicedQuantity: decimal('4') }],
+    });
+    const { service } = buildServiceForCancel(tx);
+
+    await expect(service.cancel(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
+    // Rejected before any PO/PO-item lock or invoicedQuantity reversal is
+    // attempted — never a partial cancel, never the old negative-value guard.
+    expect(tx.purchaseOrderItem.findMany).not.toHaveBeenCalled();
+    expect(tx.__poItemUpdateCalls).toHaveLength(0);
+  });
+
+  it('24. cancel() rejects a CONFIRMED invoice when ANY line (not just the first) has returnedQuantity > 0', async () => {
+    const tx = buildCancelTx({
+      invoiceId,
+      purchaseOrderId: poId,
+      status: PurchaseInvoiceStatus.CONFIRMED,
+      invoiceItems: [
+        fullInvoiceItem({ id: 'pii1', purchaseOrderItemId: poItemId, quantity: decimal('4') }),
+        fullInvoiceItem({
+          id: 'pii2',
+          purchaseOrderItemId: poItemId2,
+          quantity: decimal('3'),
+          returnedQuantity: decimal('3'),
+        }),
+      ],
+      poItems: [
+        { id: poItemId, invoicedQuantity: decimal('4') },
+        { id: poItemId2, invoicedQuantity: decimal('3') },
+      ],
+    });
+    const { service } = buildServiceForCancel(tx);
+
+    await expect(service.cancel(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.__poItemUpdateCalls).toHaveLength(0);
+  });
+
+  it('25. cancel() still succeeds for a CONFIRMED invoice whose lines all have returnedQuantity === 0 (no Purchase Return recorded)', async () => {
+    const tx = buildCancelTx({
+      invoiceId,
+      purchaseOrderId: poId,
+      status: PurchaseInvoiceStatus.CONFIRMED,
+      invoiceItems: [
+        fullInvoiceItem({
+          id: 'pii1',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('4'),
+          returnedQuantity: decimal('0'),
+        }),
+      ],
+      poItems: [{ id: poItemId, invoicedQuantity: decimal('4') }],
+    });
+    const { service } = buildServiceForCancel(tx);
+
+    const result = await service.cancel(actor, invoiceId);
+
+    expect(result.status).toBe('CANCELLED');
+    expect(tx.__poItemUpdateCalls).toHaveLength(1);
+  });
+
+  it('25b. cancel() becomes possible again once a Purchase Return that had blocked it is reversed (Phase 3.6 restores returnedQuantity to 0)', async () => {
+    // Same line as test 23, but returnedQuantity has since been restored to
+    // 0 by PurchaseReturnsService.reverse() — cancel() reads the live
+    // column value and never needs to know a return ever happened.
+    const tx = buildCancelTx({
+      invoiceId,
+      purchaseOrderId: poId,
+      status: PurchaseInvoiceStatus.CONFIRMED,
+      invoiceItems: [
+        fullInvoiceItem({
+          id: 'pii1',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('4'),
+          returnedQuantity: decimal('0'),
+        }),
+      ],
+      poItems: [{ id: poItemId, invoicedQuantity: decimal('4') }],
+    });
+    const { service } = buildServiceForCancel(tx);
+
+    const result = await service.cancel(actor, invoiceId);
+
+    expect(result.status).toBe('CANCELLED');
+    expect(tx.__poItemUpdateCalls).toHaveLength(1);
+  });
+
+  it('26. cancel() of a DRAFT invoice ignores returnedQuantity entirely (a DRAFT invoice can never have one > 0, but the guard must not misfire if it somehow did)', async () => {
+    const tx = buildCancelTx({
+      invoiceId,
+      purchaseOrderId: poId,
+      status: PurchaseInvoiceStatus.DRAFT,
+      invoiceItems: [
+        fullInvoiceItem({
+          id: 'pii1',
+          purchaseOrderItemId: poItemId,
+          quantity: decimal('4'),
+          returnedQuantity: decimal('2'),
+        }),
+      ],
+    });
+    const { service } = buildServiceForCancel(tx);
+
+    const result = await service.cancel(actor, invoiceId);
+
+    expect(result.status).toBe('CANCELLED');
+    expect(tx.purchaseOrderItem.findMany).not.toHaveBeenCalled();
   });
 
   it('cancel() rejects a non-DRAFT/non-CONFIRMED invoice (already CANCELLED)', async () => {

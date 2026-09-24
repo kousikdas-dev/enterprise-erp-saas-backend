@@ -16,7 +16,60 @@ import {
   stockReturnPayloadHash,
 } from './dto/stock-return.dto';
 
-const REFERENCE_TYPE = 'sales_return';
+type ReturnReferenceType =
+  | 'sales_return'
+  | 'purchase_return'
+  | 'purchase_return_reversal';
+
+// Phase 3.5 — each supported referenceType maps to its own original-movement
+// type and stock direction. sales_return (Phase 3.4) is additive (mirrors a
+// receipt); purchase_return is subtractive (mirrors an issue — stock leaves
+// the warehouse back to the vendor) and therefore carries an "Insufficient
+// stock" guard sales_return never needed.
+//
+// Phase 3.6 adds purchase_return_reversal: undoes a specific PURCHASE_RETURN
+// movement. Additive (mirrors a receipt — stock coming back in), costed at
+// that PURCHASE_RETURN movement's own unitCost verbatim (the shared "original
+// movement's own unitCost, never current average" rule below already gives
+// this for free). setsReversesMovementId is true ONLY for this entry: it
+// makes the created movement also set StockMovement.reversesMovementId,
+// giving a second, independent, DB-enforced "at most one reversal, ever"
+// guarantee via the already-existing @@unique([reversesMovementId])
+// constraint — on top of the quantity-cap check every entry already gets via
+// the target movement's own returnedQuantity field. Verified safe to reuse
+// alongside Opening Stock's own use of the same column: reversesMovementId is
+// a single-column, table-wide unique index over movement ids, which are
+// globally unique, so an Opening Stock reversal row and a Purchase Return
+// reversal row can never collide; no other code in the repo reads this
+// column, so no hidden exclusivity assumption exists to violate.
+const RETURN_CONFIG: Record<
+  ReturnReferenceType,
+  {
+    originalType: StockMovementType;
+    resultType: StockMovementType;
+    direction: 'additive' | 'subtractive';
+    setsReversesMovementId: boolean;
+  }
+> = {
+  sales_return: {
+    originalType: StockMovementType.SALE,
+    resultType: StockMovementType.SALE_RETURN,
+    direction: 'additive',
+    setsReversesMovementId: false,
+  },
+  purchase_return: {
+    originalType: StockMovementType.PURCHASE,
+    resultType: StockMovementType.PURCHASE_RETURN,
+    direction: 'subtractive',
+    setsReversesMovementId: false,
+  },
+  purchase_return_reversal: {
+    originalType: StockMovementType.PURCHASE_RETURN,
+    resultType: StockMovementType.PURCHASE_RETURN_REVERSAL,
+    direction: 'additive',
+    setsReversesMovementId: true,
+  },
+};
 
 export type StockReturnResult = {
   created: boolean;
@@ -58,23 +111,36 @@ type LockedOriginalMovement = {
   unitCost: Prisma.Decimal | null;
   referenceType: string | null;
   referenceId: string | null;
+  // Phase 3.6 — only read for purchase_return_reversal: the grandparent
+  // PURCHASE movement this PURCHASE_RETURN movement itself returned
+  // against. Needed so reversing a return can decrement that grandparent's
+  // OWN returnedQuantity by the same amount the original return added to
+  // it — otherwise a return-then-reverse cycle would permanently consume
+  // returnable capacity on the grandparent, never freeing it back up.
+  originalMovementId: string | null;
 };
 
 /**
- * Phase 3.4 (Inventory Return Support) — Inventory-only primitive for stock
- * coming back in against a specific, already-identified original SALE
- * movement. Structurally mirrors StockIssuesService/StockReceiptsService
- * (idempotent insert-or-replay via stock_receipt_applications, lock-then-
- * update under FOR UPDATE), with one deliberate difference: the return's
- * unitCost is never client-supplied and never the current moving average —
- * it is read verbatim from the original SALE movement being returned
- * against, which is selected AUTHORITATIVELY by StockReturnLineDto.originalMovementId,
- * never by (referenceType, referenceId, productId) lookup.
+ * Phase 3.4 (Inventory Return Support, sales_return) / Phase 3.5
+ * (purchase_return) — Inventory-only primitive for stock moving against a
+ * specific, already-identified original movement. Structurally mirrors
+ * StockIssuesService/StockReceiptsService (idempotent insert-or-replay via
+ * stock_receipt_applications, lock-then-update under FOR UPDATE), with one
+ * deliberate difference shared by both return types: the return's unitCost
+ * is never client-supplied and never the current moving average — it is
+ * read verbatim from the original movement being returned against, which is
+ * selected AUTHORITATIVELY by StockReturnLineDto.originalMovementId, never
+ * by (referenceType, referenceId, productId) lookup.
+ *
+ * sales_return is additive (mirrors a receipt — goods coming back from a
+ * customer); purchase_return is subtractive (mirrors an issue — goods going
+ * back to a vendor) and enforces an "Insufficient stock" guard sales_return
+ * never needed. See RETURN_CONFIG above for the exact per-type mapping.
  *
  * Inventory never calls accounting-service here (or anywhere) — this
  * service only exposes the authoritative unitCost/totalCost per line for a
- * future caller (e.g. a Sales Return document, in a later phase) to post
- * its own COGS-reversal journal from.
+ * caller (a Sales Return or Purchase Return document) to post its own
+ * reversing journal from.
  */
 @Injectable()
 export class StockReturnsService {
@@ -84,7 +150,8 @@ export class StockReturnsService {
     actor: ActorContext,
     dto: CreateStockReturnDto,
   ): Promise<StockReturnResult> {
-    if (dto.referenceType !== REFERENCE_TYPE) {
+    const config = RETURN_CONFIG[dto.referenceType];
+    if (!config) {
       throw new ConflictException('Unsupported referenceType');
     }
     const warehouse = await this.prisma.warehouse.findFirst({
@@ -122,14 +189,14 @@ export class StockReturnsService {
           INSERT INTO stock_receipt_applications
             (id, "tenantId", "referenceType", "referenceId", "warehouseId", "payloadHash", "createdAt")
           VALUES
-            (gen_random_uuid(), ${actor.tenantId}::uuid, ${REFERENCE_TYPE}, ${dto.referenceId}::uuid, ${dto.warehouseId}::uuid, ${payloadHash}, CURRENT_TIMESTAMP)
+            (gen_random_uuid(), ${actor.tenantId}::uuid, ${dto.referenceType}, ${dto.referenceId}::uuid, ${dto.warehouseId}::uuid, ${payloadHash}, CURRENT_TIMESTAMP)
           ON CONFLICT ("tenantId", "referenceType", "referenceId") DO NOTHING
           RETURNING id
         `,
       );
 
       if (inserted.length === 0) {
-        return this.replayExisting(tx, actor, dto, payloadHash);
+        return this.replayExisting(tx, actor, dto, config, payloadHash);
       }
 
       const movements = [];
@@ -140,7 +207,8 @@ export class StockReturnsService {
         const originalRows = await tx.$queryRaw<LockedOriginalMovement[]>(
           Prisma.sql`
             SELECT id, "productId", "warehouseId", type::text AS type,
-                   quantity, "returnedQuantity", "unitCost", "referenceType", "referenceId"
+                   quantity, "returnedQuantity", "unitCost", "referenceType", "referenceId",
+                   "originalMovementId"
             FROM stock_movements
             WHERE id = ${line.originalMovementId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
             FOR UPDATE
@@ -150,9 +218,9 @@ export class StockReturnsService {
         if (!original) {
           throw new NotFoundException('Original stock movement not found');
         }
-        if (original.type !== StockMovementType.SALE) {
+        if (original.type !== config.originalType) {
           throw new ConflictException(
-            'Original stock movement is not a returnable SALE movement',
+            `Original stock movement is not a returnable ${config.originalType} movement`,
           );
         }
         if (original.productId !== line.productId) {
@@ -209,6 +277,44 @@ export class StockReturnsService {
           data: { returnedQuantity: nextReturned },
         });
 
+        // Phase 3.6 — purchase_return_reversal only: the movement being
+        // reversed (a PURCHASE_RETURN) itself has its own originalMovementId
+        // pointing at the grandparent PURCHASE movement it returned against.
+        // That grandparent's returnedQuantity was incremented by the
+        // original return; reversing it must decrement that same amount
+        // back out, or the grandparent's returnable capacity would be
+        // permanently and incorrectly consumed even after a full reversal.
+        // Locked and updated here, after the target movement's own lock —
+        // a third, distinct row, never the same as `original` itself.
+        if (config.setsReversesMovementId && original.originalMovementId) {
+          const grandparentRows = await tx.$queryRaw<
+            Array<{ id: string; quantity: Prisma.Decimal; returnedQuantity: Prisma.Decimal }>
+          >(
+            Prisma.sql`
+              SELECT id, quantity, "returnedQuantity"
+              FROM stock_movements
+              WHERE id = ${original.originalMovementId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+              FOR UPDATE
+            `,
+          );
+          const grandparent = grandparentRows[0];
+          if (!grandparent) {
+            throw new NotFoundException('Grandparent stock movement not found');
+          }
+          const grandparentNextReturned = new Prisma.Decimal(
+            grandparent.returnedQuantity.toString(),
+          ).minus(line.quantity);
+          if (grandparentNextReturned.lt(0)) {
+            throw new ConflictException(
+              "Reversal would drive the grandparent movement's returnedQuantity negative",
+            );
+          }
+          await tx.stockMovement.update({
+            where: { id: grandparent.id },
+            data: { returnedQuantity: grandparentNextReturned },
+          });
+        }
+
         const lockedStock = await tx.$queryRaw<
           Array<{ id: string; quantity: Prisma.Decimal; totalValue: Prisma.Decimal }>
         >(
@@ -220,24 +326,46 @@ export class StockReturnsService {
         const currentValue = lockedStock[0]
           ? new Prisma.Decimal(lockedStock[0].totalValue.toString())
           : new Prisma.Decimal(0);
-        // A return is purely additive — symmetric with a receipt, opposite
-        // of an issue — so it can never drive quantity negative.
-        const nextQuantity = currentQuantity.plus(line.quantity);
-        const nextValue = currentValue.plus(totalCost);
+        // sales_return is additive — symmetric with a receipt — and can
+        // never drive quantity negative. purchase_return is subtractive —
+        // symmetric with an issue — and must guard against insufficient
+        // stock, exactly like StockIssuesService.
+        let nextQuantity: Prisma.Decimal;
+        let nextValue: Prisma.Decimal;
+        if (config.direction === 'additive') {
+          nextQuantity = currentQuantity.plus(line.quantity);
+          nextValue = currentValue.plus(totalCost);
+        } else {
+          nextQuantity = currentQuantity.minus(line.quantity);
+          if (nextQuantity.lt(0)) {
+            throw new ConflictException('Insufficient stock');
+          }
+          // Zero-stock rule (mirrors StockIssuesService): quantity reaching
+          // exactly 0 forces value to exactly 0 too, rather than trusting
+          // the subtraction to land there.
+          nextValue = nextQuantity.eq(0)
+            ? new Prisma.Decimal(0)
+            : currentValue.minus(totalCost);
+        }
 
         const movement = await tx.stockMovement.create({
           data: {
             tenantId: actor.tenantId,
             productId: line.productId,
             warehouseId: dto.warehouseId,
-            type: StockMovementType.SALE_RETURN,
+            type: config.resultType,
             quantity: line.quantity,
-            referenceType: REFERENCE_TYPE,
+            referenceType: dto.referenceType,
             referenceId: dto.referenceId,
             createdBy: actor.userId,
             unitCost,
             totalCost,
             originalMovementId: original.id,
+            // Phase 3.6 — only purchase_return_reversal sets this; see
+            // RETURN_CONFIG's own comment for the full safety analysis.
+            ...(config.setsReversesMovementId
+              ? { reversesMovementId: original.id }
+              : {}),
           },
         });
         const stock = lockedStock[0]
@@ -267,7 +395,7 @@ export class StockReturnsService {
 
       return {
         created: true,
-        referenceType: REFERENCE_TYPE,
+        referenceType: dto.referenceType,
         referenceId: dto.referenceId,
         warehouseId: dto.warehouseId,
         movements,
@@ -280,32 +408,33 @@ export class StockReturnsService {
     tx: Prisma.TransactionClient,
     actor: ActorContext,
     dto: CreateStockReturnDto,
+    config: (typeof RETURN_CONFIG)[ReturnReferenceType],
     payloadHash: string,
   ): Promise<StockReturnResult> {
     const existing = await tx.stockReceiptApplication.findFirst({
       where: {
         tenantId: actor.tenantId,
-        referenceType: REFERENCE_TYPE,
+        referenceType: dto.referenceType,
         referenceId: dto.referenceId,
       },
     });
     if (!existing) {
-      throw new ConflictException('Sales return application conflict');
+      throw new ConflictException('Return application conflict');
     }
     if (
       existing.payloadHash !== payloadHash ||
       existing.warehouseId !== dto.warehouseId
     ) {
       throw new ConflictException(
-        'Sales return reference already applied with a different payload',
+        'Return reference already applied with a different payload',
       );
     }
     const movementRows = await tx.stockMovement.findMany({
       where: {
         tenantId: actor.tenantId,
-        referenceType: REFERENCE_TYPE,
+        referenceType: dto.referenceType,
         referenceId: dto.referenceId,
-        type: StockMovementType.SALE_RETURN,
+        type: config.resultType,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -331,7 +460,7 @@ export class StockReturnsService {
     }
     return {
       created: false,
-      referenceType: REFERENCE_TYPE,
+      referenceType: dto.referenceType,
       referenceId: dto.referenceId,
       warehouseId: dto.warehouseId,
       movements: movementRows.map((row) => this.toMovement(row)),

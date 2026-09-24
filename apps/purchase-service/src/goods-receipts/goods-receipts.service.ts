@@ -24,7 +24,10 @@ import {
   parsePositiveDecimal,
   quantityToString,
 } from '../common/decimal';
-import { InventoryStockClient } from '../inventory/inventory-stock.client';
+import {
+  InventoryStockClient,
+  InventoryStockMovementSummary,
+} from '../inventory/inventory-stock.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toGoodsReceiptResponse } from './dto/goods-receipt-response';
 import { CreateGoodsReceiptDto } from './dto/goods-receipt.dto';
@@ -76,13 +79,22 @@ export class GoodsReceiptsService {
       goodsReceiptId,
       dto,
     );
-    await this.inventory.applyReceipt(actor, {
+    const applyResult = await this.inventory.applyReceipt(actor, {
       referenceType: 'goods_receipt',
       referenceId: goodsReceiptId,
       warehouseId: dto.warehouseId,
       lines: prepared.inventoryLines,
     });
-    const posted = await this.finalizePosted(actor, goodsReceiptId, request);
+    const movementIdsByItemId = this.zipMovementIds(
+      prepared.itemIds,
+      applyResult.movements,
+    );
+    const posted = await this.finalizePosted(
+      actor,
+      goodsReceiptId,
+      request,
+      movementIdsByItemId,
+    );
     return posted;
   }
 
@@ -121,13 +133,42 @@ export class GoodsReceiptsService {
       };
     });
 
-    await this.inventory.applyReceipt(actor, {
+    const applyResult = await this.inventory.applyReceipt(actor, {
       referenceType: 'goods_receipt',
       referenceId: existing.id,
       warehouseId: existing.warehouseId,
       lines: inventoryLines,
     });
-    return this.finalizePosted(actor, existing.id, request);
+    const movementIdsByItemId = this.zipMovementIds(
+      existing.items.map((item) => item.id),
+      applyResult.movements,
+    );
+    return this.finalizePosted(actor, existing.id, request, movementIdsByItemId);
+  }
+
+  /**
+   * Phase 3.5 — zips the item ids sent to Inventory (in the exact order the
+   * request's `lines` were built) with the `movements[]` array Inventory
+   * returns, which is guaranteed to be in that same positional order
+   * (StockReceiptsService iterates and pushes one movement per line, never
+   * reordering). Never matched by productId: a receipt can legitimately have
+   * two lines for the same product (distinct PurchaseOrderItems), so only
+   * positional matching against the exact request array is safe.
+   */
+  private zipMovementIds(
+    itemIds: string[],
+    movements: InventoryStockMovementSummary[],
+  ): Map<string, string> {
+    if (movements.length !== itemIds.length) {
+      throw new ConflictException(
+        'Inventory service returned a different number of movements than lines sent',
+      );
+    }
+    const map = new Map<string, string>();
+    itemIds.forEach((itemId, index) => {
+      map.set(itemId, movements[index].id);
+    });
+    return map;
   }
 
   async list(actor: ActorContext) {
@@ -211,6 +252,7 @@ export class GoodsReceiptsService {
 
       const itemsById = new Map(order.items.map((item) => [item.id, item]));
       const receiptItems: Array<{
+        id: string;
         purchaseOrderItemId: string;
         productId: string;
         productSku: string;
@@ -260,6 +302,10 @@ export class GoodsReceiptsService {
           .toDecimalPlaces(6, Prisma.Decimal.ROUND_HALF_UP);
 
         receiptItems.push({
+          // Phase 3.5 — pre-generated so it can be zipped positionally
+          // against Inventory's applyReceipt() response after this
+          // transaction commits (see zipMovementIds()).
+          id: randomUUID(),
           purchaseOrderItemId: poItem.id,
           productId: poItem.productId,
           productSku: poItem.productSku,
@@ -292,6 +338,7 @@ export class GoodsReceiptsService {
           status: GoodsReceiptStatus.PENDING_STOCK,
           items: {
             create: receiptItems.map((item) => ({
+              id: item.id,
               tenantId: actor.tenantId,
               purchaseOrderItemId: item.purchaseOrderItemId,
               quantity: item.quantity,
@@ -319,6 +366,8 @@ export class GoodsReceiptsService {
           quantity: quantityToString(item.baseQuantity),
           unitCost: moneyToString(item.unitCost),
         })),
+        // Phase 3.5 — same order as inventoryLines, for zipMovementIds().
+        itemIds: receiptItems.map((item) => item.id),
       };
     });
   }
@@ -351,6 +400,7 @@ export class GoodsReceiptsService {
     actor: ActorContext,
     goodsReceiptId: string,
     request?: RequestAuditMeta,
+    movementIdsByItemId?: Map<string, string>,
   ) {
     const posted = await this.prisma.$transaction(async (tx) => {
       // Lock ordering: goods_receipts -> purchase_orders ->
@@ -420,6 +470,19 @@ export class GoodsReceiptsService {
           where: { id: poItem.id },
           data: { receivedQuantity: nextReceived },
         });
+
+        // Phase 3.5 — persist the authoritative inventory-service
+        // StockMovement id for this line, so a future Purchase Return can
+        // send it back as originalMovementId. Never overwritten once set
+        // (a legacy row missing this from before the phase existed simply
+        // stays null forever — no backfill is possible).
+        const movementId = movementIdsByItemId?.get(item.id);
+        if (movementId && !item.inventoryMovementId) {
+          await tx.goodsReceiptItem.update({
+            where: { id: item.id },
+            data: { inventoryMovementId: movementId },
+          });
+        }
       }
 
       const refreshedItems = await tx.purchaseOrderItem.findMany({

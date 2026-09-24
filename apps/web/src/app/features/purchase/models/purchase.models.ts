@@ -208,6 +208,7 @@ export interface UpdatePurchaseOrderRequest {
 }
 
 export type GoodsReceiptStatus = 'PENDING_STOCK' | 'POSTED';
+export type GoodsReceiptPostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED';
 
 export interface GoodsReceiptItem {
   id: string;
@@ -232,6 +233,10 @@ export interface GoodsReceipt {
   purchaseOrderId: string;
   warehouseId: string;
   status: GoodsReceiptStatus | string;
+  /** Accounting journal posting state — present on the actual Gateway response,
+   *  though not currently declared on GoodsReceiptDto's Swagger class. */
+  accountingPostingStatus: GoodsReceiptPostingStatus | string;
+  journalEntryId: string | null;
   items: GoodsReceiptItem[];
 }
 
@@ -375,4 +380,68 @@ export interface CreateSupplierPaymentRequest {
 export interface RecordSupplierPaymentResult {
   payment: SupplierPayment;
   invoice: PurchaseInvoice;
+}
+
+export type PurchaseReturnStatus = 'DRAFT' | 'CONFIRMED' | 'REVERSED';
+export type PurchaseReturnPostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+export type PurchaseReturnAllocationType = 'UNMATCHED_RECEIPT' | 'MATCHED_INVOICE';
+
+export interface PurchaseReturnAllocation {
+  id: string;
+  allocationType: PurchaseReturnAllocationType | string;
+  purchaseInvoiceItemId: string | null;
+  baseQuantity: string;
+  receiptUnitCost: string;
+  receiptCostAmount: string;
+  invoiceUnitCost: string | null;
+  invoiceCostAmount: string | null;
+  /** Signed: invoiceCostAmount - receiptCostAmount. Only set for MATCHED_INVOICE allocations. */
+  ppvAmount: string | null;
+}
+
+export interface PurchaseReturnItem {
+  id: string;
+  goodsReceiptItemId: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  unitOfMeasureId: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  conversionFactor: string | null;
+  quantity: string;
+  /** quantity × conversionFactor — the value sent to Inventory. Read-only. */
+  baseQuantity: string;
+  allocations: PurchaseReturnAllocation[];
+}
+
+export interface PurchaseReturn {
+  id: string;
+  tenantId: string;
+  returnNumber: string;
+  goodsReceiptId: string;
+  warehouseId: string;
+  status: PurchaseReturnStatus | string;
+  reason: string | null;
+  accountingPostingStatus: PurchaseReturnPostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  reversedAt: string | null;
+  reversalReason: string | null;
+  items: PurchaseReturnItem[];
+}
+
+export interface CreatePurchaseReturnLineRequest {
+  goodsReceiptItemId: string;
+  quantity: string;
+}
+
+export interface CreatePurchaseReturnRequest {
+  goodsReceiptId: string;
+  reason?: string;
+  items: CreatePurchaseReturnLineRequest[];
+}
+
+export interface ReversePurchaseReturnRequest {
+  reason?: string;
 }
