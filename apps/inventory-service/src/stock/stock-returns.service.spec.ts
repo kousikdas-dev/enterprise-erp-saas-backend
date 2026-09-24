@@ -863,4 +863,208 @@ describe('StockReturnsService', () => {
       expect(result.movements[0].type).toBe(StockMovementType.PURCHASE_RETURN_REVERSAL);
     });
   });
+
+  describe('goods_receipt_reversal (Phase 3.7)', () => {
+    const reversalDto: CreateStockReturnDto = {
+      referenceType: 'goods_receipt_reversal',
+      referenceId: 'd1111111-1111-4111-8111-111111111111',
+      warehouseId,
+      lines: [{ productId, quantity: '20', originalMovementId }],
+    };
+
+    function originalPurchaseMovementRow(overrides: Record<string, unknown> = {}) {
+      return originalMovementRow({
+        type: 'PURCHASE',
+        referenceType: 'goods_receipt',
+        referenceId: 'd2222222-2222-4222-8222-222222222222',
+        unitCost: decimal('15.0000'),
+        // A root PURCHASE movement never has its own originalMovementId set —
+        // confirms the grandparent-decrement branch (Phase 3.6) correctly
+        // never fires for this config entry.
+        originalMovementId: null,
+        ...overrides,
+      });
+    }
+
+    it('applies a new goods_receipt_reversal: PURCHASE_REVERSAL movement at the ORIGINAL PURCHASE cost, Stock decreases, reversesMovementId set, no grandparent lock attempted', async () => {
+      const { service, tx } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          [originalPurchaseMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('0') })],
+          [{ id: 's1', quantity: decimal('50'), totalValue: decimal('750') }],
+        ],
+        movementCreate: {
+          id: 'mmmmmmmm-mmmm-4mmm-8mmm-mmmmmmmmmmmm',
+          tenantId: actor.tenantId,
+          productId,
+          warehouseId,
+          type: StockMovementType.PURCHASE_REVERSAL,
+          quantity: decimal('20'),
+          referenceType: 'goods_receipt_reversal',
+          referenceId: reversalDto.referenceId,
+          originalMovementId,
+          createdBy: actor.userId,
+          createdAt: new Date(),
+          unitCost: decimal('15'),
+          totalCost: decimal('300'),
+        },
+      });
+
+      const result = await service.apply(actor, reversalDto);
+
+      expect(result.created).toBe(true);
+      expect(result.movements[0].type).toBe(StockMovementType.PURCHASE_REVERSAL);
+      expect(tx.stockMovement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: StockMovementType.PURCHASE_REVERSAL,
+            referenceType: 'goods_receipt_reversal',
+            originalMovementId,
+            reversesMovementId: originalMovementId,
+          }),
+        }),
+      );
+      const createData = (tx.stockMovement.create as jest.Mock).mock.calls[0][0].data;
+      // Original PURCHASE movement's own unitCost (15), never the current
+      // stock average (750/50 = 15 here coincidentally equal — see the next
+      // test for a case where they diverge).
+      expect((createData.unitCost as Prisma.Decimal).toString()).toBe('15');
+      expect((createData.totalCost as Prisma.Decimal).toString()).toBe('300');
+      const stockUpdateData = (tx.stock.update as jest.Mock).mock.calls[0][0].data;
+      // Subtractive: 50 - 20 = 30 (opposite direction from the original receipt).
+      expect((stockUpdateData.quantity as Prisma.Decimal).toString()).toBe('30');
+      expect((stockUpdateData.totalValue as Prisma.Decimal).toString()).toBe('450'); // 750 - 300
+      // No grandparent lock/update attempted — a root PURCHASE movement has
+      // no originalMovementId of its own.
+      expect(tx.stockMovement.update).toHaveBeenCalledTimes(1); // only the target's own returnedQuantity update
+    });
+
+    it('uses the ORIGINAL PURCHASE movement cost even when the current moving average has since shifted', async () => {
+      const { service, tx } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          [originalPurchaseMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('0') })],
+          // Current stock average is now 25/unit (1250/50) — far from the
+          // original receipt's 15/unit. The reversal must still cost at 15/unit.
+          [{ id: 's1', quantity: decimal('50'), totalValue: decimal('1250') }],
+        ],
+      });
+
+      await service.apply(actor, reversalDto);
+
+      const createData = (tx.stockMovement.create as jest.Mock).mock.calls[0][0].data;
+      expect((createData.unitCost as Prisma.Decimal).toString()).toBe('15');
+      expect((createData.totalCost as Prisma.Decimal).toString()).toBe('300');
+    });
+
+    it('rejects with "Insufficient stock" when the received quantity has since been consumed elsewhere (e.g. a Sale) — a risk unique to this subtractive reversal', async () => {
+      const { service, tx } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          [originalPurchaseMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('0') })],
+          // Only 5 units remain in the warehouse — 15 of the original 20
+          // have already been sold/transferred elsewhere.
+          [{ id: 's1', quantity: decimal('5'), totalValue: decimal('75') }],
+        ],
+      });
+
+      await expect(service.apply(actor, reversalDto)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.stock.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the original movement is not a PURCHASE (e.g. a PURCHASE_RETURN)', async () => {
+      const { service } = createService({
+        queryResponses: [[{ id: 'app-1' }], [originalPurchaseMovementRow({ type: 'PURCHASE_RETURN' })]],
+      });
+      await expect(service.apply(actor, reversalDto)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('caps at one full reversal via the shared returnedQuantity cap check (a second reversal attempt is rejected)', async () => {
+      const { service } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          // The PURCHASE movement was already fully reversed once
+          // (returnedQuantity === quantity) — a second reversal must be
+          // rejected the same way a double return is.
+          [originalPurchaseMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('20') })],
+        ],
+      });
+      await expect(service.apply(actor, reversalDto)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('propagates a DB-level reversesMovementId unique-constraint violation rather than silently succeeding (defense-in-depth double-reversal guard)', async () => {
+      const uniqueConstraintError = Object.assign(
+        new Error('Unique constraint failed on the fields: (`reversesMovementId`)'),
+        { code: 'P2002', meta: { target: ['reversesMovementId'] } },
+      );
+      const { service, tx } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          [originalPurchaseMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('0') })],
+          [{ id: 's1', quantity: decimal('50'), totalValue: decimal('750') }],
+        ],
+      });
+      (tx.stockMovement.create as jest.Mock).mockRejectedValueOnce(uniqueConstraintError);
+
+      await expect(service.apply(actor, reversalDto)).rejects.toBe(uniqueConstraintError);
+    });
+
+    it('replays an existing goods_receipt_reversal without creating a duplicate movement or updating stock again', async () => {
+      const { service, tx } = createService({ queryResponses: [[]] });
+      tx.stockReceiptApplication.findFirst.mockResolvedValue({
+        id: 'app-1',
+        tenantId: actor.tenantId,
+        referenceType: 'goods_receipt_reversal',
+        referenceId: reversalDto.referenceId,
+        warehouseId,
+        payloadHash: stockReturnPayloadHash({
+          warehouseId,
+          originalReferenceType: undefined,
+          originalReferenceId: undefined,
+          lines: [{ productId, quantity: '20.000000', originalMovementId }],
+        }),
+      });
+      tx.stockMovement.findMany.mockResolvedValue([
+        {
+          id: 'm1',
+          tenantId: actor.tenantId,
+          productId,
+          warehouseId,
+          type: StockMovementType.PURCHASE_REVERSAL,
+          quantity: decimal('20'),
+          referenceType: 'goods_receipt_reversal',
+          referenceId: reversalDto.referenceId,
+          originalMovementId,
+          createdBy: actor.userId,
+          createdAt: new Date(),
+          unitCost: decimal('15'),
+          totalCost: decimal('300'),
+        },
+      ]);
+      tx.stock.findFirst.mockResolvedValue({
+        id: 's1',
+        tenantId: actor.tenantId,
+        productId,
+        warehouseId,
+        quantity: decimal('30'),
+        totalValue: decimal('450'),
+      });
+
+      const result = await service.apply(actor, {
+        ...reversalDto,
+        lines: [{ ...reversalDto.lines[0], quantity: '20.000000' }],
+      });
+
+      expect(result.created).toBe(false);
+      expect(tx.stockMovement.create).not.toHaveBeenCalled();
+      expect(tx.stock.update).not.toHaveBeenCalled();
+      expect(result.movements[0].type).toBe(StockMovementType.PURCHASE_REVERSAL);
+    });
+  });
 });

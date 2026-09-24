@@ -19,7 +19,8 @@ import {
 type ReturnReferenceType =
   | 'sales_return'
   | 'purchase_return'
-  | 'purchase_return_reversal';
+  | 'purchase_return_reversal'
+  | 'goods_receipt_reversal';
 
 // Phase 3.5 — each supported referenceType maps to its own original-movement
 // type and stock direction. sales_return (Phase 3.4) is additive (mirrors a
@@ -67,6 +68,25 @@ const RETURN_CONFIG: Record<
     originalType: StockMovementType.PURCHASE_RETURN,
     resultType: StockMovementType.PURCHASE_RETURN_REVERSAL,
     direction: 'additive',
+    setsReversesMovementId: true,
+  },
+  // Phase 3.7 — undoes a specific PURCHASE movement DIRECTLY (the root
+  // receipt movement, never a derivative — unlike purchase_return_reversal
+  // above, whose target already has its own originalMovementId pointing at
+  // a grandparent; a PURCHASE movement's own originalMovementId is always
+  // null, so the grandparent-decrement branch below correctly never fires
+  // for this entry). Subtractive (mirrors purchase_return's own direction —
+  // stock must leave the warehouse again), so it carries the same
+  // "Insufficient stock" risk purchase_return does: if the received
+  // quantity has since been consumed by an unrelated Sale/Transfer/
+  // Adjustment, reversal is correctly rejected here, not silently allowed
+  // to go negative. Always full-quantity — Goods Receipt reversal is
+  // all-or-nothing by design (GoodsReceiptsService.reverse() never sends a
+  // partial line).
+  goods_receipt_reversal: {
+    originalType: StockMovementType.PURCHASE,
+    resultType: StockMovementType.PURCHASE_REVERSAL,
+    direction: 'subtractive',
     setsReversesMovementId: true,
   },
 };

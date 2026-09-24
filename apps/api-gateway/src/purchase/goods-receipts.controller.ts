@@ -30,6 +30,7 @@ import {
   CreateGoodsReceiptDto,
   GoodsReceiptDto,
   GoodsReceiptListDto,
+  ReverseGoodsReceiptDto,
 } from './dto/goods-receipt.dto';
 import { PurchaseForwardService } from './purchase-forward.service';
 
@@ -85,6 +86,59 @@ export class GoodsReceiptsController {
     return this.purchase.forward<GoodsReceiptDto>({
       method: 'POST',
       path: `/api/v1/goods-receipts/${id}/post`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/reverse')
+  @RequirePermissions(PERMISSIONS.GOODS_RECEIPTS_REVERSE)
+  @ApiOperation({
+    summary: 'Reverse goods receipt',
+    description:
+      'Undoes a POSTED receipt in full: reverses its Inventory movement(s), restores PurchaseOrderItem.receivedQuantity and PurchaseOrder.status, and reverses the GRNI journal. Only permitted when zero downstream activity exists (no Purchase Invoice match, no unmatched or matched Purchase Return). Idempotent if already REVERSED. Permission: goods-receipts.reverse.',
+  })
+  @ApiOkResponse({ type: GoodsReceiptDto })
+  @ApiConflictResponse({
+    description:
+      'Only a POSTED goods receipt can be reversed, a line has downstream activity, has no captured inventory movement reference, or the received quantity has since been consumed elsewhere (insufficient stock)',
+  })
+  @ApiManagementErrors()
+  reverse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseGoodsReceiptDto,
+    @Req() request: Request,
+  ): Promise<GoodsReceiptDto> {
+    return this.purchase.forward<GoodsReceiptDto>({
+      method: 'POST',
+      path: `/api/v1/goods-receipts/${id}/reverse`,
+      user,
+      body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.GOODS_RECEIPTS_REVERSE)
+  @ApiOperation({
+    summary: 'Retry goods receipt accounting reversal',
+    description:
+      'Retries the GRNI journal reversal for a REVERSED receipt whose post-reversal accounting attempt failed (still accountingPostingStatus POSTED). A no-op returning the receipt unchanged if already REVERSED. Same permission as reverse. Permission: goods-receipts.reverse.',
+  })
+  @ApiOkResponse({ type: GoodsReceiptDto })
+  @ApiConflictResponse({ description: 'Receipt is not REVERSED, or has no posted journal to reverse' })
+  @ApiManagementErrors()
+  retryAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<GoodsReceiptDto> {
+    return this.purchase.forward<GoodsReceiptDto>({
+      method: 'POST',
+      path: `/api/v1/goods-receipts/${id}/retry-accounting-reversal`,
       user,
       ip: request.ip,
       userAgent: headerString(request.headers['user-agent']),

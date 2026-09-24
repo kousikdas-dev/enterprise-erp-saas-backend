@@ -36,10 +36,20 @@ enum StockMovementType {
   // Phase 3.6 (Purchase Return reversal) — undoes a specific, identified
   // PURCHASE_RETURN movement: stock comes back in (additive, mirrors a
   // receipt), costed at that PURCHASE_RETURN movement's own unitCost
-  // verbatim. The only StockMovementType other than Opening Stock's own
-  // reversal to ever set StockMovement.reversesMovementId — see
+  // verbatim. Sets StockMovement.reversesMovementId — see
   // StockReturnsService's RETURN_CONFIG.
   PURCHASE_RETURN_REVERSAL
+  // Phase 3.7 (Goods Receipt reversal) — undoes a specific, identified
+  // PURCHASE movement directly (the root receipt movement, never a
+  // derivative): stock goes back out (subtractive, mirrors PURCHASE_RETURN's
+  // own direction — this is a real "Insufficient stock" risk if the
+  // received quantity has since been consumed by an unrelated Sale/
+  // Transfer/Adjustment), costed at that PURCHASE movement's own unitCost
+  // verbatim. Always full-quantity (never partial) — Goods Receipt reversal
+  // is all-or-nothing by design (GoodsReceiptsService.reverse()). Sets
+  // StockMovement.reversesMovementId — see StockReturnsService's
+  // RETURN_CONFIG.
+  PURCHASE_REVERSAL
 }
 
 // Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is

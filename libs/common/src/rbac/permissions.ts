@@ -56,6 +56,7 @@ export const PERMISSIONS = {
   PURCHASE_ORDERS_CANCEL: 'purchase-orders.cancel',
   GOODS_RECEIPTS_CREATE: 'goods-receipts.create',
   GOODS_RECEIPTS_READ: 'goods-receipts.read',
+  GOODS_RECEIPTS_REVERSE: 'goods-receipts.reverse',
   PURCHASE_INVOICES_CREATE: 'purchase-invoices.create',
   PURCHASE_INVOICES_READ: 'purchase-invoices.read',
   PURCHASE_INVOICES_UPDATE: 'purchase-invoices.update',

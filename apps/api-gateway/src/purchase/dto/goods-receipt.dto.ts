@@ -3,8 +3,10 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
   ValidationArguments,
   ValidationOptions,
@@ -73,6 +75,14 @@ export class CreateGoodsReceiptDto {
   items!: CreateGoodsReceiptLineDto[];
 }
 
+export class ReverseGoodsReceiptDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 export class GoodsReceiptItemDto {
   @ApiProperty()
   id!: string;
@@ -129,8 +139,23 @@ export class GoodsReceiptDto {
   @ApiProperty()
   warehouseId!: string;
 
-  @ApiProperty({ enum: ['PENDING_STOCK', 'POSTED'] })
+  @ApiProperty({ enum: ['PENDING_STOCK', 'POSTED', 'REVERSED'] })
   status!: string;
+
+  @ApiProperty({ enum: ['NOT_POSTED', 'POSTED', 'FAILED', 'REVERSED'] })
+  accountingPostingStatus!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  journalEntryId!: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  reversalJournalEntryId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  reversedAt!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  reversalReason!: string | null;
 
   @ApiProperty({ type: [GoodsReceiptItemDto] })
   items!: GoodsReceiptItemDto[];

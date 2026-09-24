@@ -31,6 +31,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { toGoodsReceiptResponse } from './dto/goods-receipt-response';
 import { CreateGoodsReceiptDto } from './dto/goods-receipt.dto';
+import { ReverseGoodsReceiptDto } from './dto/reverse-goods-receipt.dto';
 
 const RECEIPT_INCLUDE = {
   items: { orderBy: { createdAt: 'asc' as const } },
@@ -485,23 +486,11 @@ export class GoodsReceiptsService {
         }
       }
 
-      const refreshedItems = await tx.purchaseOrderItem.findMany({
-        where: {
-          purchaseOrderId: receipt.purchaseOrderId,
-          tenantId: actor.tenantId,
-        },
-      });
-      const fullyReceived = refreshedItems.every((item) =>
-        item.receivedQuantity.eq(item.quantity),
+      await this.recomputePurchaseOrderStatus(
+        tx,
+        actor.tenantId,
+        receipt.purchaseOrderId,
       );
-      await tx.purchaseOrder.update({
-        where: { id: receipt.purchaseOrderId },
-        data: {
-          status: fullyReceived
-            ? PurchaseOrderStatus.RECEIVED
-            : PurchaseOrderStatus.PARTIALLY_RECEIVED,
-        },
-      });
 
       return tx.goodsReceipt.update({
         where: { id: receipt.id },
@@ -537,6 +526,369 @@ export class GoodsReceiptsService {
     // where `posted` came from finalizePosted()'s own idempotent early return.
     const { receipt: finalRow } = await this.attemptGrniPosting(actor, posted, request);
     return toGoodsReceiptResponse(finalRow);
+  }
+
+  /**
+   * Recomputes PurchaseOrder.status from the CURRENT receivedQuantity values
+   * across every item of the given PO — stateless, never from a stored
+   * delta, so it is safe to call after either an increase (finalizePosted())
+   * or a decrease (Phase 3.7 — reverse()). Three-way, not the historical
+   * binary RECEIVED/PARTIALLY_RECEIVED: finalizePosted() never actually
+   * reaches the CONFIRMED branch (receivedQuantity can only be increasing
+   * there, from an already-CONFIRMED-or-later baseline), but reverse() can
+   * legitimately drive every item back to exactly 0 — which must resolve to
+   * CONFIRMED, not a lying PARTIALLY_RECEIVED.
+   */
+  private async recomputePurchaseOrderStatus(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    purchaseOrderId: string,
+  ): Promise<void> {
+    const refreshedItems = await tx.purchaseOrderItem.findMany({
+      where: { purchaseOrderId, tenantId },
+    });
+    const fullyReceived = refreshedItems.every((item) =>
+      item.receivedQuantity.eq(item.quantity),
+    );
+    const nothingReceived = refreshedItems.every((item) =>
+      item.receivedQuantity.eq(0),
+    );
+    await tx.purchaseOrder.update({
+      where: { id: purchaseOrderId },
+      data: {
+        status: fullyReceived
+          ? PurchaseOrderStatus.RECEIVED
+          : nothingReceived
+            ? PurchaseOrderStatus.CONFIRMED
+            : PurchaseOrderStatus.PARTIALLY_RECEIVED,
+      },
+    });
+  }
+
+  /**
+   * Phase 3.7 — POSTED -> REVERSED. Undoes this receipt's effects on
+   * Inventory, GRNI accounting, and PurchaseOrderItem.receivedQuantity /
+   * PurchaseOrder.status. Full-GR-only (never partial) and permitted only
+   * when zero downstream activity exists on any line: no Purchase Invoice
+   * matching (invoiceMatch.matchedQuantity), no unmatched Purchase Return
+   * (unmatchedReturnedQuantity), no matched Purchase Return
+   * (invoiceMatch.returnedQuantity). Checked twice — a soft, pre-transaction
+   * read here (so the common "obviously blocked" case never calls Inventory
+   * at all) and again, authoritatively, under lock inside
+   * restoreAndReverseReceipt() (closing the race window against a
+   * concurrent Invoice/Return confirmation — see the lock-order design in
+   * the Phase 3.7 plan). Inventory is a hard dependency (called first, must
+   * succeed — mirrors every other document's apply-before-finalize
+   * ordering, and carries the same "hard external call before the
+   * authoritative internal re-check" trade-off PurchaseReturnsService.confirm()
+   * already accepts); the accounting reversal below is post-commit,
+   * best-effort, exactly like PurchaseInvoicesService.cancel() and
+   * PurchaseReturnsService.reverse(). Idempotent: re-invoking on an
+   * already-REVERSED receipt is a no-op that never re-calls Inventory.
+   */
+  async reverse(
+    actor: ActorContext,
+    id: string,
+    dto: ReverseGoodsReceiptDto,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+    if (existing.status === GoodsReceiptStatus.REVERSED) {
+      return toGoodsReceiptResponse(existing);
+    }
+    if (existing.status !== GoodsReceiptStatus.POSTED) {
+      throw new ConflictException('Only a POSTED goods receipt can be reversed');
+    }
+
+    const itemIds = existing.items.map((item) => item.id);
+    const softGrItems = await this.prisma.goodsReceiptItem.findMany({
+      where: { id: { in: itemIds }, tenantId: actor.tenantId },
+      include: { invoiceMatch: true },
+    });
+    for (const item of softGrItems) {
+      if (item.unmatchedReturnedQuantity.gt(0)) {
+        throw new ConflictException(
+          `Goods receipt line for product ${item.productSku} has an unmatched Purchase Return recorded against it and cannot be reversed`,
+        );
+      }
+      if (item.invoiceMatch?.matchedQuantity.gt(0)) {
+        throw new ConflictException(
+          `Goods receipt line for product ${item.productSku} has been matched by a Purchase Invoice and cannot be reversed`,
+        );
+      }
+      if (item.invoiceMatch?.returnedQuantity.gt(0)) {
+        throw new ConflictException(
+          `Goods receipt line for product ${item.productSku} has a matched Purchase Return recorded against it and cannot be reversed`,
+        );
+      }
+    }
+
+    const inventoryLines = existing.items.map((item) => {
+      const movementId = item.inventoryMovementId;
+      if (!movementId) {
+        throw new ConflictException(
+          `Goods receipt line for product ${item.productSku} has no captured inventory movement reference and cannot be reversed`,
+        );
+      }
+      if (!item.baseQuantity) {
+        throw new ConflictException(
+          `Goods receipt line ${item.id} has no persisted baseQuantity and cannot be reversed`,
+        );
+      }
+      return {
+        productId: item.productId,
+        quantity: quantityToString(item.baseQuantity),
+        originalMovementId: movementId,
+      };
+    });
+
+    await this.inventory.applyReturn(actor, {
+      referenceType: 'goods_receipt_reversal',
+      referenceId: existing.id,
+      warehouseId: existing.warehouseId,
+      lines: inventoryLines,
+    });
+
+    const reversed = await this.prisma.$transaction((tx) =>
+      this.restoreAndReverseReceipt(tx, actor, id, dto.reason),
+    );
+
+    await this.audit.record({
+      actor,
+      action: 'goods-receipt.reversed',
+      resource: 'goods-receipt',
+      resourceId: reversed.id,
+      metadata: {
+        purchaseOrderId: reversed.purchaseOrderId,
+        itemCount: reversed.items.length,
+        reason: dto.reason?.trim() || null,
+      },
+      request,
+    });
+
+    let finalRow = reversed;
+    if (
+      reversed.accountingPostingStatus === GoodsReceiptPostingStatus.POSTED &&
+      reversed.journalEntryId
+    ) {
+      const { receipt: withReversal } = await this.attemptGrReversal(
+        actor,
+        reversed,
+        request,
+      );
+      finalRow = withReversal;
+    }
+
+    return toGoodsReceiptResponse(finalRow);
+  }
+
+  /**
+   * Manual retry for a REVERSED goods receipt whose accounting reversal
+   * (attempted post-commit inside reverse()) failed. Mirrors
+   * PurchaseReturnsService.retryAccountingReversal() exactly.
+   */
+  async retryAccountingReversal(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+
+    if (existing.status !== GoodsReceiptStatus.REVERSED) {
+      throw new ConflictException(
+        'Only a REVERSED goods receipt can have its accounting reversal retried',
+      );
+    }
+
+    if (existing.accountingPostingStatus === GoodsReceiptPostingStatus.REVERSED) {
+      return toGoodsReceiptResponse(existing);
+    }
+
+    if (
+      existing.accountingPostingStatus !== GoodsReceiptPostingStatus.POSTED ||
+      !existing.journalEntryId
+    ) {
+      throw new ConflictException(
+        'This goods receipt has no posted accounting journal to reverse',
+      );
+    }
+
+    const { receipt, error } = await this.attemptGrReversal(actor, existing, request);
+    if (error) throw error;
+
+    await this.audit.record({
+      actor,
+      action: 'goods-receipt.accounting-reversal-retried',
+      resource: 'goods-receipt',
+      resourceId: receipt.id,
+      metadata: { reversalJournalEntryId: receipt.reversalJournalEntryId },
+      request,
+    });
+
+    return toGoodsReceiptResponse(receipt);
+  }
+
+  /**
+   * The restoration algorithm, entirely inside one transaction. Lock order —
+   * deliberately longer than Purchase Return reversal's own: goods_receipts
+   * (header) -> purchase_orders (single row) -> purchase_order_items (all
+   * rows for the PO — this is what serializes against a concurrent
+   * PurchaseInvoicesService.confirm(), not merely where the decrement
+   * happens) -> goods_receipt_items (all rows for this GR — combined with
+   * the header lock, this is what serializes against a concurrent
+   * PurchaseReturnsService.allocateAndConfirm()) -> purchase_invoice_goods_receipt_matches
+   * (all match rows for this GR's items). Every lock name and relative order
+   * here matches PurchaseInvoicesService.confirm()'s own chain exactly, so
+   * no new deadlock class is introduced.
+   */
+  private async restoreAndReverseReceipt(
+    tx: Prisma.TransactionClient,
+    actor: ActorContext,
+    goodsReceiptId: string,
+    reason: string | undefined,
+  ): Promise<ReceiptWithItems> {
+    // 1. Lock the header.
+    const receiptRows = await tx.$queryRaw<
+      Array<{ id: string; status: string; purchaseOrderId: string }>
+    >(
+      Prisma.sql`
+        SELECT id, status::text AS status, "purchaseOrderId"
+        FROM goods_receipts
+        WHERE id = ${goodsReceiptId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+        FOR UPDATE
+      `,
+    );
+    const locked = receiptRows[0];
+    if (!locked) throw new NotFoundException('Goods receipt not found');
+    if (locked.status === GoodsReceiptStatus.REVERSED) {
+      return tx.goodsReceipt.findFirstOrThrow({
+        where: { id: goodsReceiptId, tenantId: actor.tenantId },
+        include: RECEIPT_INCLUDE,
+      });
+    }
+    if (locked.status !== GoodsReceiptStatus.POSTED) {
+      throw new ConflictException('Goods receipt cannot be reversed');
+    }
+
+    // 2. Lock the purchase order.
+    await tx.$queryRaw`
+      SELECT id FROM purchase_orders
+      WHERE id = ${locked.purchaseOrderId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+      FOR UPDATE
+    `;
+
+    const receipt = await tx.goodsReceipt.findFirstOrThrow({
+      where: { id: goodsReceiptId, tenantId: actor.tenantId },
+      include: RECEIPT_INCLUDE,
+    });
+
+    // 3. Lock the purchase order items, ascending id (implicit via the
+    // WHERE clause matching the whole PO — Postgres's row-lock acquisition
+    // order for a multi-row FOR UPDATE follows the query's own scan order,
+    // which for a simple equality-filtered SELECT is effectively stable).
+    await tx.$queryRaw`
+      SELECT id FROM purchase_order_items
+      WHERE "purchaseOrderId" = ${receipt.purchaseOrderId}::uuid
+        AND "tenantId" = ${actor.tenantId}::uuid
+      FOR UPDATE
+    `;
+    const poItems = await tx.purchaseOrderItem.findMany({
+      where: { purchaseOrderId: receipt.purchaseOrderId, tenantId: actor.tenantId },
+    });
+    const poItemsById = new Map(poItems.map((item) => [item.id, item]));
+
+    // 4. Lock the receipt's own items, ascending id, and re-verify zero
+    // unmatched-Purchase-Return activity under lock.
+    const itemIds = receipt.items.map((item) => item.id).sort();
+    const grItemRows = await tx.$queryRaw<
+      Array<{ id: string; unmatchedReturnedQuantity: Prisma.Decimal }>
+    >(
+      Prisma.sql`
+        SELECT id, "unmatchedReturnedQuantity"
+        FROM goods_receipt_items
+        WHERE id = ANY(${itemIds}::uuid[]) AND "tenantId" = ${actor.tenantId}::uuid
+        ORDER BY id
+        FOR UPDATE
+      `,
+    );
+    const grItemLockById = new Map(grItemRows.map((row) => [row.id, row]));
+    for (const item of receipt.items) {
+      const lockedItem = grItemLockById.get(item.id);
+      if (!lockedItem) throw new NotFoundException('Goods receipt item not found');
+      if (lockedItem.unmatchedReturnedQuantity.gt(0)) {
+        throw new ConflictException(
+          `Goods receipt line for product ${item.productSku} has an unmatched Purchase Return recorded against it and cannot be reversed`,
+        );
+      }
+    }
+
+    // 5. Lock the match rows for these items (if any), and re-verify zero
+    // invoice-matched / matched-Purchase-Return activity under lock.
+    const matchRows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        goodsReceiptItemId: string;
+        matchedQuantity: Prisma.Decimal;
+        returnedQuantity: Prisma.Decimal;
+      }>
+    >(
+      Prisma.sql`
+        SELECT id, "goodsReceiptItemId", "matchedQuantity", "returnedQuantity"
+        FROM purchase_invoice_goods_receipt_matches
+        WHERE "goodsReceiptItemId" = ANY(${itemIds}::uuid[]) AND "tenantId" = ${actor.tenantId}::uuid
+        ORDER BY "goodsReceiptItemId"
+        FOR UPDATE
+      `,
+    );
+    for (const row of matchRows) {
+      if (row.matchedQuantity.gt(0)) {
+        throw new ConflictException(
+          'A goods receipt line has been matched by a Purchase Invoice and cannot be reversed',
+        );
+      }
+      if (row.returnedQuantity.gt(0)) {
+        throw new ConflictException(
+          'A goods receipt line has a matched Purchase Return recorded against it and cannot be reversed',
+        );
+      }
+    }
+
+    // 6. Restore PurchaseOrderItem.receivedQuantity per item.
+    for (const item of receipt.items) {
+      const poItem = poItemsById.get(item.purchaseOrderItemId);
+      if (!poItem) {
+        throw new ConflictException('Purchase order item missing');
+      }
+      const nextReceived = poItem.receivedQuantity.minus(item.quantity);
+      if (nextReceived.lt(0)) {
+        throw new ConflictException(
+          'Reversal would drive receivedQuantity negative for a purchase order line',
+        );
+      }
+      await tx.purchaseOrderItem.update({
+        where: { id: poItem.id },
+        data: { receivedQuantity: nextReceived },
+      });
+    }
+
+    // 7. Recompute PurchaseOrder.status via the same shared helper
+    // finalizePosted() uses — stateless, so this correctly reflects any
+    // sibling GRs against the same PO that remain untouched.
+    await this.recomputePurchaseOrderStatus(
+      tx,
+      actor.tenantId,
+      receipt.purchaseOrderId,
+    );
+
+    return tx.goodsReceipt.update({
+      where: { id: goodsReceiptId },
+      data: {
+        status: GoodsReceiptStatus.REVERSED,
+        reversedAt: new Date(),
+        reversalReason: reason?.trim() || null,
+      },
+      include: RECEIPT_INCLUDE,
+    });
   }
 
   /**
@@ -684,6 +1036,62 @@ export class GoodsReceiptsService {
           updateError instanceof Error ? updateError.stack : undefined,
         );
       }
+      const refreshed = await this.require(actor, receipt.id);
+      return { receipt: refreshed, error };
+    }
+  }
+
+  /**
+   * Phase 3.7 — attempts to reverse (or idempotently replay the reversal of)
+   * this receipt's already-POSTED GRNI accounting journal. The original
+   * journal entry is never touched — looked up read-only inside
+   * accounting-service and stays POSTED permanently (same "no VOID" design
+   * as every other document in this module). On failure,
+   * accountingPostingStatus is deliberately left at POSTED (nothing to
+   * update) rather than introducing a new failure state —
+   * retryAccountingReversal() is the dedicated retry path. Never throws: the
+   * caller decides whether a failure should be surfaced
+   * (retryAccountingReversal does; reverse()'s post-commit call does not).
+   * Mirrors PurchaseReturnsService.attemptReturnReversal() exactly.
+   */
+  private async attemptGrReversal(
+    actor: ActorContext,
+    receipt: ReceiptWithItems,
+    request?: RequestAuditMeta,
+  ) {
+    try {
+      const result = await this.accountingJournal.reverse(actor, {
+        sourceService: ACCOUNTING_SOURCE_SERVICE,
+        sourceType: 'GOODS_RECEIPT',
+        sourceId: receipt.id,
+        reversalSourceType: 'GOODS_RECEIPT_REVERSAL',
+        description: `Reversal of Goods Receipt ${receipt.id}`,
+      });
+      const updated = await this.prisma.goodsReceipt.update({
+        where: { id: receipt.id },
+        data: {
+          accountingPostingStatus: GoodsReceiptPostingStatus.REVERSED,
+          reversalJournalEntryId: result.id,
+        },
+        include: RECEIPT_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'goods-receipt.accounting-reversed',
+        resource: 'goods-receipt',
+        resourceId: receipt.id,
+        metadata: {
+          reversalJournalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { receipt: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse GRNI accounting journal for reversed goods receipt ${receipt.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       const refreshed = await this.require(actor, receipt.id);
       return { receipt: refreshed, error };
     }

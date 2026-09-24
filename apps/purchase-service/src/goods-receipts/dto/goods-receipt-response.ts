@@ -17,6 +17,9 @@ type ReceiptWithItems = {
   updatedAt: Date;
   accountingPostingStatus: GoodsReceiptPostingStatus;
   journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  reversedAt: Date | null;
+  reversalReason: string | null;
   items: Array<{
     id: string;
     tenantId: string;
@@ -51,6 +54,9 @@ export function toGoodsReceiptResponse(row: ReceiptWithItems) {
     // own posting state, mirroring PurchaseInvoice's response shape.
     accountingPostingStatus: row.accountingPostingStatus,
     journalEntryId: row.journalEntryId,
+    reversalJournalEntryId: row.reversalJournalEntryId,
+    reversedAt: row.reversedAt,
+    reversalReason: row.reversalReason,
     items: row.items.map((item) => ({
       id: item.id,
       tenantId: item.tenantId,

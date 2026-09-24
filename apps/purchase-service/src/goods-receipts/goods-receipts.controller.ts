@@ -14,6 +14,7 @@ import { ActorGuard } from '../auth/actor.guard';
 import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
 import { CreateGoodsReceiptDto } from './dto/goods-receipt.dto';
+import { ReverseGoodsReceiptDto } from './dto/reverse-goods-receipt.dto';
 import { GoodsReceiptsService } from './goods-receipts.service';
 
 @Controller({ path: 'goods-receipts', version: '1' })
@@ -46,6 +47,29 @@ export class GoodsReceiptsController {
     @Req() request: Request,
   ) {
     return this.receipts.retryAccountingPosting(
+      actor,
+      id,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseGoodsReceiptDto,
+    @Req() request: Request,
+  ) {
+    return this.receipts.reverse(actor, id, dto, requestAuditMeta(request));
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  retryAccountingReversal(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.receipts.retryAccountingReversal(
       actor,
       id,
       requestAuditMeta(request),

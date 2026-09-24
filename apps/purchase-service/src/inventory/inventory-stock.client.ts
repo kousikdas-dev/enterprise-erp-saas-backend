@@ -41,17 +41,27 @@ export interface InventoryStockReceiptRequest {
 // endpoint, same shape, only referenceType and each line's originalMovementId
 // selector differ (there it points at a PurchaseReturnItem's own captured
 // inventoryMovementId instead of a GoodsReceiptItem's).
+//
+// Phase 3.7 adds 'goods_receipt_reversal': subtractive (stock goes back out —
+// carries the same "Insufficient stock" risk as 'purchase_return', unlike the
+// additive reversal above), reversing the original PURCHASE movement
+// directly. Always full-quantity — Goods Receipt reversal never sends a
+// partial line.
 export interface InventoryStockPurchaseReturnRequest {
-  referenceType: 'purchase_return' | 'purchase_return_reversal';
+  referenceType:
+    | 'purchase_return'
+    | 'purchase_return_reversal'
+    | 'goods_receipt_reversal';
   referenceId: string;
   warehouseId: string;
   lines: Array<{
     productId: string;
     quantity: string;
     // The AUTHORITATIVE selector for which original movement this line acts
-    // against — GoodsReceiptItem.inventoryMovementId for 'purchase_return',
-    // PurchaseReturnItem.inventoryMovementId for 'purchase_return_reversal'.
-    // Never resolved by (referenceType, referenceId, productId) lookup.
+    // against — GoodsReceiptItem.inventoryMovementId for 'purchase_return'
+    // and 'goods_receipt_reversal', PurchaseReturnItem.inventoryMovementId
+    // for 'purchase_return_reversal'. Never resolved by (referenceType,
+    // referenceId, productId) lookup.
     originalMovementId: string;
   }>;
 }

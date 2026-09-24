@@ -27,17 +27,24 @@ enum PurchaseOrderStatus {
 enum GoodsReceiptStatus {
   PENDING_STOCK
   POSTED
+  // Phase 3.7 — undoes a POSTED receipt's effects on Inventory, GRNI
+  // accounting, and PurchaseOrderItem.receivedQuantity. Full-GR-only
+  // (never partial), and only when zero downstream activity exists
+  // (no invoice match, no unmatched or matched Purchase Return against
+  // any line) — see GoodsReceiptsService.reverse()'s own doc comment.
+  REVERSED
 }
 
-// Phase 3.1 (GRNI Accounting) — GoodsReceipt posting can only ever be
-// NOT_POSTED/POSTED/FAILED: Goods Receipt reversal is explicitly deferred
-// in this phase, so no REVERSED value is representable here (mirrors
-// SupplierPaymentPostingStatus, which is narrower than
-// PurchaseInvoicePostingStatus for the identical reason — no reversal path).
+// Mirrors PurchaseReturnPostingStatus's exact four-value shape (Phase 3.7
+// adds REVERSED, closing the gap this comment used to document). No third
+// "reversal failed" value: a failed reversal attempt deliberately leaves
+// this at POSTED, exactly like every other reversal in this module — see
+// GoodsReceiptsService.reverse()'s own doc comment.
 enum GoodsReceiptPostingStatus {
   NOT_POSTED
   POSTED
   FAILED
+  REVERSED
 }
 
 enum SupplierAddressType {
@@ -259,14 +266,21 @@ model GoodsReceipt {
 
   // Phase 3.1 (GRNI Accounting) — Purchase-side cache of accounting-service's
   // own posting state, mirroring the exact PurchaseInvoice/SupplierPayment
-  // pattern (Phase C1/C2) above. No reversalJournalEntryId: Goods Receipt
-  // reversal is deferred in this phase (see GoodsReceiptPostingStatus). No
-  // FK to accounting_db (separate database; soft reference). The
-  // authoritative idempotency guard is accounting-service's own unique
-  // constraint on (tenantId, sourceService, sourceType, sourceId), never
-  // this column.
+  // pattern (Phase C1/C2) above. No FK to accounting_db (separate database;
+  // soft reference). The authoritative idempotency guard is
+  // accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never this column.
   accountingPostingStatus GoodsReceiptPostingStatus @default(NOT_POSTED)
   journalEntryId          String?                   @db.Uuid
+
+  // Phase 3.7 — populated only once the accounting reversal succeeds
+  // (mirrors PurchaseReturn.reversalJournalEntryId exactly). NULL while
+  // status is REVERSED but the accounting reversal hasn't (yet) succeeded —
+  // retryable via retryAccountingReversal(), same shape as every other
+  // reversal in this module.
+  reversalJournalEntryId String?   @db.Uuid
+  reversedAt             DateTime?
+  reversalReason         String?
 
   purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   items         GoodsReceiptItem[]

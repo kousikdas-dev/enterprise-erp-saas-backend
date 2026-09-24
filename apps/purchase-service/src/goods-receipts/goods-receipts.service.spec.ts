@@ -198,6 +198,11 @@ describe('GoodsReceiptsService', () => {
       // keeps passing unmodified; GRNI-specific tests override these.
       updateGoodsReceipt?: jest.Mock;
       postJournal?: jest.Mock;
+      // Phase 3.7 (Goods Receipt reversal).
+      applyReturn?: jest.Mock;
+      reverseJournal?: jest.Mock;
+      reverseTx?: ReturnType<typeof buildReverseTx>;
+      findManyGoodsReceiptItem?: jest.Mock;
     } = {},
   ) {
     const txSequence = [prepareTx, finalizeTx].filter(
@@ -206,6 +211,9 @@ describe('GoodsReceiptsService', () => {
     let call = 0;
     const prisma = {
       $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+        if (extra.reverseTx) {
+          return fn(extra.reverseTx);
+        }
         const tx = txSequence[call];
         call += 1;
         return fn(tx);
@@ -217,6 +225,11 @@ describe('GoodsReceiptsService', () => {
           jest.fn((args: { data: unknown }) =>
             Promise.resolve({ ...postedResponse(), ...(args.data as object) }),
           ),
+      },
+      // Phase 3.7 — reverse()'s own soft, pre-transaction downstream-activity
+      // check. Default: no downstream activity found for any item.
+      goodsReceiptItem: {
+        findMany: extra.findManyGoodsReceiptItem ?? jest.fn().mockResolvedValue([]),
       },
     };
     const inventory = {
@@ -234,11 +247,29 @@ describe('GoodsReceiptsService', () => {
             })),
           }),
         ),
+      // Phase 3.7 — default mock returns one synthetic reversal movement per
+      // line, matching the real StockReturnsService's positional guarantee.
+      applyReturn:
+        extra.applyReturn ??
+        jest.fn((_actor: unknown, body: { lines: Array<{ productId: string }> }) =>
+          Promise.resolve({
+            created: true,
+            movements: body.lines.map((line) => ({
+              id: 'reversal-movement-1',
+              productId: line.productId,
+              unitCost: null,
+              totalCost: null,
+            })),
+          }),
+        ),
     };
     const accountingJournal = {
       post:
         extra.postJournal ??
         jest.fn().mockResolvedValue({ id: 'journal-1', idempotentReplay: false }),
+      reverse:
+        extra.reverseJournal ??
+        jest.fn().mockResolvedValue({ id: 'reversal-journal-1', idempotentReplay: false }),
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
     const service = new GoodsReceiptsService(
@@ -248,6 +279,91 @@ describe('GoodsReceiptsService', () => {
       accountingJournal as unknown as AccountingJournalClient,
     );
     return { service, prisma, inventory, audit, accountingJournal };
+  }
+
+  /**
+   * tx mock for restoreAndReverseReceipt() (Phase 3.7). $queryRaw responses
+   * are matched by SQL content (not call order), mirroring
+   * PurchaseReturnsService's own spec-file convention, since the real
+   * implementation issues both Prisma.sql-tagged and plain-tagged-template
+   * queries in a fixed but content-distinguishable sequence.
+   */
+  function buildReverseTx(options: {
+    receiptId: string;
+    purchaseOrderId: string;
+    initialStatus: string;
+    receiptItems: Array<Record<string, unknown>>;
+    poItemsBeforeDecrement: Array<{
+      id: string;
+      quantity: Prisma.Decimal;
+      receivedQuantity: Prisma.Decimal;
+    }>;
+    poItemsAfterDecrement: Array<{
+      id: string;
+      quantity: Prisma.Decimal;
+      receivedQuantity: Prisma.Decimal;
+    }>;
+    grItemLockRows: Array<{ id: string; unmatchedReturnedQuantity: Prisma.Decimal }>;
+    matchLockRows?: Array<{
+      id: string;
+      goodsReceiptItemId: string;
+      matchedQuantity: Prisma.Decimal;
+      returnedQuantity: Prisma.Decimal;
+    }>;
+    postedResult: Record<string, unknown>;
+  }) {
+    const fullReceipt = {
+      id: options.receiptId,
+      tenantId: actor.tenantId,
+      purchaseOrderId: options.purchaseOrderId,
+      warehouseId,
+      status: options.initialStatus,
+      items: options.receiptItems,
+    };
+    const poItemUpdateCalls: Array<{ where: { id: string }; data: Record<string, unknown> }> = [];
+    let poItemFindManyCall = 0;
+    return {
+      $queryRaw: jest.fn((...args: unknown[]) => {
+        const sql = sqlText(args);
+        if (sql.includes('FROM goods_receipts')) {
+          return Promise.resolve([
+            {
+              id: options.receiptId,
+              status: options.initialStatus,
+              purchaseOrderId: options.purchaseOrderId,
+            },
+          ]);
+        }
+        if (sql.includes('FROM goods_receipt_items')) {
+          return Promise.resolve(options.grItemLockRows);
+        }
+        if (sql.includes('FROM purchase_invoice_goods_receipt_matches')) {
+          return Promise.resolve(options.matchLockRows ?? []);
+        }
+        // purchase_orders / purchase_order_items — plain locks, no data needed.
+        return Promise.resolve([{ id: 'lock-row' }]);
+      }),
+      goodsReceipt: {
+        findFirstOrThrow: jest.fn().mockResolvedValue(fullReceipt),
+        update: jest.fn().mockResolvedValue(options.postedResult),
+      },
+      purchaseOrderItem: {
+        findMany: jest.fn(() => {
+          poItemFindManyCall += 1;
+          return Promise.resolve(
+            poItemFindManyCall === 1
+              ? options.poItemsBeforeDecrement
+              : options.poItemsAfterDecrement,
+          );
+        }),
+        update: jest.fn((args: { where: { id: string }; data: Record<string, unknown> }) => {
+          poItemUpdateCalls.push(args);
+          return Promise.resolve({});
+        }),
+      },
+      purchaseOrder: { update: jest.fn() },
+      __poItemUpdateCalls: poItemUpdateCalls,
+    };
   }
 
   function postedResponse(overrides: Record<string, unknown> = {}) {
@@ -1380,6 +1496,494 @@ describe('GoodsReceiptsService', () => {
       expect(accountingJournal.post).toHaveBeenCalledTimes(1);
       expect(result.accountingPostingStatus).toBe(GoodsReceiptPostingStatus.POSTED);
       expect(result.journalEntryId).toBe('journal-1');
+    });
+  });
+
+  describe('Phase 3.7 — Goods Receipt reversal', () => {
+    function reversalGrItem(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'gri1',
+        tenantId: actor.tenantId,
+        goodsReceiptId: receiptId,
+        purchaseOrderItemId: poItemId,
+        quantity: decimal('4'),
+        baseQuantity: decimal('4'),
+        unitCost: decimal('10'),
+        productId,
+        productSku: 'SKU-1',
+        productName: 'Widget',
+        unitOfMeasureId: null,
+        uomCode: null,
+        uomName: null,
+        conversionFactor: decimal('1'),
+        unmatchedReturnedQuantity: decimal('0'),
+        inventoryMovementId: 'movement-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    function reversedResponse(overrides: Record<string, unknown> = {}) {
+      return postedResponse({
+        status: GoodsReceiptStatus.REVERSED,
+        reversedAt: new Date(),
+        reversalReason: null,
+        reversalJournalEntryId: null,
+        ...overrides,
+      });
+    }
+
+    it('is idempotent: reversing an already-REVERSED receipt returns it without calling Inventory again', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.REVERSED, items: [reversalGrItem()] }),
+      );
+      const applyReturn = jest.fn();
+      const { service } = buildService(null, null, { findFirst, applyReturn });
+
+      const result = await service.reverse(actor, receiptId, {});
+
+      expect(result.status).toBe('REVERSED');
+      expect(applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('rejects reversing a PENDING_STOCK receipt', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.PENDING_STOCK, items: [reversalGrItem()] }),
+      );
+      const { service } = buildService(null, null, { findFirst });
+      await expect(service.reverse(actor, receiptId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('rejects (soft check) when a line has an unmatched Purchase Return recorded against it, without calling Inventory', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [reversalGrItem()] }),
+      );
+      const findManyGoodsReceiptItem = jest.fn().mockResolvedValue([
+        { ...reversalGrItem(), unmatchedReturnedQuantity: decimal('2'), invoiceMatch: null },
+      ]);
+      const applyReturn = jest.fn();
+      const { service } = buildService(null, null, {
+        findFirst,
+        findManyGoodsReceiptItem,
+        applyReturn,
+      });
+
+      await expect(service.reverse(actor, receiptId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('rejects (soft check) when a line has been matched by a Purchase Invoice, without calling Inventory', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [reversalGrItem()] }),
+      );
+      const findManyGoodsReceiptItem = jest.fn().mockResolvedValue([
+        {
+          ...reversalGrItem(),
+          invoiceMatch: { matchedQuantity: decimal('4'), returnedQuantity: decimal('0') },
+        },
+      ]);
+      const applyReturn = jest.fn();
+      const { service } = buildService(null, null, {
+        findFirst,
+        findManyGoodsReceiptItem,
+        applyReturn,
+      });
+
+      await expect(service.reverse(actor, receiptId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('rejects (soft check) when a line has a matched Purchase Return recorded against it, without calling Inventory', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [reversalGrItem()] }),
+      );
+      const findManyGoodsReceiptItem = jest.fn().mockResolvedValue([
+        {
+          ...reversalGrItem(),
+          invoiceMatch: { matchedQuantity: decimal('4'), returnedQuantity: decimal('1') },
+        },
+      ]);
+      const applyReturn = jest.fn();
+      const { service } = buildService(null, null, {
+        findFirst,
+        findManyGoodsReceiptItem,
+        applyReturn,
+      });
+
+      await expect(service.reverse(actor, receiptId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('rejects a legacy item with no captured inventoryMovementId', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({
+          status: GoodsReceiptStatus.POSTED,
+          items: [reversalGrItem({ inventoryMovementId: null })],
+        }),
+      );
+      const applyReturn = jest.fn();
+      const { service } = buildService(null, null, { findFirst, applyReturn });
+
+      await expect(service.reverse(actor, receiptId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(applyReturn).not.toHaveBeenCalled();
+    });
+
+    it("calls Inventory with referenceType 'goods_receipt_reversal' and originalMovementId sourced from GoodsReceiptItem.inventoryMovementId", async () => {
+      const item = reversalGrItem({ baseQuantity: decimal('4'), inventoryMovementId: 'movement-xyz' });
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [item] }),
+      );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('4') },
+        ],
+        poItemsAfterDecrement: [
+          { id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('0') },
+        ],
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('0') }],
+        postedResult: reversedResponse(),
+      });
+      const { service, inventory } = buildService(null, null, { findFirst, reverseTx });
+
+      await service.reverse(actor, receiptId, {});
+
+      expect(inventory.applyReturn).toHaveBeenCalledWith(actor, {
+        referenceType: 'goods_receipt_reversal',
+        referenceId: receiptId,
+        warehouseId,
+        lines: [{ productId, quantity: '4.000000', originalMovementId: 'movement-xyz' }],
+      });
+    });
+
+    it('restores PurchaseOrderItem.receivedQuantity and recomputes PurchaseOrder.status to CONFIRMED when this was the only receipt against the line', async () => {
+      const item = reversalGrItem();
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [item] }),
+      );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('4') },
+        ],
+        // After this GR's own 4 units are subtracted, the line is back to 0
+        // received — the new 3-way recompute must land on CONFIRMED, never
+        // the historical binary PARTIALLY_RECEIVED.
+        poItemsAfterDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('0') },
+        ],
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('0') }],
+        postedResult: reversedResponse(),
+      });
+      const { service } = buildService(null, null, { findFirst, reverseTx });
+
+      await service.reverse(actor, receiptId, {});
+
+      expect(reverseTx.__poItemUpdateCalls).toEqual([
+        { where: { id: poItemId }, data: { receivedQuantity: decimal('0') } },
+      ]);
+      expect(reverseTx.purchaseOrder.update).toHaveBeenCalledWith({
+        where: { id: poId },
+        data: { status: PurchaseOrderStatus.CONFIRMED },
+      });
+    });
+
+    it('recomputes PurchaseOrder.status to PARTIALLY_RECEIVED when a sibling receipt still contributes receivedQuantity on the same line', async () => {
+      const item = reversalGrItem({ quantity: decimal('4'), baseQuantity: decimal('4') });
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [item] }),
+      );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        // 10 ordered; 4 from this GR + 3 from a sibling GR = 7 received.
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('7') },
+        ],
+        // After reversing THIS GR's own 4, only the sibling's 3 remain.
+        poItemsAfterDecrement: [
+          { id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('3') },
+        ],
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('0') }],
+        postedResult: reversedResponse(),
+      });
+      const { service } = buildService(null, null, { findFirst, reverseTx });
+
+      await service.reverse(actor, receiptId, {});
+
+      expect(reverseTx.__poItemUpdateCalls).toEqual([
+        { where: { id: poItemId }, data: { receivedQuantity: decimal('3') } },
+      ]);
+      expect(reverseTx.purchaseOrder.update).toHaveBeenCalledWith({
+        where: { id: poId },
+        data: { status: PurchaseOrderStatus.PARTIALLY_RECEIVED },
+      });
+    });
+
+    it('rejects under lock when a line has an unmatched Purchase Return recorded against it (the hard, authoritative re-check)', async () => {
+      const item = reversalGrItem();
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED, items: [item] }),
+      );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('4') },
+        ],
+        poItemsAfterDecrement: [],
+        // A concurrent Purchase Return committed between the soft check and
+        // this lock — the hard re-check must still catch it.
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('1') }],
+        postedResult: reversedResponse(),
+      });
+      const { service } = buildService(null, null, { findFirst, reverseTx });
+
+      await expect(service.reverse(actor, receiptId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(reverseTx.__poItemUpdateCalls).toHaveLength(0);
+    });
+
+    it('on accounting success, calls .reverse() with sourceType GOODS_RECEIPT and reversalSourceType GOODS_RECEIPT_REVERSAL, and persists REVERSED/reversalJournalEntryId', async () => {
+      const item = reversalGrItem();
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({
+          status: GoodsReceiptStatus.POSTED,
+          accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+          journalEntryId: 'journal-1',
+          items: [item],
+        }),
+      );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('4') },
+        ],
+        poItemsAfterDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('0') },
+        ],
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('0') }],
+        postedResult: reversedResponse({
+          accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+          journalEntryId: 'journal-1',
+        }),
+      });
+      const reverseJournal = jest
+        .fn()
+        .mockResolvedValue({ id: 'reversal-journal-1', idempotentReplay: false });
+      const updateGoodsReceipt = jest.fn().mockResolvedValue(
+        reversedResponse({
+          accountingPostingStatus: GoodsReceiptPostingStatus.REVERSED,
+          reversalJournalEntryId: 'reversal-journal-1',
+        }),
+      );
+      const { service, accountingJournal } = buildService(null, null, {
+        findFirst,
+        reverseTx,
+        reverseJournal,
+        updateGoodsReceipt,
+      });
+
+      const result = await service.reverse(actor, receiptId, {});
+
+      expect(accountingJournal.reverse).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceType: 'GOODS_RECEIPT',
+          sourceId: receiptId,
+          reversalSourceType: 'GOODS_RECEIPT_REVERSAL',
+        }),
+      );
+      expect(result.accountingPostingStatus).toBe('REVERSED');
+    });
+
+    it('never throws on an accounting-reversal failure: reverse() still resolves REVERSED, accountingPostingStatus stays POSTED (no new FAILED-for-reversal state)', async () => {
+      const item = reversalGrItem();
+      // First call: reverse()'s own initial require() (still POSTED). Every
+      // subsequent call: attemptGrReversal()'s catch-block re-fetch, after
+      // the transaction has already committed the REVERSED status.
+      const findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(
+          postedResponse({
+            status: GoodsReceiptStatus.POSTED,
+            accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+            journalEntryId: 'journal-1',
+            items: [item],
+          }),
+        )
+        .mockResolvedValue(
+          postedResponse({
+            status: GoodsReceiptStatus.REVERSED,
+            accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+            journalEntryId: 'journal-1',
+            items: [item],
+          }),
+        );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('4') },
+        ],
+        poItemsAfterDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('0') },
+        ],
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('0') }],
+        postedResult: reversedResponse({
+          accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+          journalEntryId: 'journal-1',
+        }),
+      });
+      const reverseJournal = jest.fn().mockRejectedValue(new Error('accounting service unreachable'));
+      const { service } = buildService(null, null, { findFirst, reverseTx, reverseJournal });
+
+      const result = await service.reverse(actor, receiptId, {});
+
+      expect(result.status).toBe('REVERSED');
+      expect(result.accountingPostingStatus).toBe('POSTED');
+    });
+
+    it("'nothing to reverse' branch: skips the accounting call entirely when the original GRNI posting was never POSTED", async () => {
+      const item = reversalGrItem();
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({
+          status: GoodsReceiptStatus.POSTED,
+          accountingPostingStatus: GoodsReceiptPostingStatus.NOT_POSTED,
+          journalEntryId: null,
+          items: [item],
+        }),
+      );
+      const reverseTx = buildReverseTx({
+        receiptId,
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.POSTED,
+        receiptItems: [item],
+        poItemsBeforeDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('4') },
+        ],
+        poItemsAfterDecrement: [
+          { id: poItemId, quantity: decimal('4'), receivedQuantity: decimal('0') },
+        ],
+        grItemLockRows: [{ id: item.id as string, unmatchedReturnedQuantity: decimal('0') }],
+        postedResult: reversedResponse({
+          accountingPostingStatus: GoodsReceiptPostingStatus.NOT_POSTED,
+        }),
+      });
+      const reverseJournal = jest.fn();
+      const { service } = buildService(null, null, { findFirst, reverseTx, reverseJournal });
+
+      const result = await service.reverse(actor, receiptId, {});
+
+      expect(result.status).toBe('REVERSED');
+      expect(reverseJournal).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retryAccountingReversal() (Phase 3.7)', () => {
+    function reversedGrResponse(overrides: Record<string, unknown> = {}) {
+      return postedResponse({
+        status: GoodsReceiptStatus.REVERSED,
+        accountingPostingStatus: GoodsReceiptPostingStatus.POSTED,
+        journalEntryId: 'journal-1',
+        ...overrides,
+      });
+    }
+
+    it('rejects when the receipt is not yet REVERSED', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        postedResponse({ status: GoodsReceiptStatus.POSTED }),
+      );
+      const { service } = buildService(null, null, { findFirst });
+      await expect(
+        service.retryAccountingReversal(actor, receiptId),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('no-ops when the accounting reversal already succeeded', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        reversedGrResponse({ accountingPostingStatus: GoodsReceiptPostingStatus.REVERSED }),
+      );
+      const reverseJournal = jest.fn();
+      const { service } = buildService(null, null, { findFirst, reverseJournal });
+
+      const result = await service.retryAccountingReversal(actor, receiptId);
+
+      expect(result.accountingPostingStatus).toBe('REVERSED');
+      expect(reverseJournal).not.toHaveBeenCalled();
+    });
+
+    it('rejects when there is no posted journal to reverse', async () => {
+      const findFirst = jest.fn().mockResolvedValue(
+        reversedGrResponse({
+          accountingPostingStatus: GoodsReceiptPostingStatus.NOT_POSTED,
+          journalEntryId: null,
+        }),
+      );
+      const { service } = buildService(null, null, { findFirst });
+      await expect(
+        service.retryAccountingReversal(actor, receiptId),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('surfaces a renewed reversal failure to the caller', async () => {
+      const findFirst = jest.fn().mockResolvedValue(reversedGrResponse());
+      const reverseJournal = jest.fn().mockRejectedValue(new Error('still unreachable'));
+      const { service } = buildService(null, null, { findFirst, reverseJournal });
+
+      await expect(
+        service.retryAccountingReversal(actor, receiptId),
+      ).rejects.toThrow('still unreachable');
+    });
+
+    it('succeeds and persists reversalJournalEntryId on a successful retry', async () => {
+      const findFirst = jest.fn().mockResolvedValue(reversedGrResponse());
+      const reverseJournal = jest
+        .fn()
+        .mockResolvedValue({ id: 'reversal-journal-2', idempotentReplay: false });
+      const updateGoodsReceipt = jest.fn().mockResolvedValue(
+        reversedGrResponse({
+          accountingPostingStatus: GoodsReceiptPostingStatus.REVERSED,
+          reversalJournalEntryId: 'reversal-journal-2',
+        }),
+      );
+      const { service } = buildService(null, null, {
+        findFirst,
+        reverseJournal,
+        updateGoodsReceipt,
+      });
+
+      const result = await service.retryAccountingReversal(actor, receiptId);
+
+      expect(result.accountingPostingStatus).toBe('REVERSED');
+      expect(result.reversalJournalEntryId).toBe('reversal-journal-2');
     });
   });
 });
