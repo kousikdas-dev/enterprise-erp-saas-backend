@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
+import { AccountsPayableController } from './accounts-payable.controller';
 import { GoodsReceiptsController } from './goods-receipts.controller';
 import { PurchaseForwardService } from './purchase-forward.service';
 import { PurchaseInvoicesController } from './purchase-invoices.controller';
@@ -26,6 +27,7 @@ import { SuppliersController } from './suppliers.controller';
     GoodsReceiptsController,
     PurchaseInvoicesController,
     PurchaseReturnsController,
+    AccountsPayableController,
   ],
   providers: [PurchaseForwardService],
 })

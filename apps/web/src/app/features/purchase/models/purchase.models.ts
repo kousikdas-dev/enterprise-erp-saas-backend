@@ -459,3 +459,94 @@ export interface CreatePurchaseReturnRequest {
 export interface ReversePurchaseReturnRequest {
   reason?: string;
 }
+
+export interface SupplierApSummary {
+  supplierId: string;
+  supplierCode: string;
+  supplierName: string;
+  totalInvoiced: string;
+  totalPaid: string;
+  totalOutstanding: string;
+  outstandingInvoiceCount: number;
+}
+
+export interface SupplierApLedgerPaymentSummary {
+  id: string;
+  amount: string;
+  paymentDate: string;
+  status: SupplierPaymentStatus | string;
+  reversedAt: string | null;
+}
+
+export interface SupplierApLedgerItem {
+  invoiceId: string;
+  invoiceNumber: string;
+  supplierInvoiceNumber: string | null;
+  supplierId: string;
+  supplierName: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  total: string;
+  amountPaid: string;
+  balanceDue: string;
+  paymentStatus: PurchaseInvoicePaymentStatus | string;
+  status: PurchaseInvoiceStatus | string;
+  payments?: SupplierApLedgerPaymentSummary[];
+}
+
+/** PAYMENT_TERM_DERIVED is reserved but currently unreachable — PaymentTerm
+ * has no day-count field in this schema. Never presented as real. */
+export type ApAgingBasis = 'DUE_DATE' | 'PAYMENT_TERM_DERIVED' | 'INVOICE_DATE_FALLBACK';
+export type ApAgingBucket = 'CURRENT' | 'DAYS_1_30' | 'DAYS_31_60' | 'DAYS_61_90' | 'DAYS_90_PLUS';
+
+export interface ApAgingRow {
+  invoiceId: string;
+  invoiceNumber: string;
+  supplierId: string;
+  supplierName: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  effectiveDueDate: string;
+  agingBasis: ApAgingBasis | string;
+  balanceDue: string;
+  daysOverdue: number;
+  bucket: ApAgingBucket | string;
+}
+
+export interface ApAgingResult {
+  asOfDate: string;
+  items: ApAgingRow[];
+  totalsByBucket: Record<string, string>;
+}
+
+export type ApStatementLineType = 'INVOICE' | 'PAYMENT' | 'PAYMENT_REVERSAL';
+
+export interface SupplierApStatementLine {
+  date: string;
+  type: ApStatementLineType | string;
+  reference: string;
+  description: string | null;
+  amount: string;
+  runningBalance: string;
+}
+
+export interface SupplierApStatement {
+  supplierId: string;
+  supplierName: string;
+  fromDate: string | null;
+  toDate: string | null;
+  openingBalance: string;
+  closingBalance: string;
+  page: number;
+  limit: number;
+  total: number;
+  items: SupplierApStatementLine[];
+}
+
+export interface ApReconciliationSummary {
+  subledgerTotalOutstanding: string;
+  glAccountId: string | null;
+  glAccountsPayableBalance: string | null;
+  difference: string | null;
+  matches: boolean;
+}

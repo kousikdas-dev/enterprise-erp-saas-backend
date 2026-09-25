@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule, LoggingModule, validateEnv } from '@app/common';
 import { MessagingModule } from '@app/messaging';
+import { AccountsPayableModule } from './accounts-payable/accounts-payable.module';
 import { PurchaseAuditModule } from './audit/purchase-audit.module';
 import { PurchaseEnvironmentVariables } from './config/purchase-env';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,6 +28,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     GoodsReceiptsModule,
     PurchaseInvoicesModule,
     PurchaseReturnsModule,
+    AccountsPayableModule,
     MessagingModule.register(),
   ],
 })

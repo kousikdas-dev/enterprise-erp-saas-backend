@@ -271,6 +271,11 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'reverse-payment',
     description: 'Reverse supplier payments and retry their accounting posting/reversal',
   },
+  {
+    resource: 'accounts-payable',
+    action: 'read',
+    description: 'Read Accounts Payable supplier summaries, invoice ledger, aging, statements, and GL reconciliation',
+  },
   { resource: 'customers', action: 'create', description: 'Create customers' },
   { resource: 'customers', action: 'read', description: 'Read customers' },
   { resource: 'customers', action: 'update', description: 'Update customers' },

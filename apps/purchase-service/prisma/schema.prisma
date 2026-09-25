@@ -499,6 +499,7 @@ model PurchaseInvoice {
   @@index([purchaseOrderId])
   @@index([tenantId, status])
   @@index([tenantId, paymentTermId])
+  @@index([tenantId, supplierId])
   @@map("purchase_invoices")
 }
 

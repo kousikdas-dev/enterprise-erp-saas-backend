@@ -68,6 +68,7 @@ export const PERMISSIONS = {
   PURCHASE_RETURNS_READ: 'purchase-returns.read',
   PURCHASE_RETURNS_CONFIRM: 'purchase-returns.confirm',
   PURCHASE_RETURNS_REVERSE: 'purchase-returns.reverse',
+  ACCOUNTS_PAYABLE_READ: 'accounts-payable.read',
   CUSTOMERS_CREATE: 'customers.create',
   CUSTOMERS_READ: 'customers.read',
   CUSTOMERS_UPDATE: 'customers.update',

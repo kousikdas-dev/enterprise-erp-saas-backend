@@ -62,6 +62,7 @@ export const AppPermissions = {
   PURCHASE_RETURNS_READ: 'purchase-returns.read',
   PURCHASE_RETURNS_CONFIRM: 'purchase-returns.confirm',
   PURCHASE_RETURNS_REVERSE: 'purchase-returns.reverse',
+  ACCOUNTS_PAYABLE_READ: 'accounts-payable.read',
   PRODUCTS_CREATE: 'products.create',
   PRODUCTS_READ: 'products.read',
   PRODUCTS_UPDATE: 'products.update',

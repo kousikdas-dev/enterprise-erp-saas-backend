@@ -3,6 +3,7 @@ import { RouterModule, Routes } from '@angular/router';
 import { SharedModule } from '../../shared.module';
 import { ListStateComponent } from '../../shared/list-state/list-state.component';
 import { DecimalTextPipe, QuantityPipe } from '../../shared/pipes/decimal.pipes';
+import { AccountsPayableListComponent } from './accounts-payable/accounts-payable-list.component';
 import { GoodsReceiptListComponent } from './goods-receipts/goods-receipt-list.component';
 import { PurchaseOrderListComponent } from './purchase-orders/purchase-order-list.component';
 import { PurchaseInvoiceListComponent } from './purchase-invoices/purchase-invoice-list.component';
@@ -36,6 +37,11 @@ const routes: Routes = [
     component: PurchaseReturnListComponent,
     data: { extraParameter: 'purchaseMenu' },
   },
+  {
+    path: 'accounts-payable',
+    component: AccountsPayableListComponent,
+    data: { extraParameter: 'purchaseMenu' },
+  },
 ];
 
 @NgModule({
@@ -45,6 +51,7 @@ const routes: Routes = [
     GoodsReceiptListComponent,
     PurchaseInvoiceListComponent,
     PurchaseReturnListComponent,
+    AccountsPayableListComponent,
   ],
   imports: [
     SharedModule,
