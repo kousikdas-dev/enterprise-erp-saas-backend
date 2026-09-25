@@ -548,3 +548,95 @@ export interface CreateShipmentRequest {
 export interface ItemList<T> {
   items: T[];
 }
+
+export interface CustomerArSummary {
+  customerId: string;
+  customerCode: string;
+  customerName: string;
+  totalInvoiced: string;
+  totalPaid: string;
+  totalOutstanding: string;
+  outstandingInvoiceCount: number;
+}
+
+// No status/reversedAt fields — unlike Supplier Payment, Sales Payment has
+// no reversal lifecycle in this phase.
+export interface CustomerArLedgerPaymentSummary {
+  id: string;
+  amount: string;
+  paymentDate: string;
+}
+
+export interface CustomerArLedgerItem {
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  total: string;
+  amountPaid: string;
+  balanceDue: string;
+  paymentStatus: SalesInvoicePaymentStatus | string;
+  status: SalesInvoiceStatus | string;
+  payments?: CustomerArLedgerPaymentSummary[];
+}
+
+/** PAYMENT_TERM_DERIVED is reserved but currently unreachable — PaymentTerm
+ * has no day-count field in this schema. Never presented as real. */
+export type ArAgingBasis = 'DUE_DATE' | 'PAYMENT_TERM_DERIVED' | 'INVOICE_DATE_FALLBACK';
+export type ArAgingBucket = 'CURRENT' | 'DAYS_1_30' | 'DAYS_31_60' | 'DAYS_61_90' | 'DAYS_90_PLUS';
+
+export interface ArAgingRow {
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  effectiveDueDate: string;
+  agingBasis: ArAgingBasis | string;
+  balanceDue: string;
+  daysOverdue: number;
+  bucket: ArAgingBucket | string;
+}
+
+export interface ArAgingResult {
+  asOfDate: string;
+  items: ArAgingRow[];
+  totalsByBucket: Record<string, string>;
+}
+
+/** No PAYMENT_REVERSAL type — Sales Payment has no reversal lifecycle in
+ * this phase, unlike Supplier Payment. */
+export type ArStatementLineType = 'INVOICE' | 'PAYMENT';
+
+export interface CustomerArStatementLine {
+  date: string;
+  type: ArStatementLineType | string;
+  reference: string;
+  description: string | null;
+  amount: string;
+  runningBalance: string;
+}
+
+export interface CustomerArStatement {
+  customerId: string;
+  customerName: string;
+  fromDate: string | null;
+  toDate: string | null;
+  openingBalance: string;
+  closingBalance: string;
+  page: number;
+  limit: number;
+  total: number;
+  items: CustomerArStatementLine[];
+}
+
+export interface ArReconciliationSummary {
+  subledgerTotalOutstanding: string;
+  glAccountId: string | null;
+  glAccountsReceivableBalance: string | null;
+  difference: string | null;
+  matches: boolean;
+}

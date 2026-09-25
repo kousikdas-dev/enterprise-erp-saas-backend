@@ -1,0 +1,301 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Accounts Receivable</div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Read-only AR reporting over SENT sales invoices and their customer payments.
+      Aging uses <code>dueDate</code> when set on the invoice, otherwise falls back to
+      <code>invoiceDate</code> — never presented as a real due date when it isn't one.
+    </p>
+
+    <ul class="nav nav-tabs mb-3">
+      <li class="nav-item">
+        <a class="nav-link" [class.active]="activeTab === 'customers'" href="javascript:void(0);" (click)="selectTab('customers')">Customers</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" [class.active]="activeTab === 'invoices'" href="javascript:void(0);" (click)="selectTab('invoices')">Invoice Ledger</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" [class.active]="activeTab === 'aging'" href="javascript:void(0);" (click)="selectTab('aging')">Aging</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" [class.active]="activeTab === 'reconciliation'" href="javascript:void(0);" (click)="selectTab('reconciliation')">GL Reconciliation</a>
+      </li>
+    </ul>
+
+    <!-- Customers tab -->
+    <div *ngIf="activeTab === 'customers'">
+      <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-2">
+        <div class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="onlyOutstandingCheck"
+            [(ngModel)]="onlyOutstanding"
+            (change)="loadCustomers()" />
+          <label class="form-check-label" for="onlyOutstandingCheck">Only outstanding customers</label>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="loadCustomers()" [disabled]="customersLoading">
+          Refresh
+        </button>
+      </div>
+
+      <app-list-state
+        [loading]="customersLoading"
+        [error]="customersError"
+        [empty]="!customers.length"
+        emptyMessage="No customer balances to show."
+        (retry)="loadCustomers()">
+        <div class="table-responsive">
+          <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Customer</th>
+                <th class="text-end">Total Invoiced</th>
+                <th class="text-end">Total Paid</th>
+                <th class="text-end">Outstanding</th>
+                <th class="text-center">Open Invoices</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let c of customers">
+                <td><code>{{ c.customerCode }}</code></td>
+                <td>{{ c.customerName }}</td>
+                <td class="text-end">{{ c.totalInvoiced }}</td>
+                <td class="text-end">{{ c.totalPaid }}</td>
+                <td class="text-end fw-bold">{{ c.totalOutstanding }}</td>
+                <td class="text-center">{{ c.outstandingInvoiceCount }}</td>
+                <td class="text-end">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" (click)="openStatement(c)">
+                    Statement
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </app-list-state>
+    </div>
+
+    <!-- Invoice ledger tab -->
+    <div *ngIf="activeTab === 'invoices'">
+      <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-2">
+        <select class="form-select form-select-sm" style="max-width: 220px;" [(ngModel)]="invoicePaymentStatusFilter" (change)="loadInvoices()">
+          <option value="">All payment statuses</option>
+          <option value="UNPAID">Unpaid</option>
+          <option value="PARTIALLY_PAID">Partially paid</option>
+          <option value="PAID">Paid</option>
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="loadInvoices()" [disabled]="invoicesLoading">
+          Refresh
+        </button>
+      </div>
+
+      <app-list-state
+        [loading]="invoicesLoading"
+        [error]="invoicesError"
+        [empty]="!invoices.length"
+        emptyMessage="No sent sales invoices found."
+        (retry)="loadInvoices()">
+        <div class="table-responsive">
+          <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+            <thead>
+              <tr>
+                <th>Invoice #</th>
+                <th>Customer</th>
+                <th>Invoice date</th>
+                <th>Due date</th>
+                <th class="text-end">Total</th>
+                <th class="text-end">Paid</th>
+                <th class="text-end">Balance due</th>
+                <th class="text-center">Payment status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let inv of invoices">
+                <td><code>{{ inv.invoiceNumber }}</code></td>
+                <td>{{ inv.customerName }}</td>
+                <td>{{ inv.invoiceDate }}</td>
+                <td>{{ inv.dueDate || '—' }}</td>
+                <td class="text-end">{{ inv.total }}</td>
+                <td class="text-end">{{ inv.amountPaid }}</td>
+                <td class="text-end fw-bold">{{ inv.balanceDue }}</td>
+                <td class="text-center">
+                  <span class="badge"
+                        [ngClass]="inv.paymentStatus === 'PAID' ? 'bg-success' : (inv.paymentStatus === 'PARTIALLY_PAID' ? 'bg-warning text-dark' : 'bg-secondary')">
+                    {{ inv.paymentStatus }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </app-list-state>
+    </div>
+
+    <!-- Aging tab -->
+    <div *ngIf="activeTab === 'aging'">
+      <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-2">
+        <div class="d-flex align-items-center gap-2">
+          <label class="form-label mb-0 small">As of</label>
+          <input type="date" class="form-control form-control-sm" style="max-width: 180px;" [(ngModel)]="agingAsOfDate" (change)="loadAging()" />
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="loadAging()" [disabled]="agingLoading">
+          Refresh
+        </button>
+      </div>
+
+      <app-list-state
+        [loading]="agingLoading"
+        [error]="agingError"
+        [empty]="!!aging && !aging.items.length"
+        emptyMessage="No outstanding invoices as of this date."
+        (retry)="loadAging()">
+        <div *ngIf="aging">
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="p-2 border rounded" *ngFor="let bucket of agingBucketOrder">
+              <div class="small text-muted">{{ bucket.label }}</div>
+              <div class="fw-bold">{{ aging.totalsByBucket[bucket.key] || '0.0000' }}</div>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+              <thead>
+                <tr>
+                  <th>Invoice #</th>
+                  <th>Customer</th>
+                  <th>Effective due date</th>
+                  <th>Basis</th>
+                  <th class="text-end">Balance due</th>
+                  <th class="text-center">Days overdue</th>
+                  <th class="text-center">Bucket</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let row of aging.items">
+                  <td><code>{{ row.invoiceNumber }}</code></td>
+                  <td>{{ row.customerName }}</td>
+                  <td>{{ row.effectiveDueDate }}</td>
+                  <td><span class="small text-muted">{{ agingBasisLabel(row.agingBasis) }}</span></td>
+                  <td class="text-end">{{ row.balanceDue }}</td>
+                  <td class="text-center">{{ row.daysOverdue }}</td>
+                  <td class="text-center"><span class="badge bg-light text-dark border">{{ row.bucket }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </app-list-state>
+    </div>
+
+    <!-- Reconciliation tab -->
+    <div *ngIf="activeTab === 'reconciliation'">
+      <div class="d-flex justify-content-end mb-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="loadReconciliation()" [disabled]="reconciliationLoading">
+          Refresh
+        </button>
+      </div>
+
+      <app-list-state
+        [loading]="reconciliationLoading"
+        [error]="reconciliationError"
+        [empty]="false"
+        (retry)="loadReconciliation()">
+        <div *ngIf="reconciliation" class="row g-3">
+          <div class="col-md-4">
+            <div class="p-3 border rounded h-100">
+              <div class="small text-muted">Subledger total outstanding</div>
+              <div class="fs-5 fw-bold">{{ reconciliation.subledgerTotalOutstanding }}</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="p-3 border rounded h-100">
+              <div class="small text-muted">GL Accounts Receivable balance</div>
+              <div class="fs-5 fw-bold">
+                {{ reconciliation.glAccountsReceivableBalance ?? 'Not configured' }}
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="p-3 border rounded h-100">
+              <div class="small text-muted">Difference</div>
+              <div class="fs-5 fw-bold">{{ reconciliation.difference ?? '—' }}</div>
+              <span class="badge mt-1" [ngClass]="reconciliation.matches ? 'bg-success' : 'bg-danger'">
+                {{ reconciliation.matches ? 'Matches' : 'Mismatch' }}
+              </span>
+            </div>
+          </div>
+          <div class="col-12" *ngIf="!reconciliation.glAccountId">
+            <p class="text-muted small mb-0">
+              No ACCOUNTS_RECEIVABLE account mapping is configured in Accounting for this tenant yet —
+              reconciliation cannot be computed until one is set up.
+            </p>
+          </div>
+        </div>
+      </app-list-state>
+    </div>
+  </div>
+</div>
+
+<ng-template #statementModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Statement — {{ statementCustomerName }}</h5>
+    <button type="button" class="btn-close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body">
+    <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+      <div>
+        <label class="form-label small mb-0">From</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="statementFromDate" />
+      </div>
+      <div>
+        <label class="form-label small mb-0">To</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="statementToDate" />
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="loadStatement()" [disabled]="statementLoading">
+        Apply
+      </button>
+    </div>
+
+    <app-list-state
+      [loading]="statementLoading"
+      [error]="statementError"
+      [empty]="!!statement && !statement.items.length"
+      emptyMessage="No activity in this date range."
+      (retry)="loadStatement()">
+      <div *ngIf="statement">
+        <div class="d-flex flex-wrap gap-3 mb-2 small">
+          <span>Opening balance: <strong>{{ statement.openingBalance }}</strong></span>
+          <span>Closing balance: <strong>{{ statement.closingBalance }}</strong></span>
+          <span>{{ statement.total }} line(s)</span>
+        </div>
+        <div class="table-responsive">
+          <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Reference</th>
+                <th class="text-end">Amount</th>
+                <th class="text-end">Running balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let line of statement.items">
+                <td>{{ line.date }}</td>
+                <td><span class="badge" [ngClass]="statementLineBadgeClass(line.type)">{{ line.type }}</span></td>
+                <td>{{ line.reference || '—' }}</td>
+                <td class="text-end">{{ line.amount }}</td>
+                <td class="text-end fw-bold">{{ line.runningBalance }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </app-list-state>
+  </div>
+</ng-template>

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule, LoggingModule, validateEnv } from '@app/common';
 import { MessagingModule } from '@app/messaging';
+import { AccountsReceivableModule } from './accounts-receivable/accounts-receivable.module';
 import { SalesAuditModule } from './audit/sales-audit.module';
 import { SalesEnvironmentVariables } from './config/sales-env';
 import { CustomersModule } from './customers/customers.module';
@@ -29,6 +30,7 @@ import { ShipmentsModule } from './shipments/shipments.module';
     SalesInvoicesModule,
     SalesOrdersModule,
     ShipmentsModule,
+    AccountsReceivableModule,
     MessagingModule.register(),
   ],
 })

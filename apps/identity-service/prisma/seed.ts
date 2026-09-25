@@ -381,6 +381,11 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'cancel',
     description: 'Cancel sales invoices',
   },
+  {
+    resource: 'accounts-receivable',
+    action: 'read',
+    description: 'Read Accounts Receivable customer summaries, invoice ledger, aging, statements, and GL reconciliation',
+  },
   { resource: 'shipments', action: 'create', description: 'Create shipments' },
   { resource: 'shipments', action: 'read', description: 'Read shipments' },
   {

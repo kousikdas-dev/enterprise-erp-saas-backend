@@ -2,6 +2,7 @@ import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 import { SharedModule } from '../../shared.module';
 import { ListStateComponent } from '../../shared/list-state/list-state.component';
+import { AccountsReceivableListComponent } from './accounts-receivable/accounts-receivable-list.component';
 import { CustomerListComponent } from './customers/customer-list.component';
 import { ProformaInvoiceListComponent } from './proforma-invoices/proforma-invoice-list.component';
 import { QuotationListComponent } from './quotations/quotation-list.component';
@@ -41,6 +42,11 @@ const routes: Routes = [
     component: ShipmentListComponent,
     data: { extraParameter: 'salesMenu' },
   },
+  {
+    path: 'accounts-receivable',
+    component: AccountsReceivableListComponent,
+    data: { extraParameter: 'salesMenu' },
+  },
 ];
 
 @NgModule({
@@ -51,6 +57,7 @@ const routes: Routes = [
     SalesOrderListComponent,
     SalesInvoiceListComponent,
     ShipmentListComponent,
+    AccountsReceivableListComponent,
   ],
   imports: [SharedModule, ListStateComponent, RouterModule.forChild(routes)],
 })

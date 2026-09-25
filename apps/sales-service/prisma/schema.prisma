@@ -601,6 +601,7 @@ model SalesInvoice {
   @@index([tenantId, sourceType, sourceId])
   @@index([tenantId, paymentTermId])
   @@index([tenantId, salespersonId])
+  @@index([tenantId, customerId])
   @@map("sales_invoices")
 }
 
