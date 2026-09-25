@@ -462,6 +462,55 @@ describe('PurchaseOrdersService', () => {
     );
   });
 
+  // Phase 3.8 (adjacent defect fix) — a non-inventory-tracked line can be
+  // invoiced with no Goods Receipt at all, so invoicedQuantity can be > 0
+  // while receivedQuantity stays 0. cancel() must reject this case too, not
+  // just the receivedQuantity one above.
+  it('rejects cancel of a CONFIRMED purchase order that has invoices, even with zero receivedQuantity', async () => {
+    const prisma = basePrisma({
+      purchaseOrder: {
+        findFirst: jest.fn().mockResolvedValue(
+          orderRow({
+            status: PurchaseOrderStatus.CONFIRMED,
+            items: [
+              orderItemRow({
+                receivedQuantity: decimal('0'),
+                invoicedQuantity: decimal('2'),
+              }),
+            ],
+          }),
+        ),
+      },
+    });
+    const service = createService({ prisma });
+    await expect(service.cancel(actor, 'po1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it('still cancels a CONFIRMED purchase order when receivedQuantity and invoicedQuantity are both zero', async () => {
+    const cancelled = orderRow({ status: PurchaseOrderStatus.CANCELLED });
+    const prisma = basePrisma({
+      purchaseOrder: {
+        findFirst: jest.fn().mockResolvedValue(
+          orderRow({
+            status: PurchaseOrderStatus.CONFIRMED,
+            items: [
+              orderItemRow({
+                receivedQuantity: decimal('0'),
+                invoicedQuantity: decimal('0'),
+              }),
+            ],
+          }),
+        ),
+        update: jest.fn().mockResolvedValue(cancelled),
+      },
+    });
+    const service = createService({ prisma });
+    const result = await service.cancel(actor, 'po1');
+    expect(result.status).toBe(PurchaseOrderStatus.CANCELLED);
+  });
+
   it('rejects cancel of a RECEIVED purchase order', async () => {
     const prisma = basePrisma({
       purchaseOrder: {

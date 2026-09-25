@@ -266,6 +266,11 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'record-payment',
     description: 'Record supplier payments against purchase invoices',
   },
+  {
+    resource: 'purchase-invoices',
+    action: 'reverse-payment',
+    description: 'Reverse supplier payments and retry their accounting posting/reversal',
+  },
   { resource: 'customers', action: 'create', description: 'Create customers' },
   { resource: 'customers', action: 'read', description: 'Read customers' },
   { resource: 'customers', action: 'update', description: 'Update customers' },

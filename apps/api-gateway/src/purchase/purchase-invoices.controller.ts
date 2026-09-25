@@ -33,6 +33,8 @@ import {
   PurchaseInvoiceDto,
   PurchaseInvoiceListDto,
   RecordSupplierPaymentResultDto,
+  ReverseSupplierPaymentDto,
+  SupplierPaymentDto,
   SupplierPaymentListDto,
   UpdatePurchaseInvoiceDto,
 } from './dto/purchase-invoice.dto';
@@ -275,6 +277,83 @@ export class PurchaseInvoicesController {
       method: 'GET',
       path: `/api/v1/purchase-invoices/${id}/payments`,
       user,
+    });
+  }
+
+  @Post(':id/payments/:paymentId/retry-accounting-posting')
+  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_RECORD_PAYMENT)
+  @ApiOperation({
+    summary: 'Retry supplier payment accounting posting',
+    description:
+      'Retries the journal posting for a supplier payment whose original post-record posting attempt failed (accountingPostingStatus FAILED or NOT_POSTED). A no-op returning the payment unchanged if already POSTED. Same permission as recording a payment, since this retries the posting recordPayment() attempted. Permission: purchase-invoices.record-payment.',
+  })
+  @ApiOkResponse({ type: SupplierPaymentDto })
+  @ApiConflictResponse({ description: 'Payment is reversed, or the posting attempt failed again' })
+  @ApiManagementErrors()
+  retryPaymentAccountingPosting(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Req() request: Request,
+  ): Promise<SupplierPaymentDto> {
+    return this.purchase.forward<SupplierPaymentDto>({
+      method: 'POST',
+      path: `/api/v1/purchase-invoices/${id}/payments/${paymentId}/retry-accounting-posting`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/payments/:paymentId/reverse')
+  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_REVERSE_PAYMENT)
+  @ApiOperation({
+    summary: 'Reverse supplier payment',
+    description:
+      'Undoes a single ACTIVE supplier payment: reverses its effect on PurchaseInvoice.amountPaid/paymentStatus and (best-effort) its posted AP/Bank journal. Idempotent if already REVERSED. Permission: purchase-invoices.reverse-payment.',
+  })
+  @ApiOkResponse({ type: RecordSupplierPaymentResultDto })
+  @ApiConflictResponse({ description: 'Payment cannot be reversed' })
+  @ApiManagementErrors()
+  reversePayment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: ReverseSupplierPaymentDto,
+    @Req() request: Request,
+  ): Promise<RecordSupplierPaymentResultDto> {
+    return this.purchase.forward<RecordSupplierPaymentResultDto>({
+      method: 'POST',
+      path: `/api/v1/purchase-invoices/${id}/payments/${paymentId}/reverse`,
+      user,
+      body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/payments/:paymentId/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.PURCHASE_INVOICES_REVERSE_PAYMENT)
+  @ApiOperation({
+    summary: 'Retry supplier payment accounting reversal',
+    description:
+      'Retries the journal reversal for a REVERSED supplier payment whose post-reversal accounting attempt failed (still accountingPostingStatus POSTED). A no-op returning the payment unchanged if already REVERSED. Same permission as reverse, since this retries the reversal reversePayment() attempted. Permission: purchase-invoices.reverse-payment.',
+  })
+  @ApiOkResponse({ type: SupplierPaymentDto })
+  @ApiConflictResponse({ description: 'Payment is not reversed, or has no posted journal to reverse' })
+  @ApiManagementErrors()
+  retryPaymentAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Req() request: Request,
+  ): Promise<SupplierPaymentDto> {
+    return this.purchase.forward<SupplierPaymentDto>({
+      method: 'POST',
+      path: `/api/v1/purchase-invoices/${id}/payments/${paymentId}/retry-accounting-reversal`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
     });
   }
 }

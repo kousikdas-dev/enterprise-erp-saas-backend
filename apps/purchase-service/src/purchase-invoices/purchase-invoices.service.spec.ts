@@ -10,6 +10,7 @@ import {
   PurchaseInvoiceStatus,
   PurchaseOrderStatus,
   SupplierPaymentPostingStatus,
+  SupplierPaymentStatus,
 } from '../../generated/prisma-client';
 import { AccountingJournalClient } from '../accounting/accounting-journal.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
@@ -355,21 +356,39 @@ describe('PurchaseInvoicesService', () => {
       paymentMethodId: null,
       reference: null,
       notes: null,
+      status: SupplierPaymentStatus.ACTIVE,
       accountingPostingStatus: SupplierPaymentPostingStatus.NOT_POSTED,
       journalEntryId: null,
+      reversalJournalEntryId: null,
+      reversedAt: null,
+      reversalReason: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
   }
 
-  function defaultOuterSupplierPaymentMock() {
+  /** Stateful across calls within one test, mirroring
+   * defaultOuterPurchaseInvoiceMock() — `status` is the document-level
+   * SupplierPaymentStatus baseline this outer (non-tx) mock reports (the
+   * outer mock never sees the transaction's own writes), and `latest`
+   * accumulates accountingPostingStatus/journalEntryId writes across
+   * multiple outer calls (e.g. attemptPaymentReversal() then a later
+   * retryPaymentAccountingReversal() call within the same test). */
+  function defaultOuterSupplierPaymentMock(
+    status: SupplierPaymentStatus = SupplierPaymentStatus.ACTIVE,
+  ) {
     const base = basePaymentFixture();
+    let latest: Record<string, unknown> = {};
     return {
-      update: jest.fn(({ where, data }: any) =>
-        Promise.resolve({ ...base, id: where.id, ...data }),
-      ),
+      update: jest.fn(({ where, data }: any) => {
+        latest = { ...latest, ...data };
+        return Promise.resolve({ ...base, id: where.id, status, ...latest });
+      }),
       findFirstOrThrow: jest.fn(({ where }: any) =>
-        Promise.resolve({ ...base, id: where.id }),
+        Promise.resolve({ ...base, id: where.id, status, ...latest }),
+      ),
+      findFirst: jest.fn(({ where }: any) =>
+        Promise.resolve({ ...base, id: where.id, status, ...latest }),
       ),
     };
   }
@@ -1573,8 +1592,12 @@ describe('PurchaseInvoicesService', () => {
             paymentMethodId: args.data.paymentMethodId,
             reference: args.data.reference,
             notes: args.data.notes,
+            status: SupplierPaymentStatus.ACTIVE,
             accountingPostingStatus: SupplierPaymentPostingStatus.NOT_POSTED,
             journalEntryId: null,
+            reversalJournalEntryId: null,
+            reversedAt: null,
+            reversalReason: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           };
@@ -2805,6 +2828,662 @@ describe('PurchaseInvoicesService', () => {
           .reduce((sum: Prisma.Decimal, l: any) => sum.plus(l.amount), decimal('0'));
         expect(totalDebit.toFixed(4)).toBe(totalCredit.toFixed(4));
       }
+    });
+  });
+
+  // ============================== PHASE 3.8 — SUPPLIER PAYMENT REVERSAL ===
+
+  describe('Phase 3.8 — Supplier Payment reversal', () => {
+    const paymentId = 'payment-1';
+
+    /** tx mock for reversePayment(): $queryRaw x2 (invoice lock, payment
+     * lock — different shapes, differentiated by call order), purchaseInvoice
+     * findFirstOrThrow/update, supplierPayment findFirstOrThrow/update. */
+    function buildReversalTx(options: {
+      paymentStatus: SupplierPaymentStatus;
+      invoiceStatus: PurchaseInvoiceStatus;
+      total: Prisma.Decimal;
+      amountPaid: Prisma.Decimal;
+      paymentAmount: Prisma.Decimal;
+      accountingPostingStatus?: SupplierPaymentPostingStatus;
+      journalEntryId?: string | null;
+    }) {
+      const queryRawCalls: unknown[][] = [];
+      const invoiceUpdateCalls: Array<{ data: Record<string, unknown> }> = [];
+      const paymentUpdateCalls: Array<{ data: Record<string, unknown> }> = [];
+      return {
+        $queryRaw: jest.fn((...args: unknown[]) => {
+          queryRawCalls.push(args);
+          if (queryRawCalls.length === 1) {
+            return Promise.resolve([{ id: invoiceId }]);
+          }
+          return Promise.resolve([
+            { id: paymentId, status: options.paymentStatus, purchaseInvoiceId: invoiceId },
+          ]);
+        }),
+        purchaseInvoice: {
+          // The normal branch only reads status/total/amountPaid, but the
+          // already-REVERSED idempotency branch requests the full
+          // INVOICE_INCLUDE shape and hands the row straight to
+          // toResponse() — fullInvoiceHeader() supplies every decimal field
+          // toPurchaseInvoiceResponse() needs so that branch never crashes.
+          findFirstOrThrow: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({
+              id: invoiceId,
+              status: options.invoiceStatus,
+              total: options.total,
+              amountPaid: options.amountPaid,
+              items: [],
+            }),
+          ),
+          update: jest.fn((args: { data: Record<string, unknown> }) => {
+            invoiceUpdateCalls.push(args);
+            return Promise.resolve(
+              fullInvoiceHeader({
+                id: invoiceId,
+                total: options.total,
+                amountPaid: args.data.amountPaid,
+                paymentStatus: args.data.paymentStatus,
+                items: [],
+              }),
+            );
+          }),
+        },
+        supplierPayment: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            id: paymentId,
+            tenantId,
+            purchaseInvoiceId: invoiceId,
+            amount: options.paymentAmount,
+            paymentDate: new Date(),
+            paymentMethodId: 'pm-1',
+            reference: null,
+            notes: null,
+            status: options.paymentStatus,
+            accountingPostingStatus:
+              options.accountingPostingStatus ?? SupplierPaymentPostingStatus.POSTED,
+            journalEntryId:
+              options.journalEntryId === undefined ? 'je-payment-1' : options.journalEntryId,
+            reversalJournalEntryId: null,
+            reversedAt: null,
+            reversalReason: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }),
+          update: jest.fn((args: { data: Record<string, unknown> }) => {
+            paymentUpdateCalls.push(args);
+            return Promise.resolve({
+              id: paymentId,
+              tenantId,
+              purchaseInvoiceId: invoiceId,
+              amount: options.paymentAmount,
+              paymentDate: new Date(),
+              paymentMethodId: 'pm-1',
+              reference: null,
+              notes: null,
+              status: SupplierPaymentStatus.REVERSED,
+              accountingPostingStatus:
+                options.accountingPostingStatus ?? SupplierPaymentPostingStatus.POSTED,
+              journalEntryId:
+                options.journalEntryId === undefined ? 'je-payment-1' : options.journalEntryId,
+              reversalJournalEntryId: null,
+              reversedAt: new Date(),
+              reversalReason: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              ...args.data,
+            });
+          }),
+        },
+        __queryRawCalls: queryRawCalls,
+        __invoiceUpdateCalls: invoiceUpdateCalls,
+        __paymentUpdateCalls: paymentUpdateCalls,
+      };
+    }
+
+    function buildServiceForPaymentReversal(
+      tx: ReturnType<typeof buildReversalTx> | null,
+      options: {
+        accountingJournal?: unknown;
+        softPayment?: Record<string, unknown>;
+        outerPurchaseInvoice?: Partial<Record<string, jest.Mock>>;
+        outerSupplierPaymentStatus?: SupplierPaymentStatus;
+        outerSupplierPayment?: Partial<Record<string, jest.Mock>>;
+      } = {},
+    ) {
+      const prisma: any = {
+        $transaction: jest.fn(async (fn: (c: unknown) => Promise<unknown>) => fn(tx)),
+        purchaseInvoice: {
+          findFirst: jest.fn().mockResolvedValue(fullInvoiceHeader({ id: invoiceId, items: [] })),
+          ...options.outerPurchaseInvoice,
+        },
+        supplierPayment: {
+          // defaultOuterSupplierPaymentMock() also defines its own findFirst
+          // (a generic, status-param-driven stand-in) — spread it FIRST so
+          // the softPayment-aware override below always wins; requirePayment()
+          // relies on this to see each test's specific fixture.
+          ...defaultOuterSupplierPaymentMock(options.outerSupplierPaymentStatus),
+          findFirst: jest.fn().mockResolvedValue(
+            options.softPayment ?? {
+              ...basePaymentFixture(),
+              id: paymentId,
+              purchaseInvoiceId: invoiceId,
+            },
+          ),
+          ...options.outerSupplierPayment,
+        },
+      };
+      return buildService(prisma, options.accountingJournal);
+    }
+
+    // -------------------- reversePayment(): happy path --------------------
+
+    it('1. reverses an ACTIVE, POSTED-accounting payment: decrements amountPaid, recomputes paymentStatus, sets status REVERSED', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+      });
+      const { service } = buildServiceForPaymentReversal(tx, {
+        // The outer (non-tx) mock doesn't see the transaction's own writes —
+        // told explicitly what the post-commit baseline status is, mirroring
+        // defaultOuterPurchaseInvoiceMock(status)'s own convention.
+        outerSupplierPaymentStatus: SupplierPaymentStatus.REVERSED,
+      });
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(tx.__invoiceUpdateCalls).toHaveLength(1);
+      expect((tx.__invoiceUpdateCalls[0].data.amountPaid as Prisma.Decimal).toFixed(0)).toBe('0');
+      expect(tx.__invoiceUpdateCalls[0].data.paymentStatus).toBe(PurchaseInvoicePaymentStatus.UNPAID);
+      expect(tx.__paymentUpdateCalls[0].data.status).toBe(SupplierPaymentStatus.REVERSED);
+      expect(result.payment.status).toBe(SupplierPaymentStatus.REVERSED);
+      expect(result.invoice.paymentStatus).toBe(PurchaseInvoicePaymentStatus.UNPAID);
+    });
+
+    it('2. reversing the only payment on a fully PAID invoice returns it to UNPAID', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('100'),
+        paymentAmount: decimal('100'),
+      });
+      const { service } = buildServiceForPaymentReversal(tx);
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(result.invoice.paymentStatus).toBe(PurchaseInvoicePaymentStatus.UNPAID);
+    });
+
+    it('3. reversing one of two ACTIVE payments leaves the correct residual amountPaid/PARTIALLY_PAID', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('70'), // two payments already recorded: 30 (this one) + 40 (sibling)
+        paymentAmount: decimal('30'),
+      });
+      const { service } = buildServiceForPaymentReversal(tx);
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect((tx.__invoiceUpdateCalls[0].data.amountPaid as Prisma.Decimal).toFixed(0)).toBe('40');
+      expect(result.invoice.paymentStatus).toBe(PurchaseInvoicePaymentStatus.PARTIALLY_PAID);
+    });
+
+    it('4. on accounting success, calls .reverse() with sourceType SUPPLIER_PAYMENT / reversalSourceType SUPPLIER_PAYMENT_REVERSAL, and persists reversalJournalEntryId', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+      });
+      const reverse = jest.fn().mockResolvedValue({
+        id: 'je-reversal-1', entryNumber: 'JE-2', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'SUPPLIER_PAYMENT_REVERSAL', sourceId: paymentId, reversesJournalEntryId: 'je-payment-1',
+        idempotentReplay: false, totalDebit: '40.0000', totalCredit: '40.0000',
+      });
+      const accountingJournal = { post: jest.fn(), reverse };
+      const { service } = buildServiceForPaymentReversal(tx, { accountingJournal });
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(reverse).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceType: 'SUPPLIER_PAYMENT',
+          sourceId: paymentId,
+          reversalSourceType: 'SUPPLIER_PAYMENT_REVERSAL',
+        }),
+      );
+      expect(result.payment.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.REVERSED);
+      expect(result.payment.reversalJournalEntryId).toBe('je-reversal-1');
+    });
+
+    it('5. skip-accounting branch: a payment with accountingPostingStatus FAILED reverses at the document level without calling accounting-service', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+        accountingPostingStatus: SupplierPaymentPostingStatus.FAILED,
+        journalEntryId: null,
+      });
+      const reverse = jest.fn();
+      const { service } = buildServiceForPaymentReversal(tx, {
+        accountingJournal: { post: jest.fn(), reverse },
+      });
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(reverse).not.toHaveBeenCalled();
+      expect(result.payment.status).toBe(SupplierPaymentStatus.REVERSED);
+    });
+
+    it('6. skip-accounting branch: NOT_POSTED behaves the same as FAILED', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+        accountingPostingStatus: SupplierPaymentPostingStatus.NOT_POSTED,
+        journalEntryId: null,
+      });
+      const reverse = jest.fn();
+      const { service } = buildServiceForPaymentReversal(tx, {
+        accountingJournal: { post: jest.fn(), reverse },
+      });
+
+      await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(reverse).not.toHaveBeenCalled();
+    });
+
+    // -------------------- reversePayment(): guards -------------------------
+
+    it('7. rejects reversing an already-REVERSED payment as an idempotent no-op (soft check, no transaction, no accounting call)', async () => {
+      const reverse = jest.fn();
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.REVERSED,
+        },
+        accountingJournal: { post: jest.fn(), reverse },
+      });
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(result.payment.status).toBe(SupplierPaymentStatus.REVERSED);
+      expect(reverse).not.toHaveBeenCalled();
+    });
+
+    it('8. rejects reversing a payment belonging to a different invoice/tenant (404)', async () => {
+      const prisma: any = {
+        purchaseInvoice: {
+          findFirst: jest.fn().mockResolvedValue(fullInvoiceHeader({ id: invoiceId, items: [] })),
+        },
+        supplierPayment: { findFirst: jest.fn().mockResolvedValue(null) },
+      };
+      const { service } = buildService(prisma);
+
+      await expect(
+        service.reversePayment(actor, invoiceId, paymentId, {}),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('9. data-integrity guard: reversing a payment whose amount would drive amountPaid negative throws ConflictException', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('10'), // less than this payment's own amount — should never happen under correct operation
+        paymentAmount: decimal('40'),
+      });
+      const { service } = buildServiceForPaymentReversal(tx);
+
+      await expect(
+        service.reversePayment(actor, invoiceId, paymentId, {}),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('10. locks purchase_invoices then the specific supplier_payments row, in that order', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+      });
+      const { service } = buildServiceForPaymentReversal(tx);
+
+      await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(tx.__queryRawCalls).toHaveLength(2);
+    });
+
+    it('10b. race: soft pre-check sees ACTIVE, but the row is already REVERSED by the time the lock is acquired — the hard, under-lock re-check catches it and never double-decrements amountPaid', async () => {
+      // The tx-level lock query reports REVERSED even though the outer
+      // (soft, unlocked) supplierPayment.findFirst mock — set up below —
+      // still reports ACTIVE, simulating a concurrent reversePayment() call
+      // that committed in between the two reads.
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.REVERSED,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('0'), // already decremented by the concurrent winner
+        paymentAmount: decimal('40'),
+      });
+      const { service } = buildServiceForPaymentReversal(tx, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.ACTIVE,
+        },
+      });
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(tx.__invoiceUpdateCalls).toHaveLength(0);
+      expect(tx.__paymentUpdateCalls).toHaveLength(0);
+      expect(result.payment.status).toBe(SupplierPaymentStatus.REVERSED);
+    });
+
+    // -------------------- reversePayment(): accounting failure -------------
+
+    it('11. never throws on an accounting-reversal failure: document-level reversal still commits, accountingPostingStatus stays POSTED', async () => {
+      const tx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+      });
+      const reverse = jest.fn().mockRejectedValue(new Error('accounting-service down'));
+      const { service } = buildServiceForPaymentReversal(tx, {
+        accountingJournal: { post: jest.fn(), reverse },
+        outerSupplierPaymentStatus: SupplierPaymentStatus.REVERSED,
+        // attemptPaymentReversal()'s catch branch re-fetches the "refreshed"
+        // row on failure — told explicitly that accountingPostingStatus was
+        // still POSTED post-tx-commit (the failed reversal attempt never
+        // wrote anything), since the outer mock's generic base fixture
+        // otherwise defaults to NOT_POSTED.
+        outerSupplierPayment: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            ...basePaymentFixture(),
+            id: paymentId,
+            status: SupplierPaymentStatus.REVERSED,
+            accountingPostingStatus: SupplierPaymentPostingStatus.POSTED,
+            journalEntryId: 'je-payment-1',
+          }),
+        },
+      });
+
+      const result = await service.reversePayment(actor, invoiceId, paymentId, {});
+
+      expect(result.payment.status).toBe(SupplierPaymentStatus.REVERSED);
+      expect(result.payment.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.POSTED);
+    });
+
+    it('12. retryPaymentAccountingReversal(): rejects when the payment is not yet REVERSED', async () => {
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: { ...basePaymentFixture(), id: paymentId, purchaseInvoiceId: invoiceId, status: SupplierPaymentStatus.ACTIVE },
+      });
+
+      await expect(
+        service.retryPaymentAccountingReversal(actor, invoiceId, paymentId),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('13. retryPaymentAccountingReversal(): no-ops when the accounting reversal already succeeded', async () => {
+      const reverse = jest.fn();
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.REVERSED,
+          accountingPostingStatus: SupplierPaymentPostingStatus.REVERSED,
+        },
+        accountingJournal: { post: jest.fn(), reverse },
+      });
+
+      const result = await service.retryPaymentAccountingReversal(actor, invoiceId, paymentId);
+
+      expect(result.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.REVERSED);
+      expect(reverse).not.toHaveBeenCalled();
+    });
+
+    it('14. retryPaymentAccountingReversal(): rejects (409) when there is no posted journal to reverse', async () => {
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.REVERSED,
+          accountingPostingStatus: SupplierPaymentPostingStatus.FAILED,
+          journalEntryId: null,
+        },
+      });
+
+      await expect(
+        service.retryPaymentAccountingReversal(actor, invoiceId, paymentId),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('15. retryPaymentAccountingReversal(): surfaces a renewed reversal failure to the caller', async () => {
+      const reverse = jest.fn().mockRejectedValue(new Error('still down'));
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.REVERSED,
+          accountingPostingStatus: SupplierPaymentPostingStatus.POSTED,
+          journalEntryId: 'je-payment-1',
+        },
+        accountingJournal: { post: jest.fn(), reverse },
+      });
+
+      await expect(
+        service.retryPaymentAccountingReversal(actor, invoiceId, paymentId),
+      ).rejects.toThrow('still down');
+    });
+
+    it('16. retryPaymentAccountingReversal(): succeeds and persists reversalJournalEntryId on a successful retry', async () => {
+      const reverse = jest.fn().mockResolvedValue({
+        id: 'je-reversal-2', entryNumber: 'JE-3', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'SUPPLIER_PAYMENT_REVERSAL', sourceId: paymentId, reversesJournalEntryId: 'je-payment-1',
+        idempotentReplay: false, totalDebit: '40.0000', totalCredit: '40.0000',
+      });
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.REVERSED,
+          accountingPostingStatus: SupplierPaymentPostingStatus.POSTED,
+          journalEntryId: 'je-payment-1',
+        },
+        accountingJournal: { post: jest.fn(), reverse },
+      });
+
+      const result = await service.retryPaymentAccountingReversal(actor, invoiceId, paymentId);
+
+      expect(result.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.REVERSED);
+      expect(result.reversalJournalEntryId).toBe('je-reversal-2');
+    });
+
+    // -------------------- retryPaymentAccountingPosting() ------------------
+
+    it('17. retryPaymentAccountingPosting(): a FAILED posting retried succeeds and transitions to POSTED', async () => {
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-payment-2', entryNumber: 'JE-4', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'SUPPLIER_PAYMENT', sourceId: paymentId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '40.0000', totalCredit: '40.0000',
+      });
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          amount: decimal('40'),
+          paymentMethodId: 'pm-1',
+          status: SupplierPaymentStatus.ACTIVE,
+          accountingPostingStatus: SupplierPaymentPostingStatus.FAILED,
+        },
+        accountingJournal: { post, reverse: jest.fn() },
+      });
+
+      const result = await service.retryPaymentAccountingPosting(actor, invoiceId, paymentId);
+
+      expect(result.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('je-payment-2');
+    });
+
+    it('17b. retryPaymentAccountingPosting(): a NOT_POSTED payment (never attempted) retried succeeds and transitions to POSTED', async () => {
+      // NOT_POSTED is the pre-attempt default — attemptPaymentPosting() has
+      // no branch distinguishing it from FAILED, but this pins that down
+      // explicitly rather than relying only on the FAILED-starting case above.
+      const post = jest.fn().mockResolvedValue({
+        id: 'je-payment-3', entryNumber: 'JE-5', status: 'POSTED', sourceService: 'purchase-service',
+        sourceType: 'SUPPLIER_PAYMENT', sourceId: paymentId, reversesJournalEntryId: null,
+        idempotentReplay: false, totalDebit: '40.0000', totalCredit: '40.0000',
+      });
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          amount: decimal('40'),
+          paymentMethodId: 'pm-1',
+          status: SupplierPaymentStatus.ACTIVE,
+          accountingPostingStatus: SupplierPaymentPostingStatus.NOT_POSTED,
+        },
+        accountingJournal: { post, reverse: jest.fn() },
+      });
+
+      const result = await service.retryPaymentAccountingPosting(actor, invoiceId, paymentId);
+
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('je-payment-3');
+    });
+
+    it('18. retryPaymentAccountingPosting(): already-POSTED is a no-op, never calls accounting-service again', async () => {
+      const post = jest.fn();
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.ACTIVE,
+          accountingPostingStatus: SupplierPaymentPostingStatus.POSTED,
+          journalEntryId: 'je-payment-1',
+        },
+        accountingJournal: { post, reverse: jest.fn() },
+      });
+
+      const result = await service.retryPaymentAccountingPosting(actor, invoiceId, paymentId);
+
+      expect(post).not.toHaveBeenCalled();
+      expect(result.accountingPostingStatus).toBe(SupplierPaymentPostingStatus.POSTED);
+    });
+
+    it('19. retryPaymentAccountingPosting(): rejects (409) for a REVERSED payment', async () => {
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          status: SupplierPaymentStatus.REVERSED,
+        },
+      });
+
+      await expect(
+        service.retryPaymentAccountingPosting(actor, invoiceId, paymentId),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('20. retryPaymentAccountingPosting(): surfaces a renewed posting failure to the caller', async () => {
+      const post = jest.fn().mockRejectedValue(new Error('accounting-service down'));
+      const { service } = buildServiceForPaymentReversal(null, {
+        softPayment: {
+          ...basePaymentFixture(),
+          id: paymentId,
+          purchaseInvoiceId: invoiceId,
+          amount: decimal('40'),
+          paymentMethodId: 'pm-1',
+          status: SupplierPaymentStatus.ACTIVE,
+          accountingPostingStatus: SupplierPaymentPostingStatus.FAILED,
+        },
+        accountingJournal: { post, reverse: jest.fn() },
+      });
+
+      await expect(
+        service.retryPaymentAccountingPosting(actor, invoiceId, paymentId),
+      ).rejects.toThrow('accounting-service down');
+    });
+
+    // -------------------- invoice-cancellation interaction -----------------
+
+    it('21. after reversing the sole ACTIVE payment on a CONFIRMED invoice, cancel() now succeeds', async () => {
+      const reversalTx = buildReversalTx({
+        paymentStatus: SupplierPaymentStatus.ACTIVE,
+        invoiceStatus: PurchaseInvoiceStatus.CONFIRMED,
+        total: decimal('100'),
+        amountPaid: decimal('40'),
+        paymentAmount: decimal('40'),
+      });
+      const { service: reversalService } = buildServiceForPaymentReversal(reversalTx);
+      const reversed = await reversalService.reversePayment(actor, invoiceId, paymentId, {});
+      expect(reversed.invoice.amountPaid).toBe('0.0000');
+
+      // cancel() itself is entirely unmodified by Phase 3.8 — this proves
+      // the pre-existing amountPaid.gt(0) guard is now satisfiable.
+      const cancelTx = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: invoiceId }]),
+        purchaseInvoice: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            id: invoiceId,
+            status: PurchaseInvoiceStatus.CONFIRMED,
+            amountPaid: decimal('0'),
+            items: [],
+          }),
+          update: jest.fn().mockResolvedValue(
+            fullInvoiceHeader({ id: invoiceId, status: PurchaseInvoiceStatus.CANCELLED, items: [] }),
+          ),
+        },
+        purchaseOrderItem: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      const { service: cancelService } = buildServiceForCancel(cancelTx as any);
+      const result = await cancelService.cancel(actor, invoiceId);
+      expect(result.status).toBe(PurchaseInvoiceStatus.CANCELLED);
+    });
+
+    it('22. cancel() still correctly rejects while another payment on the same invoice remains ACTIVE', async () => {
+      const cancelTx = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: invoiceId }]),
+        purchaseInvoice: {
+          findFirstOrThrow: jest.fn().mockResolvedValue({
+            id: invoiceId,
+            status: PurchaseInvoiceStatus.CONFIRMED,
+            amountPaid: decimal('40'), // sibling payment still ACTIVE
+            items: [],
+          }),
+        },
+      };
+      const { service } = buildServiceForCancel(cancelTx as any);
+
+      await expect(service.cancel(actor, invoiceId)).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

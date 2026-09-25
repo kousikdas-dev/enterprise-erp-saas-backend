@@ -353,7 +353,7 @@
 
     <h6 class="mt-3 mb-2">Payments</h6>
     <div class="table-responsive" *ngIf="payments.length; else noPurchasePayments">
-      <table class="table table-sm">
+      <table class="table table-sm align-middle">
         <thead>
           <tr>
             <th>Date</th>
@@ -361,6 +361,9 @@
             <th>Method</th>
             <th>Reference</th>
             <th>Notes</th>
+            <th class="text-center">Status</th>
+            <th class="text-center">Accounting</th>
+            <th class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -370,6 +373,42 @@
             <td>{{ paymentMethodLabel(p.paymentMethodId) }}</td>
             <td>{{ p.reference || '—' }}</td>
             <td>{{ p.notes || '—' }}</td>
+            <td class="text-center">
+              <span class="badge" [ngClass]="paymentStatusDocBadgeClass(p.status)">{{ p.status }}</span>
+            </td>
+            <td class="text-center">
+              <span class="badge" [ngClass]="postingStatusBadgeClass(p.accountingPostingStatus)">
+                {{ p.accountingPostingStatus }}
+              </span>
+            </td>
+            <td class="text-end text-nowrap">
+              <button
+                *ngIf="canRetryPaymentPosting(p)"
+                type="button"
+                class="btn btn-sm btn-outline-warning me-1"
+                [disabled]="paymentActionId === p.id"
+                title="The original accounting posting failed — retry it"
+                (click)="retryPaymentAccountingPosting(p)">
+                {{ paymentActionId === p.id ? 'Retrying…' : 'Retry Posting' }}
+              </button>
+              <button
+                *ngIf="canReversePaymentRow(p)"
+                type="button"
+                class="btn btn-sm btn-outline-secondary me-1"
+                [disabled]="paymentActionId === p.id"
+                (click)="reversePayment(p)">
+                {{ paymentActionId === p.id ? 'Reversing…' : 'Reverse' }}
+              </button>
+              <button
+                *ngIf="canRetryPaymentReversal(p)"
+                type="button"
+                class="btn btn-sm btn-outline-warning"
+                [disabled]="paymentActionId === p.id"
+                title="The original accounting reversal failed — retry it"
+                (click)="retryPaymentAccountingReversal(p)">
+                {{ paymentActionId === p.id ? 'Retrying…' : 'Retry Reversal' }}
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>

@@ -14,6 +14,7 @@ import {
   PurchaseInvoiceStatus,
   PurchaseOrderStatus,
   SupplierPaymentPostingStatus,
+  SupplierPaymentStatus,
 } from '../../generated/prisma-client';
 import {
   AccountingJournalClient,
@@ -40,6 +41,7 @@ import {
   CreateSupplierPaymentDto,
   UpdatePurchaseInvoiceDto,
 } from './dto/purchase-invoice.dto';
+import { ReverseSupplierPaymentDto } from './dto/reverse-supplier-payment.dto';
 import { toSupplierPaymentResponse } from './dto/supplier-payment-response';
 
 const INVOICE_INCLUDE = {
@@ -705,9 +707,9 @@ export class PurchaseInvoicesService {
    * exactly: the PurchaseInvoice row is locked FOR UPDATE for the duration
    * of the transaction so the balance-due check and the amountPaid/
    * paymentStatus update happen against a single, serialized read — never an
-   * application-level read taken outside the transaction. No reversal/
-   * cancellation endpoint exists, matching Sales Payment's own current state
-   * (Section 21.4) — not proposed for V1.
+   * application-level read taken outside the transaction. Phase 3.8 adds a
+   * reversal path for a recorded payment — see reversePayment() below; Sales
+   * Payment's own identical gap (Section 21.4) is unchanged.
    */
   async recordPayment(
     actor: ActorContext,
@@ -792,10 +794,9 @@ export class PurchaseInvoicesService {
       request,
     });
 
-    // Post-commit, best-effort — identical rationale to confirm() above.
-    // SupplierPayment has no retry endpoint of its own in this phase (it
-    // simply stays FAILED, matching its existing "no reversal/cancellation"
-    // limitation) — this is its one and only posting attempt.
+    // Post-commit, best-effort — identical rationale to confirm() above. A
+    // FAILED outcome here is recoverable via retryPaymentAccountingPosting()
+    // (Phase 3.8) rather than being permanently stuck.
     const { payment: finalPayment } = await this.attemptPaymentPosting(
       actor,
       payment,
@@ -925,6 +926,182 @@ export class PurchaseInvoicesService {
     return this.toResponse(actor, invoice);
   }
 
+  /**
+   * Manual retry for a Supplier Payment whose original accounting posting
+   * attempt (inside recordPayment()) never succeeded
+   * (accountingPostingStatus FAILED or NOT_POSTED, e.g. a missing
+   * paymentMethodId at the time or accounting-service being unreachable).
+   * Rejected once the payment is REVERSED — posting a fresh journal for a
+   * reversed payment would create a real AP/Bank effect for a payment the
+   * business no longer considers active. Already-POSTED is a no-op (never
+   * re-calls accounting-service). Mirrors
+   * PurchaseInvoicesService.retryAccountingPosting() exactly (Phase 3.8).
+   */
+  async retryPaymentAccountingPosting(
+    actor: ActorContext,
+    invoiceId: string,
+    paymentId: string,
+    request?: RequestAuditMeta,
+  ) {
+    const payment = await this.requirePayment(actor, invoiceId, paymentId);
+
+    if (payment.status === SupplierPaymentStatus.REVERSED) {
+      throw new ConflictException(
+        'Cannot post accounting for a reversed supplier payment',
+      );
+    }
+    if (payment.accountingPostingStatus === SupplierPaymentPostingStatus.POSTED) {
+      return toSupplierPaymentResponse(payment);
+    }
+
+    const { payment: updated, error } = await this.attemptPaymentPosting(
+      actor,
+      payment,
+      request,
+    );
+    if (error) {
+      throw error;
+    }
+
+    await this.audit.record({
+      actor,
+      action: 'supplier-payment.accounting-posting-retried',
+      resource: 'supplier-payment',
+      resourceId: updated.id,
+      metadata: { journalEntryId: updated.journalEntryId },
+      request,
+    });
+
+    return toSupplierPaymentResponse(updated);
+  }
+
+  /**
+   * Phase 3.8 — ACTIVE -> REVERSED. Undoes a single Supplier Payment's
+   * effect on PurchaseInvoice.amountPaid/paymentStatus and (post-commit,
+   * best-effort) its posted AP/Bank journal. Idempotent: re-invoking on an
+   * already-REVERSED payment is a no-op that never touches the invoice or
+   * calls accounting again. Unlike GRNI matching, sibling payments on the
+   * same invoice have no consumption relationship — any ACTIVE payment can
+   * be reversed independently of any other, in any order. Reversing a
+   * payment can make a CONFIRMED invoice's amountPaid drop back to 0,
+   * un-blocking cancel()'s existing `amountPaid.gt(0)` guard — cancel()
+   * itself is unmodified.
+   */
+  async reversePayment(
+    actor: ActorContext,
+    invoiceId: string,
+    paymentId: string,
+    dto: ReverseSupplierPaymentDto,
+    request?: RequestAuditMeta,
+  ) {
+    // Soft, pre-transaction check: the common "already reversed" case never
+    // needs to open a transaction or take any lock at all.
+    const softPayment = await this.requirePayment(actor, invoiceId, paymentId);
+    if (softPayment.status === SupplierPaymentStatus.REVERSED) {
+      return {
+        payment: toSupplierPaymentResponse(softPayment),
+        invoice: await this.toResponse(actor, await this.require(actor, invoiceId)),
+      };
+    }
+
+    const { invoice, payment, alreadyReversed } = await this.prisma.$transaction((tx) =>
+      this.restoreAndReversePayment(tx, actor, invoiceId, paymentId, dto.reason),
+    );
+
+    if (alreadyReversed) {
+      return {
+        payment: toSupplierPaymentResponse(payment),
+        invoice: await this.toResponse(actor, invoice),
+      };
+    }
+
+    await this.audit.record({
+      actor,
+      action: 'supplier-payment.reversed',
+      resource: 'supplier-payment',
+      resourceId: payment.id,
+      metadata: {
+        purchaseInvoiceId: invoiceId,
+        amount: moneyToString(payment.amount),
+        reason: dto.reason?.trim() || null,
+      },
+      request,
+    });
+
+    // Cancellation itself is already committed and correct at this point,
+    // independent of everything below (same principle as
+    // PurchaseInvoicesService.cancel() and GoodsReceiptsService.reverse()).
+    let finalPayment = payment;
+    if (
+      payment.accountingPostingStatus === SupplierPaymentPostingStatus.POSTED &&
+      payment.journalEntryId
+    ) {
+      const { payment: reversed } = await this.attemptPaymentReversal(
+        actor,
+        payment,
+        request,
+      );
+      finalPayment = reversed;
+    }
+
+    return {
+      payment: toSupplierPaymentResponse(finalPayment),
+      invoice: await this.toResponse(actor, invoice),
+    };
+  }
+
+  /**
+   * Manual retry for a REVERSED Supplier Payment whose accounting reversal
+   * (attempted post-commit inside reversePayment()) failed. Mirrors
+   * PurchaseInvoicesService.retryAccountingReversal() /
+   * GoodsReceiptsService.retryAccountingReversal() exactly.
+   */
+  async retryPaymentAccountingReversal(
+    actor: ActorContext,
+    invoiceId: string,
+    paymentId: string,
+    request?: RequestAuditMeta,
+  ) {
+    const payment = await this.requirePayment(actor, invoiceId, paymentId);
+
+    if (payment.status !== SupplierPaymentStatus.REVERSED) {
+      throw new ConflictException(
+        'Only a reversed supplier payment can have its accounting reversal retried',
+      );
+    }
+    if (payment.accountingPostingStatus === SupplierPaymentPostingStatus.REVERSED) {
+      return toSupplierPaymentResponse(payment);
+    }
+    if (
+      payment.accountingPostingStatus !== SupplierPaymentPostingStatus.POSTED ||
+      !payment.journalEntryId
+    ) {
+      throw new ConflictException(
+        'This supplier payment has no posted accounting journal to reverse',
+      );
+    }
+
+    const { payment: reversed, error } = await this.attemptPaymentReversal(
+      actor,
+      payment,
+      request,
+    );
+    if (error) {
+      throw error;
+    }
+
+    await this.audit.record({
+      actor,
+      action: 'supplier-payment.accounting-reversal-retried',
+      resource: 'supplier-payment',
+      resourceId: reversed.id,
+      metadata: { reversalJournalEntryId: reversed.reversalJournalEntryId },
+      request,
+    });
+
+    return toSupplierPaymentResponse(reversed);
+  }
+
   private async require(actor: ActorContext, id: string) {
     const row = await this.prisma.purchaseInvoice.findFirst({
       where: { id, tenantId: actor.tenantId },
@@ -932,6 +1109,25 @@ export class PurchaseInvoicesService {
     });
     if (!row) throw new NotFoundException('Purchase invoice not found');
     return row;
+  }
+
+  /**
+   * Phase 3.8 — tenant- and parent-invoice-scoped lookup for a single
+   * Supplier Payment. 404s if the invoice itself doesn't exist/isn't in this
+   * tenant, or if the payment doesn't exist/isn't a child of that invoice —
+   * never leaks a cross-invoice or cross-tenant payment id.
+   */
+  private async requirePayment(
+    actor: ActorContext,
+    invoiceId: string,
+    paymentId: string,
+  ) {
+    await this.require(actor, invoiceId);
+    const payment = await this.prisma.supplierPayment.findFirst({
+      where: { id: paymentId, tenantId: actor.tenantId, purchaseInvoiceId: invoiceId },
+    });
+    if (!payment) throw new NotFoundException('Supplier payment not found');
+    return payment;
   }
 
   /**
@@ -1246,6 +1442,165 @@ export class PurchaseInvoicesService {
       }
       return { payment: updated, error };
     }
+  }
+
+  /**
+   * Attempts to reverse (or idempotently replay the reversal of) a Supplier
+   * Payment's already-POSTED accounting journal. The original journal entry
+   * is never touched — looked up read-only inside accounting-service and
+   * stays POSTED permanently (approved design: no VOID). On failure,
+   * accountingPostingStatus is deliberately left at POSTED (nothing to
+   * update) rather than introducing a new failure state — mirrors
+   * attemptInvoiceReversal() exactly (Phase 3.8).
+   */
+  private async attemptPaymentReversal(
+    actor: ActorContext,
+    payment: { id: string },
+    request?: RequestAuditMeta,
+  ) {
+    try {
+      const result = await this.accountingJournal.reverse(actor, {
+        sourceService: ACCOUNTING_SOURCE_SERVICE,
+        sourceType: 'SUPPLIER_PAYMENT',
+        sourceId: payment.id,
+        reversalSourceType: 'SUPPLIER_PAYMENT_REVERSAL',
+        description: `Reversal of supplier payment ${payment.id}`,
+      });
+      const updated = await this.prisma.supplierPayment.update({
+        where: { id: payment.id },
+        data: {
+          accountingPostingStatus: SupplierPaymentPostingStatus.REVERSED,
+          reversalJournalEntryId: result.id,
+        },
+      });
+      await this.audit.record({
+        actor,
+        action: 'supplier-payment.accounting-reversed',
+        resource: 'supplier-payment',
+        resourceId: payment.id,
+        metadata: {
+          reversalJournalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { payment: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse accounting journal for reversed supplier payment ${payment.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      const refreshed = await this.prisma.supplierPayment.findFirstOrThrow({
+        where: { id: payment.id },
+      });
+      return { payment: refreshed, error };
+    }
+  }
+
+  /**
+   * The restoration algorithm for reversePayment(), entirely inside one
+   * transaction. Lock order — purchase_invoices (single row) ->
+   * supplier_payments (single row) — the shortest chain in this module,
+   * since a payment has no children and no sibling rows that need
+   * re-validating (unlike GRNI matching, sibling payments on the same
+   * invoice have no consumption relationship). Matches recordPayment()'s own
+   * parent-before-child ordering, so the two can never deadlock against each
+   * other. Re-verifies the ACTIVE/REVERSED state under lock (closing the
+   * race window against a concurrent reversePayment() call for the same
+   * payment) rather than trusting the caller's soft, pre-transaction read.
+   */
+  private async restoreAndReversePayment(
+    tx: Prisma.TransactionClient,
+    actor: ActorContext,
+    invoiceId: string,
+    paymentId: string,
+    reason: string | undefined,
+  ) {
+    const invoiceLockRows = await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT id FROM purchase_invoices
+        WHERE id = ${invoiceId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+        FOR UPDATE
+      `,
+    );
+    if (!invoiceLockRows[0]) throw new NotFoundException('Purchase invoice not found');
+
+    const paymentLockRows = await tx.$queryRaw<
+      Array<{ id: string; status: string; purchaseInvoiceId: string }>
+    >(
+      Prisma.sql`
+        SELECT id, status::text AS status, "purchaseInvoiceId"
+        FROM supplier_payments
+        WHERE id = ${paymentId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+        FOR UPDATE
+      `,
+    );
+    const lockedPayment = paymentLockRows[0];
+    if (!lockedPayment || lockedPayment.purchaseInvoiceId !== invoiceId) {
+      throw new NotFoundException('Supplier payment not found');
+    }
+
+    if (lockedPayment.status === SupplierPaymentStatus.REVERSED) {
+      const [invoice, payment] = await Promise.all([
+        tx.purchaseInvoice.findFirstOrThrow({
+          where: { id: invoiceId, tenantId: actor.tenantId },
+          include: INVOICE_INCLUDE,
+        }),
+        tx.supplierPayment.findFirstOrThrow({
+          where: { id: paymentId, tenantId: actor.tenantId },
+        }),
+      ]);
+      return { invoice, payment, alreadyReversed: true as const };
+    }
+
+    const existingInvoice = await tx.purchaseInvoice.findFirstOrThrow({
+      where: { id: invoiceId, tenantId: actor.tenantId },
+    });
+    if (existingInvoice.status !== PurchaseInvoiceStatus.CONFIRMED) {
+      // Data-integrity guard — should never trigger under correct operation:
+      // an invoice can only reach CANCELLED once amountPaid is back to 0,
+      // which requires every ACTIVE payment (including this one) to already
+      // be REVERSED. Surfaced as an error rather than silently allowed.
+      throw new ConflictException(
+        'Only a CONFIRMED purchase invoice can have a payment reversed',
+      );
+    }
+
+    const existingPayment = await tx.supplierPayment.findFirstOrThrow({
+      where: { id: paymentId, tenantId: actor.tenantId },
+    });
+
+    const newAmountPaid = existingInvoice.amountPaid.minus(existingPayment.amount);
+    if (newAmountPaid.lt(0)) {
+      // Data-integrity guard — should never trigger under correct operation
+      // (mirrors the invoicedQuantity/matchedQuantity-negative guards
+      // elsewhere in this file).
+      throw new ConflictException(
+        'Reversing this payment would drive amountPaid negative for the purchase invoice',
+      );
+    }
+    const newPaymentStatus = newAmountPaid.lte(0)
+      ? PurchaseInvoicePaymentStatus.UNPAID
+      : newAmountPaid.gte(existingInvoice.total)
+        ? PurchaseInvoicePaymentStatus.PAID
+        : PurchaseInvoicePaymentStatus.PARTIALLY_PAID;
+
+    const updatedInvoice = await tx.purchaseInvoice.update({
+      where: { id: invoiceId },
+      data: { amountPaid: newAmountPaid, paymentStatus: newPaymentStatus },
+      include: INVOICE_INCLUDE,
+    });
+
+    const updatedPayment = await tx.supplierPayment.update({
+      where: { id: paymentId },
+      data: {
+        status: SupplierPaymentStatus.REVERSED,
+        reversedAt: new Date(),
+        reversalReason: reason?.trim() || null,
+      },
+    });
+
+    return { invoice: updatedInvoice, payment: updatedPayment, alreadyReversed: false as const };
   }
 
   /**

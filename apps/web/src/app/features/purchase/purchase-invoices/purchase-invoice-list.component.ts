@@ -71,6 +71,9 @@ export class PurchaseInvoiceListComponent implements OnInit {
   readonly canRecordPayment = this.permissions.has(
     AppPermissions.PURCHASE_INVOICES_RECORD_PAYMENT,
   );
+  readonly canReversePayment = this.permissions.has(
+    AppPermissions.PURCHASE_INVOICES_REVERSE_PAYMENT,
+  );
 
   items: PurchaseInvoice[] = [];
   orders: PurchaseOrder[] = [];
@@ -83,6 +86,8 @@ export class PurchaseInvoiceListComponent implements OnInit {
   filter = '';
   saving = false;
   actionId: string | null = null;
+  /** Separate from actionId (invoice-level actions) — a payment row's own action button reuses payment.id here. */
+  paymentActionId: string | null = null;
   paymentSaving = false;
   viewing: PurchaseInvoice | null = null;
   selectedOrder: PurchaseOrder | null = null;
@@ -363,6 +368,40 @@ export class PurchaseInvoiceListComponent implements OnInit {
       this.canRecordPayment &&
       item.status === 'CONFIRMED' &&
       item.paymentStatus !== 'PAID'
+    );
+  }
+
+  paymentStatusDocBadgeClass(status: string): string {
+    return status === 'REVERSED' ? 'bg-secondary' : 'bg-success';
+  }
+
+  /** Mirrors PurchaseInvoice's canCancelInvoice(): only an ACTIVE payment can be reversed. */
+  canReversePaymentRow(payment: SupplierPayment): boolean {
+    return this.canReversePayment && payment.status === 'ACTIVE';
+  }
+
+  /** Mirrors PurchaseInvoice's canRetryPosting(): a failed (or never-attempted) posting on an ACTIVE payment can be retried. */
+  canRetryPaymentPosting(payment: SupplierPayment): boolean {
+    return (
+      this.canRecordPayment &&
+      payment.status === 'ACTIVE' &&
+      (payment.accountingPostingStatus === 'FAILED' ||
+        payment.accountingPostingStatus === 'NOT_POSTED')
+    );
+  }
+
+  /**
+   * A reversed payment whose post-reversal accounting attempt failed stays at
+   * accountingPostingStatus POSTED (never a new FAILED-for-reversal state —
+   * mirrors PurchaseInvoicesService.reversePayment()'s own reconciliation
+   * note), so that exact combination is what's retryable here — mirrors
+   * PurchaseInvoice's canRetryReversal().
+   */
+  canRetryPaymentReversal(payment: SupplierPayment): boolean {
+    return (
+      this.canReversePayment &&
+      payment.status === 'REVERSED' &&
+      payment.accountingPostingStatus === 'POSTED'
     );
   }
 
@@ -650,6 +689,86 @@ export class PurchaseInvoiceListComponent implements OnInit {
       },
       error: (err) => {
         this.actionId = null;
+        this.toast.error(apiErrorMessage(err, 'Retry accounting reversal failed'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  /** Re-fetches the invoice + its payments together — mirrors submitPayment()'s own refresh. */
+  private refreshDetailIfOpen(invoiceId: string): void {
+    if (this.viewing?.id === invoiceId) {
+      this.openDetail({ ...this.viewing });
+    }
+  }
+
+  retryPaymentAccountingPosting(payment: SupplierPayment): void {
+    if (!this.canRetryPaymentPosting(payment) || this.paymentActionId) {
+      return;
+    }
+    this.paymentActionId = payment.id;
+    this.cdr.detectChanges();
+    const invoiceId = payment.purchaseInvoiceId;
+    this.invoices.retryPaymentAccountingPosting(invoiceId, payment.id).subscribe({
+      next: (updated) => {
+        this.paymentActionId = null;
+        const ok = updated.accountingPostingStatus === 'POSTED';
+        this.toast[ok ? 'success' : 'error'](
+          ok ? 'Accounting posting succeeded' : 'Accounting posting failed again',
+        );
+        this.refreshDetailIfOpen(invoiceId);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.paymentActionId = null;
+        this.toast.error(apiErrorMessage(err, 'Retry accounting posting failed'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  reversePayment(payment: SupplierPayment): void {
+    if (!this.canReversePaymentRow(payment) || this.paymentActionId) {
+      return;
+    }
+    this.paymentActionId = payment.id;
+    this.cdr.detectChanges();
+    const invoiceId = payment.purchaseInvoiceId;
+    this.invoices.reversePayment(invoiceId, payment.id).subscribe({
+      next: () => {
+        this.paymentActionId = null;
+        this.toast.success('Payment reversed');
+        this.load();
+        this.refreshDetailIfOpen(invoiceId);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.paymentActionId = null;
+        this.toast.error(apiErrorMessage(err, 'Payment reversal failed'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  retryPaymentAccountingReversal(payment: SupplierPayment): void {
+    if (!this.canRetryPaymentReversal(payment) || this.paymentActionId) {
+      return;
+    }
+    this.paymentActionId = payment.id;
+    this.cdr.detectChanges();
+    const invoiceId = payment.purchaseInvoiceId;
+    this.invoices.retryPaymentAccountingReversal(invoiceId, payment.id).subscribe({
+      next: (updated) => {
+        this.paymentActionId = null;
+        const ok = updated.accountingPostingStatus === 'REVERSED';
+        this.toast[ok ? 'success' : 'error'](
+          ok ? 'Accounting reversal succeeded' : 'Accounting reversal failed again',
+        );
+        this.refreshDetailIfOpen(invoiceId);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.paymentActionId = null;
         this.toast.error(apiErrorMessage(err, 'Retry accounting reversal failed'));
         this.cdr.detectChanges();
       },

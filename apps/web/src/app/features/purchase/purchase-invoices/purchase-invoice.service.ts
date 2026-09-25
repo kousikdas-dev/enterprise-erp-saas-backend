@@ -7,6 +7,7 @@ import {
   ItemList,
   PurchaseInvoice,
   RecordSupplierPaymentResult,
+  ReverseSupplierPaymentRequest,
   SupplierPayment,
   UpdatePurchaseInvoiceRequest,
 } from '../models/purchase.models';
@@ -64,6 +65,35 @@ export class PurchaseInvoiceService {
   listPayments(id: string): Observable<ItemList<SupplierPayment>> {
     return this.api.get<ItemList<SupplierPayment>>(
       `/api/v1/purchase-invoices/${id}/payments`,
+    );
+  }
+
+  retryPaymentAccountingPosting(
+    id: string,
+    paymentId: string,
+  ): Observable<SupplierPayment> {
+    return this.api.post<SupplierPayment>(
+      `/api/v1/purchase-invoices/${id}/payments/${paymentId}/retry-accounting-posting`,
+    );
+  }
+
+  reversePayment(
+    id: string,
+    paymentId: string,
+    body: ReverseSupplierPaymentRequest = {},
+  ): Observable<RecordSupplierPaymentResult> {
+    return this.api.post<RecordSupplierPaymentResult>(
+      `/api/v1/purchase-invoices/${id}/payments/${paymentId}/reverse`,
+      body,
+    );
+  }
+
+  retryPaymentAccountingReversal(
+    id: string,
+    paymentId: string,
+  ): Observable<SupplierPayment> {
+    return this.api.post<SupplierPayment>(
+      `/api/v1/purchase-invoices/${id}/payments/${paymentId}/retry-accounting-reversal`,
     );
   }
 }

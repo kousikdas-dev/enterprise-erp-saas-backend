@@ -396,6 +396,22 @@ export class PurchaseOrdersService {
           'Cannot cancel a purchase order that has receipts',
         );
       }
+      // Phase 3.8 (adjacent defect fix) — for a non-inventory-tracked line, a
+      // Purchase Invoice can be confirmed after a Goods Receipt, and that
+      // Goods Receipt can later be reversed (its guards don't check
+      // invoicedQuantity for untracked lines), leaving invoicedQuantity > 0
+      // while receivedQuantity is back at 0. Without this guard, cancelling
+      // such a PO would leave a CANCELLED purchase order with a live
+      // CONFIRMED invoice (and possibly a posted AP journal) still
+      // referencing it.
+      const invoiced = existing.items.some((item) =>
+        item.invoicedQuantity.gt(0),
+      );
+      if (invoiced) {
+        throw new ConflictException(
+          'Cannot cancel a purchase order that has invoices',
+        );
+      }
     }
     const row = await this.prisma.purchaseOrder.update({
       where: { id },

@@ -57,6 +57,7 @@ export const AppPermissions = {
   PURCHASE_INVOICES_CONFIRM: 'purchase-invoices.confirm',
   PURCHASE_INVOICES_CANCEL: 'purchase-invoices.cancel',
   PURCHASE_INVOICES_RECORD_PAYMENT: 'purchase-invoices.record-payment',
+  PURCHASE_INVOICES_REVERSE_PAYMENT: 'purchase-invoices.reverse-payment',
   PURCHASE_RETURNS_CREATE: 'purchase-returns.create',
   PURCHASE_RETURNS_READ: 'purchase-returns.read',
   PURCHASE_RETURNS_CONFIRM: 'purchase-returns.confirm',

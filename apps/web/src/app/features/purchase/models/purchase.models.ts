@@ -357,6 +357,10 @@ export interface UpdatePurchaseInvoiceRequest {
   items?: CreatePurchaseInvoiceLineRequest[];
 }
 
+/** Document-level lifecycle (Phase 3.8) — separate from accountingPostingStatus below. */
+export type SupplierPaymentStatus = 'ACTIVE' | 'REVERSED';
+export type SupplierPaymentPostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+
 export interface SupplierPayment {
   id: string;
   purchaseInvoiceId: string;
@@ -365,6 +369,12 @@ export interface SupplierPayment {
   paymentMethodId: string | null;
   reference: string | null;
   notes: string | null;
+  status: SupplierPaymentStatus | string;
+  accountingPostingStatus: SupplierPaymentPostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  reversedAt: string | null;
+  reversalReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -375,6 +385,10 @@ export interface CreateSupplierPaymentRequest {
   paymentMethodId?: string;
   reference?: string;
   notes?: string;
+}
+
+export interface ReverseSupplierPaymentRequest {
+  reason?: string;
 }
 
 export interface RecordSupplierPaymentResult {

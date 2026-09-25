@@ -1,6 +1,7 @@
 import {
   Prisma,
   SupplierPaymentPostingStatus,
+  SupplierPaymentStatus,
 } from '../../../generated/prisma-client';
 import { moneyToString } from '../../common/decimal';
 
@@ -13,8 +14,12 @@ type SupplierPaymentRow = {
   paymentMethodId: string | null;
   reference: string | null;
   notes: string | null;
+  status: SupplierPaymentStatus;
   accountingPostingStatus: SupplierPaymentPostingStatus;
   journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  reversedAt: Date | null;
+  reversalReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -28,11 +33,15 @@ export function toSupplierPaymentResponse(row: SupplierPaymentRow) {
     paymentMethodId: row.paymentMethodId,
     reference: row.reference,
     notes: row.notes,
+    status: row.status,
     accountingPostingStatus: row.accountingPostingStatus,
     journalEntryId: row.journalEntryId,
+    reversalJournalEntryId: row.reversalJournalEntryId,
+    reversedAt: row.reversedAt,
+    reversalReason: row.reversalReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-export { SupplierPaymentPostingStatus };
+export { SupplierPaymentPostingStatus, SupplierPaymentStatus };
