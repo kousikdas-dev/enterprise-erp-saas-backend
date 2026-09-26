@@ -398,6 +398,9 @@
             <th>Method</th>
             <th>Reference</th>
             <th>Notes</th>
+            <th>Status</th>
+            <th>Accounting</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -407,6 +410,38 @@
             <td>{{ paymentMethodLabel(p.paymentMethodId) }}</td>
             <td>{{ p.reference || '—' }}</td>
             <td>{{ p.notes || '—' }}</td>
+            <td>
+              <span class="badge" [ngClass]="paymentStatusDocBadgeClass(p.status)">{{ p.status }}</span>
+            </td>
+            <td>
+              <span class="badge" [ngClass]="postingStatusBadgeClass(p.accountingPostingStatus)">{{ p.accountingPostingStatus }}</span>
+            </td>
+            <td>
+              <button
+                *ngIf="canRetryPaymentPosting(p)"
+                type="button"
+                class="btn btn-sm btn-outline-warning me-1"
+                [disabled]="paymentActionId === p.id"
+                (click)="retryPaymentAccountingPosting(p)">
+                {{ paymentActionId === p.id ? 'Retrying…' : 'Retry Posting' }}
+              </button>
+              <button
+                *ngIf="canReversePaymentRow(p)"
+                type="button"
+                class="btn btn-sm btn-outline-secondary me-1"
+                [disabled]="paymentActionId === p.id"
+                (click)="reversePayment(p)">
+                {{ paymentActionId === p.id ? 'Reversing…' : 'Reverse' }}
+              </button>
+              <button
+                *ngIf="canRetryPaymentReversal(p)"
+                type="button"
+                class="btn btn-sm btn-outline-warning"
+                [disabled]="paymentActionId === p.id"
+                (click)="retryPaymentAccountingReversal(p)">
+                {{ paymentActionId === p.id ? 'Retrying…' : 'Retry Reversal' }}
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>

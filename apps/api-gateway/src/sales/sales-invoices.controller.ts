@@ -31,8 +31,10 @@ import {
   CreateSalesInvoiceDto,
   CreateSalesPaymentDto,
   RecordSalesPaymentResultDto,
+  ReverseSalesPaymentDto,
   SalesInvoiceDto,
   SalesInvoiceListDto,
+  SalesPaymentDto,
   SalesPaymentListDto,
   UpdateSalesInvoiceDto,
 } from './dto/sales-invoice.dto';
@@ -272,6 +274,83 @@ export class SalesInvoicesController {
       method: 'GET',
       path: `/api/v1/sales-invoices/${id}/payments`,
       user,
+    });
+  }
+
+  @Post(':id/payments/:paymentId/retry-accounting-posting')
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT)
+  @ApiOperation({
+    summary: 'Retry customer payment accounting posting',
+    description:
+      'Retries the journal posting for a customer payment whose original post-record posting attempt failed (accountingPostingStatus FAILED or NOT_POSTED). A no-op returning the payment unchanged if already POSTED. Same permission as recording a payment, since this retries the posting recordPayment() attempted. Permission: sales-invoices.record-payment.',
+  })
+  @ApiOkResponse({ type: SalesPaymentDto })
+  @ApiConflictResponse({ description: 'Payment is reversed, or the posting attempt failed again' })
+  @ApiManagementErrors()
+  retryPaymentAccountingPosting(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Req() request: Request,
+  ): Promise<SalesPaymentDto> {
+    return this.sales.forward<SalesPaymentDto>({
+      method: 'POST',
+      path: `/api/v1/sales-invoices/${id}/payments/${paymentId}/retry-accounting-posting`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/payments/:paymentId/reverse')
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT)
+  @ApiOperation({
+    summary: 'Reverse customer payment',
+    description:
+      'Undoes a single ACTIVE customer payment: reverses its effect on SalesInvoice.amountPaid/paymentStatus and (best-effort) its posted Receivable/Bank journal. Idempotent if already REVERSED. Permission: sales-invoices.reverse-payment.',
+  })
+  @ApiOkResponse({ type: RecordSalesPaymentResultDto })
+  @ApiConflictResponse({ description: 'Payment cannot be reversed' })
+  @ApiManagementErrors()
+  reversePayment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: ReverseSalesPaymentDto,
+    @Req() request: Request,
+  ): Promise<RecordSalesPaymentResultDto> {
+    return this.sales.forward<RecordSalesPaymentResultDto>({
+      method: 'POST',
+      path: `/api/v1/sales-invoices/${id}/payments/${paymentId}/reverse`,
+      user,
+      body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/payments/:paymentId/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT)
+  @ApiOperation({
+    summary: 'Retry customer payment accounting reversal',
+    description:
+      'Retries the journal reversal for a REVERSED customer payment whose post-reversal accounting attempt failed (still accountingPostingStatus POSTED). A no-op returning the payment unchanged if already REVERSED. Same permission as reverse, since this retries the reversal reversePayment() attempted. Permission: sales-invoices.reverse-payment.',
+  })
+  @ApiOkResponse({ type: SalesPaymentDto })
+  @ApiConflictResponse({ description: 'Payment is not reversed, or has no posted journal to reverse' })
+  @ApiManagementErrors()
+  retryPaymentAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Req() request: Request,
+  ): Promise<SalesPaymentDto> {
+    return this.sales.forward<SalesPaymentDto>({
+      method: 'POST',
+      path: `/api/v1/sales-invoices/${id}/payments/${paymentId}/retry-accounting-reversal`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
     });
   }
 }

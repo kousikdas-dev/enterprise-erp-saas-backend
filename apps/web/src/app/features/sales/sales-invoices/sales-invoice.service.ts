@@ -6,6 +6,7 @@ import {
   CreateSalesPaymentRequest,
   ItemList,
   RecordSalesPaymentResult,
+  ReverseSalesPaymentRequest,
   SalesInvoice,
   SalesPayment,
   UpdateSalesInvoiceRequest,
@@ -64,6 +65,35 @@ export class SalesInvoiceService {
   listPayments(id: string): Observable<ItemList<SalesPayment>> {
     return this.api.get<ItemList<SalesPayment>>(
       `/api/v1/sales-invoices/${id}/payments`,
+    );
+  }
+
+  retryPaymentAccountingPosting(
+    invoiceId: string,
+    paymentId: string,
+  ): Observable<SalesPayment> {
+    return this.api.post<SalesPayment>(
+      `/api/v1/sales-invoices/${invoiceId}/payments/${paymentId}/retry-accounting-posting`,
+    );
+  }
+
+  reversePayment(
+    invoiceId: string,
+    paymentId: string,
+    body: ReverseSalesPaymentRequest = {},
+  ): Observable<RecordSalesPaymentResult> {
+    return this.api.post<RecordSalesPaymentResult>(
+      `/api/v1/sales-invoices/${invoiceId}/payments/${paymentId}/reverse`,
+      body,
+    );
+  }
+
+  retryPaymentAccountingReversal(
+    invoiceId: string,
+    paymentId: string,
+  ): Observable<SalesPayment> {
+    return this.api.post<SalesPayment>(
+      `/api/v1/sales-invoices/${invoiceId}/payments/${paymentId}/retry-accounting-reversal`,
     );
   }
 }

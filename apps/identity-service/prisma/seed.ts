@@ -382,6 +382,16 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Cancel sales invoices',
   },
   {
+    resource: 'sales-invoices',
+    action: 'record-payment',
+    description: 'Record customer payments against sales invoices',
+  },
+  {
+    resource: 'sales-invoices',
+    action: 'reverse-payment',
+    description: 'Reverse customer payments and retry their accounting posting/reversal',
+  },
+  {
     resource: 'accounts-receivable',
     action: 'read',
     description: 'Read Accounts Receivable customer summaries, invoice ledger, aging, statements, and GL reconciliation',

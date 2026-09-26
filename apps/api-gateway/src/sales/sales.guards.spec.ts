@@ -62,6 +62,30 @@ class SalesInvoicesRetryProbeController {
   }
 }
 
+@Controller('sales-invoices-payment-probe')
+class SalesInvoicesPaymentProbeController {
+  @Post('retry-accounting-posting')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT)
+  retryPaymentPosting(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('reverse')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT)
+  reverse(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('retry-accounting-reversal')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT)
+  retryPaymentReversal(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 describe('sales JWT and RBAC', () => {
   const secret = 'test-access-secret-change-me';
   let app: INestApplication;
@@ -81,6 +105,7 @@ describe('sales JWT and RBAC', () => {
         CustomersProbeController,
         ShipmentsProbeController,
         SalesInvoicesRetryProbeController,
+        SalesInvoicesPaymentProbeController,
       ],
       providers: [
         JwtStrategy,
@@ -179,6 +204,48 @@ describe('sales JWT and RBAC', () => {
     getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_CANCEL]);
     await request(server)
       .post('/sales-invoices-retry-probe/reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires sales-invoices.record-payment to retry a customer payment accounting posting', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT]);
+    await request(server)
+      .post('/sales-invoices-payment-probe/retry-accounting-posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT]);
+    await request(server)
+      .post('/sales-invoices-payment-probe/retry-accounting-posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires sales-invoices.reverse-payment to reverse a customer payment', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT]);
+    await request(server)
+      .post('/sales-invoices-payment-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT]);
+    await request(server)
+      .post('/sales-invoices-payment-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires sales-invoices.reverse-payment to retry a customer payment accounting reversal', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT]);
+    await request(server)
+      .post('/sales-invoices-payment-probe/retry-accounting-reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT]);
+    await request(server)
+      .post('/sales-invoices-payment-probe/retry-accounting-reversal')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(201);
   });

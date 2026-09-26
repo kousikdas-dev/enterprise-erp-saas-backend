@@ -19,6 +19,7 @@ import {
   CreateSalesPaymentDto,
   UpdateSalesInvoiceDto,
 } from './dto/sales-invoice.dto';
+import { ReverseSalesPaymentDto } from './dto/reverse-sales-payment.dto';
 import { SalesInvoicesService } from './sales-invoices.service';
 
 @Controller({ path: 'sales-invoices', version: '1' })
@@ -118,5 +119,52 @@ export class SalesInvoicesController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.invoices.listPayments(actor, id);
+  }
+
+  @Post(':id/payments/:paymentId/retry-accounting-posting')
+  retryPaymentAccountingPosting(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Req() request: Request,
+  ) {
+    return this.invoices.retryPaymentAccountingPosting(
+      actor,
+      id,
+      paymentId,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/payments/:paymentId/reverse')
+  reversePayment(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: ReverseSalesPaymentDto,
+    @Req() request: Request,
+  ) {
+    return this.invoices.reversePayment(
+      actor,
+      id,
+      paymentId,
+      dto,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/payments/:paymentId/retry-accounting-reversal')
+  retryPaymentAccountingReversal(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Req() request: Request,
+  ) {
+    return this.invoices.retryPaymentAccountingReversal(
+      actor,
+      id,
+      paymentId,
+      requestAuditMeta(request),
+    );
   }
 }

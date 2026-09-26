@@ -334,11 +334,44 @@ export class SalesPaymentDto {
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
 
+  @ApiProperty({
+    enum: ['ACTIVE', 'REVERSED'],
+    description: 'Document-level lifecycle. ACTIVE payments count toward SalesInvoice.amountPaid.',
+  })
+  status!: string;
+
+  @ApiProperty({
+    enum: ['NOT_POSTED', 'POSTED', 'FAILED', 'REVERSED'],
+    description:
+      'Accounting journal posting state for this payment. NOT_POSTED before the initial post-record attempt; POSTED once posted; FAILED if posting (or reversal) failed and can be retried; REVERSED once a reversed payment has had its journal reversed.',
+  })
+  accountingPostingStatus!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  journalEntryId!: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  reversalJournalEntryId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  reversedAt!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  reversalReason!: string | null;
+
   @ApiProperty()
   createdAt!: string;
 
   @ApiProperty()
   updatedAt!: string;
+}
+
+export class ReverseSalesPaymentDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 export class SalesPaymentListDto {

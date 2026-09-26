@@ -38,6 +38,7 @@ export const AppPermissions = {
   SALES_INVOICES_SEND: 'sales-invoices.send',
   SALES_INVOICES_CANCEL: 'sales-invoices.cancel',
   SALES_INVOICES_RECORD_PAYMENT: 'sales-invoices.record-payment',
+  SALES_INVOICES_REVERSE_PAYMENT: 'sales-invoices.reverse-payment',
   ACCOUNTS_RECEIVABLE_READ: 'accounts-receivable.read',
   SHIPMENTS_CREATE: 'shipments.create',
   SHIPMENTS_READ: 'shipments.read',

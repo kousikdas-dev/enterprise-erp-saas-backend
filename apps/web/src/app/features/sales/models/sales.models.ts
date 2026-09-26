@@ -464,6 +464,10 @@ export interface SalesInvoice {
   items: SalesInvoiceItem[];
 }
 
+/** Document-level lifecycle (Phase 3.11) — separate from accountingPostingStatus below. */
+export type SalesPaymentStatus = 'ACTIVE' | 'REVERSED';
+export type SalesPaymentPostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+
 export interface SalesPayment {
   id: string;
   salesInvoiceId: string;
@@ -472,6 +476,12 @@ export interface SalesPayment {
   paymentMethodId: string | null;
   reference: string | null;
   notes: string | null;
+  status: SalesPaymentStatus | string;
+  accountingPostingStatus: SalesPaymentPostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  reversedAt: string | null;
+  reversalReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -482,6 +492,10 @@ export interface CreateSalesPaymentRequest {
   paymentMethodId?: string;
   reference?: string;
   notes?: string;
+}
+
+export interface ReverseSalesPaymentRequest {
+  reason?: string;
 }
 
 export interface RecordSalesPaymentResult {

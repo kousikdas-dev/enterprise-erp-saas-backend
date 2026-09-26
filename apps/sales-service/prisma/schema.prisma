@@ -96,12 +96,18 @@ enum SalesInvoicePostingStatus {
   REVERSED
 }
 
-// No REVERSED here: SalesPayment has no reversal path in this phase, same
-// limitation as SupplierPayment.
 enum SalesPaymentPostingStatus {
   NOT_POSTED
   POSTED
   FAILED
+  REVERSED
+}
+
+// Document-level lifecycle (Phase 3.11) — separate from
+// SalesPaymentPostingStatus above, mirrors SupplierPaymentStatus exactly.
+enum SalesPaymentStatus {
+  ACTIVE
+  REVERSED
 }
 
 model Customer {
@@ -668,12 +674,15 @@ model SalesPayment {
   paymentMethodId String?  @db.Uuid
   reference       String?
   notes           String?
+  status          SalesPaymentStatus @default(ACTIVE)
 
   // Sales Accounting Integration — Sales-side cache of accounting-service's
-  // own posting state. No reversalJournalEntryId here: SalesPayment has no
-  // reversal path in this phase (mirrors SupplierPayment exactly).
+  // own posting state.
   accountingPostingStatus SalesPaymentPostingStatus @default(NOT_POSTED)
   journalEntryId          String?                   @db.Uuid
+  reversalJournalEntryId  String?                   @db.Uuid
+  reversedAt              DateTime?
+  reversalReason          String?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

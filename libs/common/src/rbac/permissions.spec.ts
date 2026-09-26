@@ -26,6 +26,9 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.SALES_INVOICES_RECORD_PAYMENT).toBe(
       'sales-invoices.record-payment',
     );
+    expect(PERMISSIONS.SALES_INVOICES_REVERSE_PAYMENT).toBe(
+      'sales-invoices.reverse-payment',
+    );
     expect(PERMISSIONS.SHIPMENTS_POST).toBe('shipments.post');
     expect(PERMISSIONS.ACCOUNTS_CREATE).toBe('accounts.create');
     expect(PERMISSIONS.ACCOUNTS_UPDATE).toBe('accounts.update');
