@@ -29,7 +29,13 @@ export interface InventoryStockIssueRequest {
 // exact same order `lines` was sent (inventory-service's StockIssuesService
 // processes lines strictly 1:1 in order — never re-fetched from Sales, this
 // is the authoritative moving-average cost at the moment of this issue).
+// Phase 3.12 (Sales Return / Credit Note) prerequisite — `id` is the
+// authoritative SALE StockMovement id, already returned by inventory-service
+// (verified against StockIssueResult) but previously left uncaptured here;
+// captured positionally onto ShipmentItem.inventoryMovementId, mirroring
+// GoodsReceiptItem.inventoryMovementId's own capture exactly.
 export interface InventoryStockIssueMovement {
+  id: string;
   productId: string;
   quantity: string;
   unitCost: string | null;
@@ -39,6 +45,37 @@ export interface InventoryStockIssueMovement {
 export interface InventoryStockIssueResult {
   created: boolean;
   movements: InventoryStockIssueMovement[];
+}
+
+// Phase 3.12 (Sales Return / Credit Note) — inventory-service's stock-returns
+// endpoint already accepts 'sales_return' (Phase 3.4) and, once inventory-
+// service is extended, 'sales_return_reversal' (mirrors purchase-service's
+// own InventoryStockPurchaseReturnRequest shape exactly). Additive on the
+// inventory side (stock comes back in from the customer); costed at the
+// ORIGINAL SALE movement's own unitCost, never client-supplied.
+export interface InventoryStockSalesReturnRequest {
+  referenceType: 'sales_return' | 'sales_return_reversal';
+  referenceId: string;
+  warehouseId: string;
+  lines: Array<{
+    productId: string;
+    quantity: string;
+    // The AUTHORITATIVE selector for which original movement this line
+    // returns against — ShipmentItem.inventoryMovementId for 'sales_return',
+    // SalesReturnItem.inventoryMovementId for 'sales_return_reversal'. Never
+    // resolved by (referenceType, referenceId, productId) lookup.
+    originalMovementId: string;
+  }>;
+}
+
+// Positional per-line movement summary from inventory-service's response —
+// movements[i] corresponds to lines[i] of the request, mirrors purchase-
+// service's InventoryStockReturnMovementSummary exactly.
+export interface InventoryStockSalesReturnMovementSummary {
+  id: string;
+  productId: string;
+  unitCost: string | null;
+  totalCost: string | null;
 }
 
 interface InventoryEnvelope<T> {
@@ -82,6 +119,55 @@ export class InventoryStockClient {
       return {
         created: response.status === 201,
         movements: data?.movements ?? [],
+      };
+    } catch (error) {
+      this.rethrow(error);
+    }
+  }
+
+  // Phase 3.12 — modeled directly on purchase-service's own applyReturn():
+  // same base URL, headers, validateStatus, and error mapping; the endpoint
+  // path is shared (POST .../stock/returns, the primitive Phase 3.4 built)
+  // and the request/response shapes are the sales-return-specific ones above.
+  async applyReturn(
+    actor: ActorContext,
+    body: InventoryStockSalesReturnRequest,
+  ): Promise<{
+    created: boolean;
+    movements: InventoryStockSalesReturnMovementSummary[];
+  }> {
+    const base = this.config
+      .get('INVENTORY_SERVICE_URL', { infer: true })
+      .replace(/\/$/, '');
+    const secret = this.config.get('INTERNAL_SERVICE_SECRET', { infer: true });
+    try {
+      const response = await firstValueFrom(
+        this.http.post<
+          InventoryEnvelope<{
+            movements?: Array<{
+              id: string;
+              productId: string;
+              unitCost: string | null;
+              totalCost: string | null;
+            }>;
+          }>
+        >(`${base}/api/v1/internal/stock/returns`, body, {
+          headers: {
+            [INTERNAL_SERVICE_SECRET_HEADER]: secret,
+            [ACTOR_USER_ID_HEADER]: actor.userId,
+            [ACTOR_TENANT_ID_HEADER]: actor.tenantId,
+          },
+          validateStatus: (status) => status === 200 || status === 201,
+        }),
+      );
+      return {
+        created: response.status === 201,
+        movements: (response.data.data?.movements ?? []).map((movement) => ({
+          id: movement.id,
+          productId: movement.productId,
+          unitCost: movement.unitCost,
+          totalCost: movement.totalCost,
+        })),
       };
     } catch (error) {
       this.rethrow(error);

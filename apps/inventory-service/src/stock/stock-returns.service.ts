@@ -20,7 +20,8 @@ type ReturnReferenceType =
   | 'sales_return'
   | 'purchase_return'
   | 'purchase_return_reversal'
-  | 'goods_receipt_reversal';
+  | 'goods_receipt_reversal'
+  | 'sales_return_reversal';
 
 // Phase 3.5 — each supported referenceType maps to its own original-movement
 // type and stock direction. sales_return (Phase 3.4) is additive (mirrors a
@@ -86,6 +87,23 @@ const RETURN_CONFIG: Record<
   goods_receipt_reversal: {
     originalType: StockMovementType.PURCHASE,
     resultType: StockMovementType.PURCHASE_REVERSAL,
+    direction: 'subtractive',
+    setsReversesMovementId: true,
+  },
+  // Phase 3.12 (Sales Return reversal) — undoes a specific SALE_RETURN
+  // movement. Subtractive (mirrors purchase_return's own direction — stock
+  // must leave the warehouse again, since SALE_RETURN itself was additive),
+  // so it carries the same "Insufficient stock" risk purchase_return does:
+  // if the returned quantity has since been consumed by an unrelated Sale/
+  // Transfer/Adjustment, reversal is correctly rejected here, not silently
+  // allowed to go negative. Costed at that SALE_RETURN movement's own
+  // unitCost verbatim (the shared "original movement's own unitCost" rule
+  // above already gives this for free). Sets reversesMovementId, giving the
+  // same second, independent, DB-enforced "at most one reversal, ever"
+  // guarantee purchase_return_reversal gets.
+  sales_return_reversal: {
+    originalType: StockMovementType.SALE_RETURN,
+    resultType: StockMovementType.SALE_RETURN_REVERSAL,
     direction: 'subtractive',
     setsReversesMovementId: true,
   },

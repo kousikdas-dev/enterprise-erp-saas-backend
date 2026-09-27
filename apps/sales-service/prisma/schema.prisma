@@ -110,6 +110,24 @@ enum SalesPaymentStatus {
   REVERSED
 }
 
+// Phase 3.12 (Sales Return / Credit Note) — mirrors PurchaseReturnStatus
+// exactly. DRAFT is freely editable; CONFIRMED posts accounting + inventory
+// and locks the lines; REVERSED undoes a CONFIRMED return's effects (never
+// CANCELLED — mirrors Purchase Return's own vocabulary for "undo a posted
+// inventory/accounting-affecting document").
+enum SalesReturnStatus {
+  DRAFT
+  CONFIRMED
+  REVERSED
+}
+
+enum SalesReturnPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
 model Customer {
   id       String @id @default(uuid()) @db.Uuid
   tenantId String @db.Uuid
@@ -549,8 +567,25 @@ model ShipmentItem {
   unitCost  Decimal? @db.Decimal(19, 4)
   totalCost Decimal? @db.Decimal(19, 4)
 
+  // Phase 3.12 (Sales Return / Credit Note) prerequisite — the authoritative
+  // SALE StockMovement id this line's issue created, captured positionally
+  // from Inventory's applyIssue() response inside finalizePosted(), mirrors
+  // GoodsReceiptItem.inventoryMovementId exactly. Nullable at the DB level
+  // only for legacy pre-migration rows; never overwritten once set. This is
+  // the AUTHORITATIVE selector a Sales Return sends to Inventory's
+  // applyReturn() as originalMovementId — never resolved by
+  // (referenceType, referenceId, productId) lookup.
+  inventoryMovementId String? @db.Uuid
+
+  // Phase 3.12 (Sales Return / Credit Note) — cumulative base-quantity
+  // already returned against this shipment line via CONFIRMED Sales Returns.
+  // Caps repeat returns; mirrors GoodsReceiptItem.unmatchedReturnedQuantity's
+  // capacity role, simplified since Sales has no matched/unmatched split.
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
+
   shipment       Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
   salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id], onDelete: Restrict)
+  returnLines    SalesReturnItem[] @relation("SalesReturnItemShipmentLine")
 
   @@index([tenantId])
   @@index([shipmentId])
@@ -582,8 +617,18 @@ model SalesInvoice {
   discountTotal   Decimal                   @default(0) @db.Decimal(19, 4)
   taxTotal        Decimal                   @default(0) @db.Decimal(19, 4)
   total           Decimal                   @db.Decimal(19, 4)
-  // balanceDue is intentionally not persisted: it is always total - amountPaid.
+  // balanceDue is intentionally not persisted: it is always
+  // total - amountPaid - amountCredited.
   amountPaid      Decimal                   @default(0) @db.Decimal(19, 4)
+  // Phase 3.12 (Sales Return / Credit Note) — cumulative total of every
+  // CONFIRMED Sales Return's revenue+tax reversal against this invoice,
+  // maintained transactionally by SalesReturnsService.confirm()/reverse()
+  // exactly like amountPaid is maintained by recordPayment()/reversePayment().
+  // Deliberately does NOT affect paymentStatus below — paymentStatus means
+  // only "cash payment state" (amountPaid vs total), unchanged; a fully
+  // credited but never-paid invoice is UNPAID with balanceDue 0, which is
+  // accurate (nothing owed, but no cash was ever collected).
+  amountCredited  Decimal                   @default(0) @db.Decimal(19, 4)
   paymentStatus   SalesInvoicePaymentStatus @default(UNPAID)
   sentAt          DateTime?
   createdAt       DateTime                  @default(now())
@@ -599,6 +644,7 @@ model SalesInvoice {
   customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items    SalesInvoiceItem[]
   payments SalesPayment[]
+  returns  SalesReturn[]
 
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId])
@@ -635,8 +681,16 @@ model SalesInvoiceItem {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // Phase 3.12 (Sales Return / Credit Note) — cumulative quantity (same unit
+  // as `quantity` above) already returned against this line via CONFIRMED
+  // Sales Returns. Mirrors PurchaseInvoiceItem.returnedQuantity; also blocks
+  // SalesInvoicesService.cancel() from cancelling a SENT invoice that has any
+  // returned line.
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
+
   salesInvoice  SalesInvoice                   @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
   taxComponents SalesInvoiceItemTaxComponent[]
+  returnLines   SalesReturnItem[]              @relation("SalesReturnItemInvoiceLine")
 
   @@index([tenantId])
   @@index([salesInvoiceId])
@@ -692,4 +746,110 @@ model SalesPayment {
   @@index([tenantId])
   @@index([salesInvoiceId])
   @@map("sales_payments")
+}
+
+// Phase 3.12 (Sales Return / Credit Note). Anchors to one SalesInvoice (the
+// document a Credit Note reduces) — mirrors PurchaseReturn's own single-
+// document anchoring, substituting Sales' anchor (the invoice being credited)
+// for Purchase's (the goods receipt whose inventory moved). The document
+// itself doubles as the Credit Note — no separate CreditNote entity, mirrors
+// PurchaseReturn's own "the return IS the debit note" precedent.
+model SalesReturn {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @db.Uuid
+  returnNumber   String
+  salesInvoiceId String            @db.Uuid
+  // Snapshot of the warehouse every shipment-linked line's stock movement
+  // happens in; set only when >= 1 item has a shipmentItemId, null for a
+  // pure invoice-only (financial-credit) return. Every shipment-linked
+  // line's own Shipment.warehouseId must match this value (validated at
+  // create() time) — mirrors PurchaseReturn.warehouseId's single-warehouse-
+  // per-Inventory-call constraint.
+  warehouseId String? @db.Uuid
+  status      SalesReturnStatus @default(DRAFT)
+  reason      String?
+  returnedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Sales Accounting Integration — Sales-side cache of accounting-service's
+  // own posting state, mirrors PurchaseReturn's identical fields exactly. No
+  // FK to accounting_db (separate database; soft reference).
+  accountingPostingStatus SalesReturnPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                  @db.Uuid
+  reversalJournalEntryId  String?                  @db.Uuid
+  reversedAt              DateTime?
+  reversalReason          String?
+
+  salesInvoice SalesInvoice      @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  items        SalesReturnItem[]
+
+  @@unique([tenantId, returnNumber])
+  @@index([tenantId])
+  @@index([salesInvoiceId])
+  @@index([tenantId, status])
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id            String @id @default(uuid()) @db.Uuid
+  tenantId      String @db.Uuid
+  salesReturnId String @db.Uuid
+
+  // Service-level invariant (not expressible as a DB constraint): at least
+  // one of the two below must be set. Both set = the common case (invoiced
+  // AND shipped goods coming back). Invoice-only = goodwill/pricing credit,
+  // no stock movement. Shipment-only = physical return of never-invoiced
+  // goods.
+  salesInvoiceItemId String? @db.Uuid
+  shipmentItemId     String? @db.Uuid
+
+  productId   String
+  productSku  String
+  productName String
+
+  // Commercial-unit quantity returned on this line.
+  quantity Decimal @db.Decimal(19, 6)
+  // Base quantity (× conversionFactor) — the ONLY value ever sent to
+  // Inventory. Null when shipmentItemId is null (nothing to send).
+  baseQuantity Decimal? @db.Decimal(19, 6)
+
+  // Revenue/tax reversal snapshot, frozen from SalesInvoiceItem's own
+  // pricing at confirm() time — never re-derived from current product/tax
+  // state. Null when salesInvoiceItemId is null.
+  unitPrice       Decimal? @db.Decimal(19, 4)
+  discountPercent Decimal? @db.Decimal(5, 2)
+  discountAmount  Decimal? @db.Decimal(19, 4)
+  taxCodeId       String?  @db.Uuid
+  taxCode         String?
+  taxCodeName     String?
+  taxAmount       Decimal? @db.Decimal(19, 4)
+  lineSubtotal    Decimal? @db.Decimal(19, 4)
+  lineTotal       Decimal? @db.Decimal(19, 4)
+
+  // Inventory/COGS reversal snapshot — the original SALE movement's own
+  // unitCost, read back verbatim (never re-derived). Null when
+  // shipmentItemId is null.
+  unitCost  Decimal? @db.Decimal(19, 4)
+  totalCost Decimal? @db.Decimal(19, 4)
+
+  // Prerequisite for THIS return's own future reversal — the SALE_RETURN
+  // StockMovement this line created, captured positionally from Inventory's
+  // applyReturn() response inside confirm(). Mirrors
+  // PurchaseReturnItem.inventoryMovementId exactly. Null when shipmentItemId
+  // is null (nothing was posted to Inventory for this line).
+  inventoryMovementId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  salesReturn      SalesReturn       @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  salesInvoiceItem SalesInvoiceItem? @relation("SalesReturnItemInvoiceLine", fields: [salesInvoiceItemId], references: [id], onDelete: Restrict)
+  shipmentItem     ShipmentItem?     @relation("SalesReturnItemShipmentLine", fields: [shipmentItemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([salesReturnId])
+  @@index([salesInvoiceItemId])
+  @@index([shipmentItemId])
+  @@map("sales_return_items")
 }

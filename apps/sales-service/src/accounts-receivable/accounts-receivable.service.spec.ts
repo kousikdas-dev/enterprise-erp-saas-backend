@@ -113,6 +113,37 @@ describe('AccountsReceivableService', () => {
         }),
       ]);
     });
+
+    it('Phase 3.12 — a fully-credited (never paid) customer is excluded when onlyOutstanding is true', async () => {
+      const { service } = buildService({
+        salesInvoice: {
+          groupBy: jest.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
+            if ('paymentStatus' in (args.where ?? {})) {
+              return Promise.resolve([{ customerId, _count: { _all: 0 } }]);
+            }
+            return Promise.resolve([
+              {
+                customerId,
+                _sum: {
+                  total: decimal('100.0000'),
+                  amountPaid: decimal('0.0000'),
+                  amountCredited: decimal('100.0000'),
+                },
+              },
+            ]);
+          }),
+          aggregate: jest.fn(),
+          count: jest.fn(),
+          findMany: jest.fn(),
+        },
+        customer: {
+          findFirst: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([{ id: customerId, code: 'CUST-1', name: 'Acme' }]),
+        },
+      });
+      const result = await service.listCustomerSummaries(actor, true);
+      expect(result.items).toEqual([]);
+    });
   });
 
   describe('getCustomerSummary', () => {
@@ -162,6 +193,7 @@ describe('AccountsReceivableService', () => {
           dueDate: null,
           total: decimal('100.0000'),
           amountPaid: decimal('0.0000'),
+          amountCredited: decimal('0.0000'),
           paymentStatus: 'UNPAID',
           status: 'SENT',
           payments: [{ id: 'pay-1', amount: decimal('10.0000'), paymentDate: new Date() }],
@@ -187,6 +219,7 @@ describe('AccountsReceivableService', () => {
           dueDate: null,
           total: decimal('100.0000'),
           amountPaid: decimal('10.0000'),
+          amountCredited: decimal('0.0000'),
           paymentStatus: 'PARTIALLY_PAID',
           status: 'SENT',
           payments: [
@@ -227,6 +260,7 @@ describe('AccountsReceivableService', () => {
         dueDate: null,
         total: decimal('100.0000'),
         amountPaid: decimal('0.0000'),
+        amountCredited: decimal('0.0000'),
         ...overrides,
       };
     }
@@ -245,6 +279,26 @@ describe('AccountsReceivableService', () => {
       const result = await service.getAging(actor, { asOfDate: '2026-01-15' } as any);
       expect(result.items[0].agingBasis).toBe('DUE_DATE');
       expect(result.items[0].bucket).toBe('CURRENT');
+    });
+
+    it('Phase 3.12 — balanceDue nets out amountCredited alongside amountPaid', async () => {
+      const { service } = buildService({
+        salesInvoice: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn(),
+          count: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([
+            invoiceRow({
+              dueDate: new Date('2026-02-01T00:00:00.000Z'),
+              amountPaid: decimal('20.0000'),
+              amountCredited: decimal('30.0000'),
+            }),
+          ]),
+        },
+      });
+      const result = await service.getAging(actor, { asOfDate: '2026-01-15' } as any);
+      expect(result.items[0].balanceDue).toBe('50.0000');
+      expect(result.totalsByBucket.CURRENT).toBe('50.0000');
     });
 
     it('falls back to INVOICE_DATE_FALLBACK when dueDate is null', async () => {
@@ -370,6 +424,21 @@ describe('AccountsReceivableService', () => {
         difference: null,
         matches: false,
       });
+    });
+
+    it('Phase 3.12 — nets out amountCredited from the subledger total alongside amountPaid', async () => {
+      const { service } = buildService({
+        salesInvoice: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({
+            _sum: { total: decimal('300.0000'), amountPaid: decimal('100.0000'), amountCredited: decimal('50.0000') },
+          }),
+          count: jest.fn(),
+          findMany: jest.fn(),
+        },
+      });
+      const result = await service.getReconciliation(actor);
+      expect(result.subledgerTotalOutstanding).toBe('150.0000');
     });
 
     it('reports matches=true when the subledger and GL balance agree', async () => {

@@ -10,6 +10,7 @@ import { QuotationsController } from './quotations.controller';
 import { SalesForwardService } from './sales-forward.service';
 import { SalesInvoicesController } from './sales-invoices.controller';
 import { SalesOrdersController } from './sales-orders.controller';
+import { SalesReturnsController } from './sales-returns.controller';
 import { ShipmentsController } from './shipments.controller';
 
 @Module({
@@ -29,6 +30,7 @@ import { ShipmentsController } from './shipments.controller';
     SalesOrdersController,
     SalesInvoicesController,
     ShipmentsController,
+    SalesReturnsController,
     AccountsReceivableController,
   ],
   providers: [SalesForwardService],

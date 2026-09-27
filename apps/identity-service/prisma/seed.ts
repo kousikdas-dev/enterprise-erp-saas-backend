@@ -392,6 +392,26 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Reverse customer payments and retry their accounting posting/reversal',
   },
   {
+    resource: 'sales-returns',
+    action: 'create',
+    description: 'Create sales returns / credit notes against sales invoices',
+  },
+  {
+    resource: 'sales-returns',
+    action: 'read',
+    description: 'Read sales returns / credit notes',
+  },
+  {
+    resource: 'sales-returns',
+    action: 'confirm',
+    description: 'Confirm sales returns / credit notes and retry their accounting posting',
+  },
+  {
+    resource: 'sales-returns',
+    action: 'reverse',
+    description: 'Reverse sales returns / credit notes and retry their accounting reversal',
+  },
+  {
     resource: 'accounts-receivable',
     action: 'read',
     description: 'Read Accounts Receivable customer summaries, invoice ledger, aging, statements, and GL reconciliation',

@@ -129,10 +129,11 @@ describe('SalesInvoicesService', () => {
     };
   }
 
-  /** Default payment state for a freshly created/updated invoice — real Decimal since the response mapper computes balanceDue = total.minus(amountPaid). */
+  /** Default payment state for a freshly created/updated invoice — real Decimal since the response mapper computes balanceDue = total.minus(amountPaid).minus(amountCredited). */
   function unpaidState() {
     return {
       amountPaid: new Prisma.Decimal(0),
+      amountCredited: new Prisma.Decimal(0),
       paymentStatus: SalesInvoicePaymentStatus.UNPAID,
     };
   }
@@ -158,6 +159,7 @@ describe('SalesInvoicesService', () => {
     taxAmount: { toFixed: () => '0.0000' },
     lineSubtotal: { toFixed: () => '10.0000' },
     lineTotal: { toFixed: () => '10.0000' },
+    returnedQuantity: { toFixed: () => '0.000000' },
     createdAt: new Date(),
     updatedAt: new Date(),
     taxComponents: [],
@@ -1038,6 +1040,7 @@ describe('SalesInvoicesService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
         amountPaid: new Prisma.Decimal(0),
+        amountCredited: new Prisma.Decimal(0),
         paymentStatus: SalesInvoicePaymentStatus.PAID,
       });
       const prisma = {
@@ -1192,6 +1195,7 @@ describe('SalesInvoicesService', () => {
         status: SalesInvoiceStatus.SENT,
         total: new Prisma.Decimal(100),
         amountPaid: new Prisma.Decimal(0),
+        amountCredited: new Prisma.Decimal(0),
         paymentStatus: SalesInvoicePaymentStatus.UNPAID,
         ...overrides,
       };
@@ -1475,6 +1479,7 @@ describe('SalesInvoicesService', () => {
       const invoice = sentInvoiceRow({
         total: new Prisma.Decimal(0),
         amountPaid: new Prisma.Decimal(0),
+        amountCredited: new Prisma.Decimal(0),
         paymentStatus: SalesInvoicePaymentStatus.PAID,
       });
       const { prisma } = makeTxHarness({ invoice, createdPayment: makePaymentRow() });
@@ -1629,6 +1634,7 @@ describe('SalesInvoicesService', () => {
         taxTotal: new Prisma.Decimal(0),
         total: new Prisma.Decimal(0),
         amountPaid: new Prisma.Decimal(0),
+        amountCredited: new Prisma.Decimal(0),
         paymentStatus: SalesInvoicePaymentStatus.UNPAID,
         sentAt: new Date(),
         accountingPostingStatus: SalesInvoicePostingStatus.NOT_POSTED,
@@ -2435,6 +2441,7 @@ describe('SalesInvoicesService', () => {
         taxTotal: new Prisma.Decimal(0),
         total: new Prisma.Decimal(0),
         amountPaid: new Prisma.Decimal(0),
+        amountCredited: new Prisma.Decimal(0),
         paymentStatus: SalesInvoicePaymentStatus.UNPAID,
         sentAt: new Date(),
         accountingPostingStatus: SalesInvoicePostingStatus.NOT_POSTED,
@@ -2854,6 +2861,7 @@ describe('SalesInvoicesService', () => {
         invoiceStatus: SalesInvoiceStatus.SENT,
         total: new Prisma.Decimal(100),
         amountPaid: new Prisma.Decimal(0), // already reflects the concurrent reversal
+        amountCredited: new Prisma.Decimal(0),
         paymentAmount: new Prisma.Decimal(40),
       });
       const { service } = buildServiceForPaymentReversal(tx, {

@@ -430,6 +430,8 @@ export interface SalesInvoiceItem {
   taxAmount: string;
   lineSubtotal: string;
   lineTotal: string;
+  /** Phase 3.12 (Sales Return / Credit Note) — cumulative quantity already returned against this line. */
+  returnedQuantity: string;
   taxComponents: SalesInvoiceItemTaxComponent[];
 }
 
@@ -454,6 +456,8 @@ export interface SalesInvoice {
   taxTotal: string;
   total: string;
   amountPaid: string;
+  /** Phase 3.12 (Sales Return / Credit Note) — cumulative credit-note total applied to this invoice. */
+  amountCredited: string;
   balanceDue: string;
   paymentStatus: SalesInvoicePaymentStatus | string;
   sentAt: string | null;
@@ -653,4 +657,67 @@ export interface ArReconciliationSummary {
   glAccountsReceivableBalance: string | null;
   difference: string | null;
   matches: boolean;
+}
+
+/** Phase 3.12 — Sales Return / Credit Note. No approval workflow: DRAFT -> CONFIRMED -> (optionally) REVERSED. */
+export type SalesReturnStatus = 'DRAFT' | 'CONFIRMED' | 'REVERSED';
+export type SalesReturnPostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+
+export interface SalesReturnItem {
+  id: string;
+  salesInvoiceItemId: string | null;
+  shipmentItemId: string | null;
+  productId: string;
+  productSku: string;
+  productName: string;
+  quantity: string;
+  /** quantity × conversionFactor — the value sent to Inventory. Null when shipmentItemId is null. */
+  baseQuantity: string | null;
+  /** Revenue/tax reversal snapshot. Null when salesInvoiceItemId is null. */
+  unitPrice: string | null;
+  discountPercent: string | null;
+  discountAmount: string | null;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string | null;
+  lineSubtotal: string | null;
+  lineTotal: string | null;
+  /** Inventory/COGS reversal snapshot. Null when shipmentItemId is null. */
+  unitCost: string | null;
+  totalCost: string | null;
+  inventoryMovementId: string | null;
+}
+
+export interface SalesReturn {
+  id: string;
+  tenantId: string;
+  returnNumber: string;
+  salesInvoiceId: string;
+  warehouseId: string | null;
+  status: SalesReturnStatus | string;
+  reason: string | null;
+  returnedAt: string | null;
+  accountingPostingStatus: SalesReturnPostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  reversedAt: string | null;
+  reversalReason: string | null;
+  items: SalesReturnItem[];
+}
+
+export interface CreateSalesReturnLineRequest {
+  salesInvoiceItemId?: string;
+  shipmentItemId?: string;
+  quantity: string;
+}
+
+export interface CreateSalesReturnRequest {
+  salesInvoiceId: string;
+  reason?: string;
+  items: CreateSalesReturnLineRequest[];
+}
+
+export interface ReverseSalesReturnRequest {
+  reason?: string;
 }

@@ -50,6 +50,14 @@ enum StockMovementType {
   // StockMovement.reversesMovementId — see StockReturnsService's
   // RETURN_CONFIG.
   PURCHASE_REVERSAL
+  // Phase 3.12 (Sales Return reversal) — undoes a specific, identified
+  // SALE_RETURN movement: stock goes back out (subtractive, mirrors
+  // SALE's own direction — this is a real "Insufficient stock" risk if the
+  // returned quantity has since been consumed by an unrelated Sale/
+  // Transfer/Adjustment), costed at that SALE_RETURN movement's own unitCost
+  // verbatim. Sets StockMovement.reversesMovementId — see
+  // StockReturnsService's RETURN_CONFIG.
+  SALE_RETURN_REVERSAL
 }
 
 // Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is

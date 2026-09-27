@@ -37,6 +37,7 @@ type SalesInvoiceWithItems = {
   taxTotal: Prisma.Decimal;
   total: Prisma.Decimal;
   amountPaid: Prisma.Decimal;
+  amountCredited: Prisma.Decimal;
   paymentStatus: SalesInvoicePaymentStatus;
   sentAt: Date | null;
   accountingPostingStatus: SalesInvoicePostingStatus;
@@ -65,6 +66,7 @@ type SalesInvoiceWithItems = {
     taxAmount: Prisma.Decimal;
     lineSubtotal: Prisma.Decimal;
     lineTotal: Prisma.Decimal;
+    returnedQuantity: Prisma.Decimal;
     createdAt: Date;
     updatedAt: Date;
     taxComponents: SalesInvoiceItemTaxComponentRow[];
@@ -104,7 +106,13 @@ export function toSalesInvoiceResponse(row: SalesInvoiceWithItems) {
     taxTotal: moneyToString(row.taxTotal),
     total: moneyToString(row.total),
     amountPaid: moneyToString(row.amountPaid),
-    balanceDue: moneyToString(row.total.minus(row.amountPaid)),
+    amountCredited: moneyToString(row.amountCredited),
+    // Phase 3.12 (Sales Return / Credit Note) — nets out both cash payments
+    // and credit notes. paymentStatus below deliberately still means only
+    // "cash payment state" (amountPaid vs total), unchanged.
+    balanceDue: moneyToString(
+      row.total.minus(row.amountPaid).minus(row.amountCredited),
+    ),
     paymentStatus: row.paymentStatus,
     sentAt: row.sentAt,
     accountingPostingStatus: row.accountingPostingStatus,
@@ -135,6 +143,7 @@ export function toSalesInvoiceResponse(row: SalesInvoiceWithItems) {
       taxAmount: moneyToString(item.taxAmount),
       lineSubtotal: moneyToString(item.lineSubtotal),
       lineTotal: moneyToString(item.lineTotal),
+      returnedQuantity: quantityToString(item.returnedQuantity),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       taxComponents: item.taxComponents.map(toTaxComponentResponse),

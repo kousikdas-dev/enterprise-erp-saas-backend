@@ -57,7 +57,7 @@ export class AccountsReceivableService {
     const grouped = await this.prisma.salesInvoice.groupBy({
       by: ['customerId'],
       where: { tenantId: actor.tenantId, status: 'SENT' },
-      _sum: { total: true, amountPaid: true },
+      _sum: { total: true, amountPaid: true, amountCredited: true },
     });
     if (grouped.length === 0) {
       return { items: [] };
@@ -87,18 +87,22 @@ export class AccountsReceivableService {
       const customer = customerById.get(row.customerId);
       const totalInvoiced = row._sum.total ?? ZERO;
       const totalPaid = row._sum.amountPaid ?? ZERO;
+      const totalCredited = row._sum.amountCredited ?? ZERO;
       return {
         customerId: row.customerId,
         customerCode: customer?.code ?? '',
         customerName: customer?.name ?? '',
         totalInvoiced,
         totalPaid,
+        totalCredited,
         outstandingInvoiceCount: outstandingCountByCustomer.get(row.customerId) ?? 0,
       };
     });
 
     const filtered = onlyOutstanding
-      ? rows.filter((row) => row.totalInvoiced.minus(row.totalPaid).greaterThan(0))
+      ? rows.filter((row) =>
+          row.totalInvoiced.minus(row.totalPaid).minus(row.totalCredited).greaterThan(0),
+        )
       : rows;
 
     filtered.sort((a, b) => a.customerName.localeCompare(b.customerName));
@@ -117,7 +121,7 @@ export class AccountsReceivableService {
 
     const agg = await this.prisma.salesInvoice.aggregate({
       where: { tenantId: actor.tenantId, customerId, status: 'SENT' },
-      _sum: { total: true, amountPaid: true },
+      _sum: { total: true, amountPaid: true, amountCredited: true },
     });
     const outstandingInvoiceCount = await this.prisma.salesInvoice.count({
       where: {
@@ -134,6 +138,7 @@ export class AccountsReceivableService {
       customerName: customer.name,
       totalInvoiced: agg._sum.total ?? ZERO,
       totalPaid: agg._sum.amountPaid ?? ZERO,
+      totalCredited: agg._sum.amountCredited ?? ZERO,
       outstandingInvoiceCount,
     });
   }
@@ -164,6 +169,7 @@ export class AccountsReceivableService {
           dueDate: invoice.dueDate,
           total: invoice.total,
           amountPaid: invoice.amountPaid,
+          amountCredited: invoice.amountCredited,
           paymentStatus: invoice.paymentStatus,
           status: invoice.status,
           payments: includePayments
@@ -207,7 +213,7 @@ export class AccountsReceivableService {
         (asOfMidnight.getTime() - effectiveDueMidnight.getTime()) / 86_400_000,
       );
       const bucket = bucketFor(daysOverdue);
-      const balanceDue = invoice.total.minus(invoice.amountPaid);
+      const balanceDue = invoice.total.minus(invoice.amountPaid).minus(invoice.amountCredited);
       totalsByBucket[bucket] = totalsByBucket[bucket].plus(balanceDue);
 
       return {
@@ -311,11 +317,11 @@ export class AccountsReceivableService {
   async getReconciliation(actor: ActorContext) {
     const agg = await this.prisma.salesInvoice.aggregate({
       where: { tenantId: actor.tenantId, status: 'SENT' },
-      _sum: { total: true, amountPaid: true },
+      _sum: { total: true, amountPaid: true, amountCredited: true },
     });
-    const subledgerTotalOutstanding = (agg._sum.total ?? ZERO).minus(
-      agg._sum.amountPaid ?? ZERO,
-    );
+    const subledgerTotalOutstanding = (agg._sum.total ?? ZERO)
+      .minus(agg._sum.amountPaid ?? ZERO)
+      .minus(agg._sum.amountCredited ?? ZERO);
 
     const mapping = await this.ledgerClient.findAccountsReceivableMapping(actor);
     if (!mapping) {
@@ -359,7 +365,33 @@ export class AccountsReceivableService {
 
     const invoiceTotal = invoiceAgg._sum.total ?? ZERO;
     const paymentTotal = paymentAgg._sum.amount ?? ZERO;
-    return invoiceTotal.minus(paymentTotal);
+    const creditTotal = await this.confirmedCreditTotalBefore(actor, customerId, beforeDate);
+    return invoiceTotal.minus(paymentTotal).minus(creditTotal);
+  }
+
+  /** Sum of each CONFIRMED Sales Return's own AR-side amount (the sum of its
+   * invoice-linked lines' lineTotal) — SalesReturn itself has no persisted
+   * header-level total, so this sums via its items, mirroring how the return
+   * document computes amountCredited at confirm()/reverse() time. */
+  private async confirmedCreditTotalBefore(
+    actor: ActorContext,
+    customerId: string,
+    beforeDate: Date,
+  ): Promise<Prisma.Decimal> {
+    const rows = await this.prisma.salesReturnItem.aggregate({
+      where: {
+        tenantId: actor.tenantId,
+        salesInvoiceItemId: { not: null },
+        salesReturn: {
+          tenantId: actor.tenantId,
+          status: 'CONFIRMED',
+          returnedAt: { lt: beforeDate },
+          salesInvoice: { tenantId: actor.tenantId, customerId },
+        },
+      },
+      _sum: { lineTotal: true },
+    });
+    return rows._sum.lineTotal ?? ZERO;
   }
 
   /** The two-way UNION behind the customer AR statement: every SENT invoice
@@ -404,6 +436,36 @@ export class AccountsReceivableService {
         AND si."customerId" = ${customerId}::uuid
         AND (${fromDate}::timestamptz IS NULL OR sp."paymentDate" >= ${fromDate}::timestamptz)
         AND (${toDateExclusive}::timestamptz IS NULL OR sp."paymentDate" < ${toDateExclusive}::timestamptz)
+
+      UNION ALL
+
+      -- Phase 3.12 (Sales Return / Credit Note) — only CONFIRMED returns
+      -- (a later-REVERSED return simply stops appearing, its net effect on
+      -- amountCredited already zero — mirrors the PAYMENT line above having
+      -- no PAYMENT_REVERSAL counterpart). Amount is the sum of this return's
+      -- own invoice-linked lines' lineTotal (SalesReturn has no persisted
+      -- header total; shipment-only lines never contribute to the AR side).
+      SELECT
+        sr.id AS id,
+        sr."returnedAt" AS date,
+        'CREDIT_NOTE' AS type,
+        sr."returnNumber" AS reference,
+        sr.reason AS description,
+        -COALESCE(sri_sum.total, 0) AS amount
+      FROM sales_returns sr
+      JOIN sales_invoices si ON si.id = sr."salesInvoiceId"
+      JOIN LATERAL (
+        SELECT SUM(sri."lineTotal") AS total
+        FROM sales_return_items sri
+        WHERE sri."salesReturnId" = sr.id AND sri."salesInvoiceItemId" IS NOT NULL
+      ) sri_sum ON true
+      WHERE sr."tenantId" = ${actor.tenantId}::uuid
+        AND si."tenantId" = ${actor.tenantId}::uuid
+        AND si."customerId" = ${customerId}::uuid
+        AND sr.status = 'CONFIRMED'::"SalesReturnStatus"
+        AND sr."returnedAt" IS NOT NULL
+        AND (${fromDate}::timestamptz IS NULL OR sr."returnedAt" >= ${fromDate}::timestamptz)
+        AND (${toDateExclusive}::timestamptz IS NULL OR sr."returnedAt" < ${toDateExclusive}::timestamptz)
     `;
   }
 }

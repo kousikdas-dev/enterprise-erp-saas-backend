@@ -2,12 +2,14 @@ import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 import { SharedModule } from '../../shared.module';
 import { ListStateComponent } from '../../shared/list-state/list-state.component';
+import { DecimalTextPipe, QuantityPipe } from '../../shared/pipes/decimal.pipes';
 import { AccountsReceivableListComponent } from './accounts-receivable/accounts-receivable-list.component';
 import { CustomerListComponent } from './customers/customer-list.component';
 import { ProformaInvoiceListComponent } from './proforma-invoices/proforma-invoice-list.component';
 import { QuotationListComponent } from './quotations/quotation-list.component';
 import { SalesInvoiceListComponent } from './sales-invoices/sales-invoice-list.component';
 import { SalesOrderListComponent } from './sales-orders/sales-order-list.component';
+import { SalesReturnListComponent } from './sales-returns/sales-return-list.component';
 import { ShipmentListComponent } from './shipments/shipment-list.component';
 
 const routes: Routes = [
@@ -43,6 +45,11 @@ const routes: Routes = [
     data: { extraParameter: 'salesMenu' },
   },
   {
+    path: 'sales-returns',
+    component: SalesReturnListComponent,
+    data: { extraParameter: 'salesMenu' },
+  },
+  {
     path: 'accounts-receivable',
     component: AccountsReceivableListComponent,
     data: { extraParameter: 'salesMenu' },
@@ -57,8 +64,15 @@ const routes: Routes = [
     SalesOrderListComponent,
     SalesInvoiceListComponent,
     ShipmentListComponent,
+    SalesReturnListComponent,
     AccountsReceivableListComponent,
   ],
-  imports: [SharedModule, ListStateComponent, RouterModule.forChild(routes)],
+  imports: [
+    SharedModule,
+    ListStateComponent,
+    QuantityPipe,
+    DecimalTextPipe,
+    RouterModule.forChild(routes),
+  ],
 })
 export class SalesFeatureModule {}

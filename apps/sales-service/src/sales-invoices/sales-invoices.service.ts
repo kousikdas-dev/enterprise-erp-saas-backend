@@ -605,6 +605,13 @@ export class SalesInvoicesService {
         'Cannot cancel a sales invoice that has recorded payments',
       );
     }
+    // Phase 3.12 (Sales Return / Credit Note) — mirrors
+    // PurchaseInvoicesService.cancel()'s own returnedQuantity guard exactly.
+    if (existing.amountCredited.gt(0)) {
+      throw new ConflictException(
+        'Cannot cancel a sales invoice that has recorded credit notes',
+      );
+    }
     const row = await this.prisma.salesInvoice.update({
       where: { id },
       data: { status: SalesInvoiceStatus.CANCELLED },

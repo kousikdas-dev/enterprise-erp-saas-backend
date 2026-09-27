@@ -18,26 +18,26 @@ export interface CustomerArSummaryRow {
   customerName: string;
   totalInvoiced: Prisma.Decimal;
   totalPaid: Prisma.Decimal;
+  // Phase 3.12 (Sales Return / Credit Note) — cumulative CONFIRMED Sales
+  // Return credit against this customer's invoices.
+  totalCredited: Prisma.Decimal;
   outstandingInvoiceCount: number;
 }
 
 export function toCustomerArSummary(row: CustomerArSummaryRow) {
-  const totalOutstanding = row.totalInvoiced.minus(row.totalPaid);
+  const totalOutstanding = row.totalInvoiced.minus(row.totalPaid).minus(row.totalCredited);
   return {
     customerId: row.customerId,
     customerCode: row.customerCode,
     customerName: row.customerName,
     totalInvoiced: moneyToString(row.totalInvoiced),
     totalPaid: moneyToString(row.totalPaid),
+    totalCredited: moneyToString(row.totalCredited),
     totalOutstanding: moneyToString(totalOutstanding),
     outstandingInvoiceCount: row.outstandingInvoiceCount,
   };
 }
 
-// No status/reversedAt fields here — unlike SupplierPayment, SalesPayment
-// has no reversal lifecycle in this phase (schema.prisma's own comment on
-// SalesPayment.accountingPostingStatus: "No REVERSED here: SalesPayment has
-// no reversal path in this phase").
 export interface CustomerArLedgerPaymentRow {
   id: string;
   amount: Prisma.Decimal;
@@ -53,13 +53,15 @@ export interface CustomerArLedgerItemRow {
   dueDate: Date | null;
   total: Prisma.Decimal;
   amountPaid: Prisma.Decimal;
+  // Phase 3.12 (Sales Return / Credit Note).
+  amountCredited: Prisma.Decimal;
   paymentStatus: string;
   status: string;
   payments?: CustomerArLedgerPaymentRow[];
 }
 
 export function toCustomerArLedgerItem(row: CustomerArLedgerItemRow) {
-  const balanceDue = row.total.minus(row.amountPaid);
+  const balanceDue = row.total.minus(row.amountPaid).minus(row.amountCredited);
   return {
     invoiceId: row.invoiceId,
     invoiceNumber: row.invoiceNumber,
@@ -69,6 +71,7 @@ export function toCustomerArLedgerItem(row: CustomerArLedgerItemRow) {
     dueDate: row.dueDate ? row.dueDate.toISOString().slice(0, 10) : null,
     total: moneyToString(row.total),
     amountPaid: moneyToString(row.amountPaid),
+    amountCredited: moneyToString(row.amountCredited),
     balanceDue: moneyToString(balanceDue),
     paymentStatus: row.paymentStatus,
     status: row.status,
@@ -115,13 +118,16 @@ export function toArAgingRow(row: ArAgingRowInput) {
 }
 
 /** One row from the raw windowed customer-statement query — a single
- * INVOICE or PAYMENT line. No PAYMENT_REVERSAL line type: SalesPayment has
- * no reversal lifecycle in this phase (see the model comment), so unlike
- * the AP statement, a reversed-payment pair can never occur here. */
+ * INVOICE, PAYMENT, or CREDIT_NOTE line. CREDIT_NOTE (Phase 3.12) is sourced
+ * only from CONFIRMED Sales Returns — a return that is later REVERSED simply
+ * stops appearing (its net effect on SalesInvoice.amountCredited is already
+ * zero), rather than emitting an offsetting reversal line; mirrors this
+ * statement's own existing convention (the PAYMENT line above likewise has
+ * no PAYMENT_REVERSAL counterpart). */
 export interface CustomerArStatementRawRow {
   id: string;
   date: Date;
-  type: 'INVOICE' | 'PAYMENT';
+  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
   reference: string;
   description: string | null;
   amount: Prisma.Decimal | string;

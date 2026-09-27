@@ -65,9 +65,12 @@ type ShipmentItemRow = {
 // returned by Inventory's issue call, keyed by ShipmentItem.id so it can be
 // persisted onto the right row inside finalizePosted()'s own transaction.
 // Never recomputed by Sales — this is exactly what Inventory returned.
+// Phase 3.12 (Sales Return / Credit Note) prerequisite — movementId is the
+// authoritative SALE StockMovement id this line's issue created, captured
+// the same way, mirrors GoodsReceiptsService's zipMovementIds() exactly.
 type CostsByShipmentItemId = Map<
   string,
-  { unitCost: Prisma.Decimal; totalCost: Prisma.Decimal }
+  { unitCost: Prisma.Decimal; totalCost: Prisma.Decimal; movementId: string }
 >;
 
 /** Minimal shape needed to build a Shipment's COGS accounting posting request. */
@@ -688,6 +691,10 @@ export class ShipmentsService {
         // commits the shipment as POSTED. Copies productTracksInventory
         // forward from the SalesOrderItem at the same time — the ONLY
         // place this snapshot is ever written for a ShipmentItem.
+        // Phase 3.12 (Sales Return / Credit Note) prerequisite — captures
+        // the same response's movement id, guarded so a retry/replay call
+        // never overwrites an already-populated inventoryMovementId,
+        // mirrors GoodsReceiptsService's own capture guard exactly.
         const cost = costsByItemId?.get(item.id);
         await tx.shipmentItem.update({
           where: { id: item.id },
@@ -695,6 +702,9 @@ export class ShipmentsService {
             productTracksInventory: soItem.productTracksInventory,
             ...(cost
               ? { unitCost: cost.unitCost, totalCost: cost.totalCost }
+              : {}),
+            ...(cost && !item.inventoryMovementId
+              ? { inventoryMovementId: cost.movementId }
               : {}),
           },
         });
@@ -796,6 +806,7 @@ export class ShipmentsService {
       map.set(line.shipmentItemId, {
         unitCost: new Prisma.Decimal(movement.unitCost ?? 0),
         totalCost: new Prisma.Decimal(movement.totalCost ?? 0),
+        movementId: movement.id,
       });
     });
     return map;
