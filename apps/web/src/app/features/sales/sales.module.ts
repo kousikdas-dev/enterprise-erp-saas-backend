@@ -10,6 +10,7 @@ import { QuotationListComponent } from './quotations/quotation-list.component';
 import { SalesInvoiceListComponent } from './sales-invoices/sales-invoice-list.component';
 import { SalesOrderListComponent } from './sales-orders/sales-order-list.component';
 import { SalesReturnListComponent } from './sales-returns/sales-return-list.component';
+import { SalesCreditNoteListComponent } from './sales-credit-notes/sales-credit-note-list.component';
 import { ShipmentListComponent } from './shipments/shipment-list.component';
 
 const routes: Routes = [
@@ -50,6 +51,11 @@ const routes: Routes = [
     data: { extraParameter: 'salesMenu' },
   },
   {
+    path: 'sales-credit-notes',
+    component: SalesCreditNoteListComponent,
+    data: { extraParameter: 'salesMenu' },
+  },
+  {
     path: 'accounts-receivable',
     component: AccountsReceivableListComponent,
     data: { extraParameter: 'salesMenu' },
@@ -65,6 +71,7 @@ const routes: Routes = [
     SalesInvoiceListComponent,
     ShipmentListComponent,
     SalesReturnListComponent,
+    SalesCreditNoteListComponent,
     AccountsReceivableListComponent,
   ],
   imports: [

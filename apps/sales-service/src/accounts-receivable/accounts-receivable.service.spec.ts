@@ -18,6 +18,7 @@ describe('AccountsReceivableService', () => {
     salesInvoice?: Record<string, jest.Mock>;
     customer?: Record<string, jest.Mock>;
     salesPayment?: Record<string, jest.Mock>;
+    salesCreditNote?: Record<string, jest.Mock>;
     queryRaw?: jest.Mock;
     ledgerClient?: Partial<AccountingLedgerClient>;
   } = {}) {
@@ -37,6 +38,13 @@ describe('AccountsReceivableService', () => {
       salesPayment: {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
         ...overrides.salesPayment,
+      },
+      // Phase 3.14 — defaults to "no Credit Notes at all" so every
+      // pre-existing test above is unaffected unless it opts in.
+      salesCreditNote: {
+        groupBy: jest.fn().mockResolvedValue([]),
+        aggregate: jest.fn().mockResolvedValue({ _sum: { total: null } }),
+        ...overrides.salesCreditNote,
       },
       $queryRaw: overrides.queryRaw ?? jest.fn().mockResolvedValue([]),
     };
@@ -144,6 +152,54 @@ describe('AccountsReceivableService', () => {
       const result = await service.listCustomerSummaries(actor, true);
       expect(result.items).toEqual([]);
     });
+
+    it('Phase 3.14 — subtracts posted standalone Credit Notes from totalOutstanding and can flip a customer to fully-settled', async () => {
+      const { service } = buildService({
+        salesInvoice: {
+          groupBy: jest.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
+            if ('paymentStatus' in (args.where ?? {})) {
+              return Promise.resolve([{ customerId, _count: { _all: 1 } }]);
+            }
+            return Promise.resolve([
+              {
+                customerId,
+                _sum: {
+                  total: decimal('500.0000'),
+                  amountPaid: decimal('300.0000'),
+                  amountCredited: decimal('0.0000'),
+                },
+              },
+            ]);
+          }),
+          aggregate: jest.fn(),
+          count: jest.fn(),
+          findMany: jest.fn(),
+        },
+        customer: {
+          findFirst: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([{ id: customerId, code: 'CUST-1', name: 'Acme' }]),
+        },
+        salesCreditNote: {
+          groupBy: jest
+            .fn()
+            .mockResolvedValue([{ customerId, _sum: { total: decimal('200.0000') } }]),
+          aggregate: jest.fn(),
+        },
+      });
+      const result = await service.listCustomerSummaries(actor, true);
+      // totalOutstanding = 500 - 300 - 0 - 200 = 0 -> excluded by onlyOutstanding.
+      expect(result.items).toEqual([]);
+
+      const resultAll = await service.listCustomerSummaries(actor, false);
+      expect(resultAll.items[0]).toEqual(
+        expect.objectContaining({
+          totalInvoiced: '500.0000',
+          totalPaid: '300.0000',
+          totalCreditNotes: '200.0000',
+          totalOutstanding: '0.0000',
+        }),
+      );
+    });
   });
 
   describe('getCustomerSummary', () => {
@@ -176,6 +232,36 @@ describe('AccountsReceivableService', () => {
           totalPaid: '200.0000',
           totalOutstanding: '300.0000',
           outstandingInvoiceCount: 2,
+        }),
+      );
+    });
+
+    it('Phase 3.14 — includes posted standalone Credit Notes in totalOutstanding', async () => {
+      const { service } = buildService({
+        customer: {
+          findFirst: jest.fn().mockResolvedValue({ id: customerId, code: 'CUST-1', name: 'Acme' }),
+          findMany: jest.fn(),
+        },
+        salesInvoice: {
+          groupBy: jest.fn(),
+          aggregate: jest
+            .fn()
+            .mockResolvedValue({ _sum: { total: decimal('500.0000'), amountPaid: decimal('200.0000') } }),
+          count: jest.fn().mockResolvedValue(2),
+          findMany: jest.fn(),
+        },
+        salesCreditNote: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { total: decimal('120.0000') } }),
+        },
+      });
+      const result = await service.getCustomerSummary(actor, customerId);
+      expect(result).toEqual(
+        expect.objectContaining({
+          totalInvoiced: '500.0000',
+          totalPaid: '200.0000',
+          totalCreditNotes: '120.0000',
+          totalOutstanding: '180.0000',
         }),
       );
     });
@@ -404,6 +490,28 @@ describe('AccountsReceivableService', () => {
       expect(result.total).toBe(1);
       expect(result.closingBalance).toBe('500.0000');
     });
+
+    it('Phase 3.14 — produces two lines (SALES_CREDIT_NOTE + SALES_CREDIT_NOTE_REVERSAL) for a reversed credit note, negative amount', async () => {
+      const queryRaw = jest
+        .fn()
+        .mockResolvedValueOnce([{ signed: '0.0000', cnt: 2 }])
+        .mockResolvedValueOnce([
+          { id: 'scn-1', date: new Date('2026-01-05T00:00:00.000Z'), type: 'SALES_CREDIT_NOTE', reference: 'SCN-1', description: 'price correction', amount: '-100.0000', cumulative: '-100.0000' },
+          { id: 'scn-1', date: new Date('2026-01-10T00:00:00.000Z'), type: 'SALES_CREDIT_NOTE_REVERSAL', reference: 'SCN-1', description: 'undo', amount: '100.0000', cumulative: '0.0000' },
+        ]);
+      const { service } = buildService({
+        customer: { findFirst: jest.fn().mockResolvedValue({ id: customerId, name: 'Acme' }), findMany: jest.fn() },
+        queryRaw,
+      });
+
+      const result = await service.getStatement(actor, customerId, { page: 1, limit: 50 } as any);
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].type).toBe('SALES_CREDIT_NOTE');
+      expect(result.items[0].amount).toBe('-100.0000');
+      expect(result.items[1].type).toBe('SALES_CREDIT_NOTE_REVERSAL');
+      expect(result.items[1].amount).toBe('100.0000');
+      expect(result.closingBalance).toBe('0.0000');
+    });
   });
 
   describe('getReconciliation', () => {
@@ -439,6 +547,23 @@ describe('AccountsReceivableService', () => {
       });
       const result = await service.getReconciliation(actor);
       expect(result.subledgerTotalOutstanding).toBe('150.0000');
+    });
+
+    it('Phase 3.14 — subtracts posted standalone Credit Notes from the subledger total', async () => {
+      const { service } = buildService({
+        salesInvoice: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { total: decimal('300.0000'), amountPaid: decimal('100.0000') } }),
+          count: jest.fn(),
+          findMany: jest.fn(),
+        },
+        salesCreditNote: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { total: decimal('40.0000') } }),
+        },
+      });
+      const result = await service.getReconciliation(actor);
+      expect(result.subledgerTotalOutstanding).toBe('160.0000');
     });
 
     it('reports matches=true when the subledger and GL balance agree', async () => {

@@ -11,6 +11,7 @@ import { SalesForwardService } from './sales-forward.service';
 import { SalesInvoicesController } from './sales-invoices.controller';
 import { SalesOrdersController } from './sales-orders.controller';
 import { SalesReturnsController } from './sales-returns.controller';
+import { SalesCreditNotesController } from './sales-credit-notes.controller';
 import { ShipmentsController } from './shipments.controller';
 
 @Module({
@@ -31,6 +32,7 @@ import { ShipmentsController } from './shipments.controller';
     SalesInvoicesController,
     ShipmentsController,
     SalesReturnsController,
+    SalesCreditNotesController,
     AccountsReceivableController,
   ],
   providers: [SalesForwardService],

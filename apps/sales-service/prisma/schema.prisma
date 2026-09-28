@@ -162,10 +162,13 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  quotations    Quotation[]
-  salesOrders   SalesOrder[]
-  salesInvoices SalesInvoice[]
-  addresses     CustomerAddress[]
+  quotations       Quotation[]
+  salesOrders      SalesOrder[]
+  salesInvoices    SalesInvoice[]
+  addresses        CustomerAddress[]
+  // Phase 3.14 (Standalone Sales Credit Note) — a Credit Note is always tied
+  // to a Customer, never optional, unlike its optional SalesInvoice reference.
+  salesCreditNotes SalesCreditNote[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -239,17 +242,17 @@ model Quotation {
 }
 
 model QuotationItem {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @db.Uuid
-  quotationId      String   @db.Uuid
-  productId        String   @db.Uuid
-  productSku       String
-  productName      String
-  quantity         Decimal  @db.Decimal(19, 6)
-  unitOfMeasureId  String?  @db.Uuid
-  uomCode          String?
-  uomName          String?
-  conversionFactor Decimal? @db.Decimal(19, 6)
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid
+  quotationId            String   @db.Uuid
+  productId              String   @db.Uuid
+  productSku             String
+  productName            String
+  quantity               Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId        String?  @db.Uuid
+  uomCode                String?
+  uomName                String?
+  conversionFactor       Decimal? @db.Decimal(19, 6)
   // Phase 3.3 (Sales Shipment COGS) — snapshotted verbatim from
   // inventory-service's Product.trackInventory via the same getUomOptions()
   // round-trip already used for UOM resolution — no separate call. Copied
@@ -258,17 +261,17 @@ model QuotationItem {
   // migration window: every row created before this column existed has NULL
   // here, and NULL is always treated identically to false downstream.
   productTracksInventory Boolean?
-  unitPrice        Decimal  @db.Decimal(19, 4)
-  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
-  discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
-  taxCodeId        String?  @db.Uuid
-  taxCode          String?
-  taxCodeName      String?
-  taxAmount        Decimal  @default(0) @db.Decimal(19, 4)
-  lineSubtotal     Decimal  @db.Decimal(19, 4)
-  lineTotal        Decimal  @db.Decimal(19, 4)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  unitPrice              Decimal  @db.Decimal(19, 4)
+  discountPercent        Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount         Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId              String?  @db.Uuid
+  taxCode                String?
+  taxCodeName            String?
+  taxAmount              Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal           Decimal  @db.Decimal(19, 4)
+  lineTotal              Decimal  @db.Decimal(19, 4)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   quotation     Quotation                   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   taxComponents QuotationItemTaxComponent[]
@@ -329,33 +332,33 @@ model ProformaInvoice {
 }
 
 model ProformaInvoiceItem {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @db.Uuid
-  proformaInvoiceId String   @db.Uuid
-  productId         String   @db.Uuid
-  productSku        String
-  productName       String
-  quantity          Decimal  @db.Decimal(19, 6)
-  unitOfMeasureId   String?  @db.Uuid
-  uomCode           String?
-  uomName           String?
-  conversionFactor  Decimal? @db.Decimal(19, 6)
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid
+  proformaInvoiceId      String   @db.Uuid
+  productId              String   @db.Uuid
+  productSku             String
+  productName            String
+  quantity               Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId        String?  @db.Uuid
+  uomCode                String?
+  uomName                String?
+  conversionFactor       Decimal? @db.Decimal(19, 6)
   // Phase 3.3 (Sales Shipment COGS) — same snapshot rule as
   // QuotationItem.productTracksInventory above; copied forward to
   // SalesOrderItem when a Sales Order is converted from this Proforma
   // Invoice.
   productTracksInventory Boolean?
-  unitPrice         Decimal  @db.Decimal(19, 4)
-  discountPercent   Decimal  @default(0) @db.Decimal(5, 2)
-  discountAmount    Decimal  @default(0) @db.Decimal(19, 4)
-  taxCodeId         String?  @db.Uuid
-  taxCode           String?
-  taxCodeName       String?
-  taxAmount         Decimal  @default(0) @db.Decimal(19, 4)
-  lineSubtotal      Decimal  @db.Decimal(19, 4)
-  lineTotal         Decimal  @db.Decimal(19, 4)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  unitPrice              Decimal  @db.Decimal(19, 4)
+  discountPercent        Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount         Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId              String?  @db.Uuid
+  taxCode                String?
+  taxCodeName            String?
+  taxAmount              Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal           Decimal  @db.Decimal(19, 4)
+  lineTotal              Decimal  @db.Decimal(19, 4)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   proformaInvoice ProformaInvoice                   @relation(fields: [proformaInvoiceId], references: [id], onDelete: Cascade)
   taxComponents   ProformaInvoiceItemTaxComponent[]
@@ -425,17 +428,17 @@ model SalesOrder {
 }
 
 model SalesOrderItem {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @db.Uuid
-  salesOrderId     String   @db.Uuid
-  productId        String   @db.Uuid
-  productSku       String
-  productName      String
-  quantity         Decimal  @db.Decimal(19, 6)
-  unitOfMeasureId  String?  @db.Uuid
-  uomCode          String?
-  uomName          String?
-  conversionFactor Decimal? @db.Decimal(19, 6)
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid
+  salesOrderId           String   @db.Uuid
+  productId              String   @db.Uuid
+  productSku             String
+  productName            String
+  quantity               Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId        String?  @db.Uuid
+  uomCode                String?
+  uomName                String?
+  conversionFactor       Decimal? @db.Decimal(19, 6)
   // Phase 3.3 (Sales Shipment COGS) — snapshotted from inventory-service's
   // Product.trackInventory when this order line is created directly (via
   // mapLines()'s existing getUomOptions() call), or copied forward verbatim
@@ -444,18 +447,18 @@ model SalesOrderItem {
   // shipment-creation time. NULL and false are always treated identically —
   // only an explicit true requires/enables COGS posting at shipment time.
   productTracksInventory Boolean?
-  unitPrice        Decimal  @db.Decimal(19, 4)
-  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
-  discountAmount   Decimal  @default(0) @db.Decimal(19, 4)
-  taxCodeId        String?  @db.Uuid
-  taxCode          String?
-  taxCodeName      String?
-  taxAmount        Decimal  @default(0) @db.Decimal(19, 4)
-  lineSubtotal     Decimal  @db.Decimal(19, 4)
-  lineTotal        Decimal  @db.Decimal(19, 4)
-  shippedQuantity  Decimal  @default(0) @db.Decimal(19, 6)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  unitPrice              Decimal  @db.Decimal(19, 4)
+  discountPercent        Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount         Decimal  @default(0) @db.Decimal(19, 4)
+  taxCodeId              String?  @db.Uuid
+  taxCode                String?
+  taxCodeName            String?
+  taxAmount              Decimal  @default(0) @db.Decimal(19, 4)
+  lineSubtotal           Decimal  @db.Decimal(19, 4)
+  lineTotal              Decimal  @db.Decimal(19, 4)
+  shippedQuantity        Decimal  @default(0) @db.Decimal(19, 6)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   salesOrder    SalesOrder                   @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   shipmentItems ShipmentItem[]
@@ -583,8 +586,8 @@ model ShipmentItem {
   // capacity role, simplified since Sales has no matched/unmatched split.
   returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
 
-  shipment       Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id], onDelete: Restrict)
+  shipment       Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  salesOrderItem SalesOrderItem    @relation(fields: [salesOrderItemId], references: [id], onDelete: Restrict)
   returnLines    SalesReturnItem[] @relation("SalesReturnItemShipmentLine")
 
   @@index([tenantId])
@@ -641,10 +644,15 @@ model SalesInvoice {
   journalEntryId          String?                   @db.Uuid
   reversalJournalEntryId  String?                   @db.Uuid
 
-  customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  items    SalesInvoiceItem[]
-  payments SalesPayment[]
-  returns  SalesReturn[]
+  customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items       SalesInvoiceItem[]
+  payments    SalesPayment[]
+  returns     SalesReturn[]
+  // Phase 3.14 (Standalone Sales Credit Note) — optional, traceability-only
+  // back reference; a Credit Note is never required to reference an invoice
+  // (see SalesCreditNote.salesInvoiceId below). Deliberately separate from
+  // `returns` above — a Credit Note is not a SalesReturn.
+  creditNotes SalesCreditNote[]
 
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId])
@@ -718,14 +726,14 @@ model SalesInvoiceItemTaxComponent {
 }
 
 model SalesPayment {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @db.Uuid
-  salesInvoiceId  String   @db.Uuid
-  amount          Decimal  @db.Decimal(19, 4)
+  id              String             @id @default(uuid()) @db.Uuid
+  tenantId        String             @db.Uuid
+  salesInvoiceId  String             @db.Uuid
+  amount          Decimal            @db.Decimal(19, 4)
   paymentDate     DateTime
   // Master-data UUID intentionally has no foreign key: that data belongs to
   // a separate service/database (mirrors SalesInvoice.paymentTermId).
-  paymentMethodId String?  @db.Uuid
+  paymentMethodId String?            @db.Uuid
   reference       String?
   notes           String?
   status          SalesPaymentStatus @default(ACTIVE)
@@ -738,8 +746,8 @@ model SalesPayment {
   reversedAt              DateTime?
   reversalReason          String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   salesInvoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
 
@@ -765,12 +773,12 @@ model SalesReturn {
   // line's own Shipment.warehouseId must match this value (validated at
   // create() time) — mirrors PurchaseReturn.warehouseId's single-warehouse-
   // per-Inventory-call constraint.
-  warehouseId String? @db.Uuid
-  status      SalesReturnStatus @default(DRAFT)
-  reason      String?
-  returnedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  warehouseId    String?           @db.Uuid
+  status         SalesReturnStatus @default(DRAFT)
+  reason         String?
+  returnedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   // Sales Accounting Integration — Sales-side cache of accounting-service's
   // own posting state, mirrors PurchaseReturn's identical fields exactly. No
@@ -809,7 +817,7 @@ model SalesReturnItem {
   productName String
 
   // Commercial-unit quantity returned on this line.
-  quantity Decimal @db.Decimal(19, 6)
+  quantity     Decimal  @db.Decimal(19, 6)
   // Base quantity (× conversionFactor) — the ONLY value ever sent to
   // Inventory. Null when shipmentItemId is null (nothing to send).
   baseQuantity Decimal? @db.Decimal(19, 6)
@@ -852,4 +860,175 @@ model SalesReturnItem {
   @@index([salesInvoiceItemId])
   @@index([shipmentItemId])
   @@map("sales_return_items")
+}
+
+// ============================================================================
+// Standalone Sales Credit Note V1 (Phase 3.14) — a standalone Accounts
+// Receivable adjustment document. Deliberately independent of SalesReturn/
+// Shipment/ShipmentItem: a Credit Note records a seller-side reduction of the
+// amount owed by a customer (price correction, commercial discount after
+// invoicing, billing adjustment, other pure customer-credit adjustment)
+// WITHOUT any physical goods movement — it must never call
+// InventoryStockClient and never touches SalesInvoice.amountCredited (that
+// column remains exclusively owned by SalesReturnsService — see its own
+// comment on SalesInvoice.amountCredited above). salesInvoiceId is optional,
+// retained only as traceability when supplied; a standalone Credit Note with
+// no invoice reference is equally valid.
+//
+// Document-level lifecycle: DRAFT -> POSTED -> REVERSED (never CONFIRMED —
+// deliberately distinct vocabulary from SalesReturnStatus, mirrors Purchase
+// Debit Note's own POSTED terminology instead). No third "reversal failed"
+// posting status — a failed reversal attempt deliberately leaves
+// accountingPostingStatus at POSTED, exactly like every other reversal in
+// this codebase (see SalesCreditNotesService.reverse()'s own doc comment).
+//
+// Accounting (mirrors SalesInvoice's own postings, reversed — the exact same
+// shape as SalesReturnsService.buildReturnPostingRequest()'s commercial-only
+// case, i.e. a return with no shipment-linked lines):
+//   Dr SALES_REVENUE       subtotal
+//   Cr SALES_DISCOUNT      discountTotal, when > 0
+//   Dr OUTPUT_TAX          taxTotal, when > 0
+//   Cr ACCOUNTS_RECEIVABLE total
+// sourceService 'sales-service', sourceType 'SALES_CREDIT_NOTE'. Reuses the
+// existing SALES_REVENUE/SALES_DISCOUNT/OUTPUT_TAX/ACCOUNTS_RECEIVABLE roles
+// and account mappings — no new GL account-mapping purpose.
+// ============================================================================
+
+enum SalesCreditNoteStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+// Mirrors SalesInvoicePostingStatus/SalesReturnPostingStatus's exact
+// four-value shape. No third "reversal failed" value — see the model-group
+// comment above.
+enum SalesCreditNotePostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
+model SalesCreditNote {
+  id               String @id @default(uuid()) @db.Uuid
+  tenantId         String @db.Uuid
+  creditNoteNumber String
+  customerId       String @db.Uuid
+
+  // Customer snapshot — frozen at create time from the live Customer record,
+  // never re-fetched afterwards (same "snapshot, never re-derive" convention
+  // as SalesOrder/SalesInvoice's own customer snapshots).
+  customerName           String
+  customerGstin          String?
+  customerBillingAddress String?
+
+  // Optional — when present, ties this Credit Note to a specific SENT
+  // SalesInvoice for traceability only (verified to exist, belong to this
+  // tenant, and be SENT at create time). Never required: a standalone Credit
+  // Note with no invoice reference is equally valid and creates no
+  // invoice-side effect (SalesInvoice.amountCredited is never touched by a
+  // Credit Note — that column remains exclusively owned by SalesReturn).
+  salesInvoiceId String? @db.Uuid
+
+  creditNoteDate DateTime
+  reason         String?
+  notes          String?
+
+  subtotal      Decimal @db.Decimal(19, 4)
+  discountTotal Decimal @default(0) @db.Decimal(19, 4)
+  taxTotal      Decimal @default(0) @db.Decimal(19, 4)
+  total         Decimal @db.Decimal(19, 4)
+
+  status SalesCreditNoteStatus @default(DRAFT)
+
+  postedAt DateTime?
+  postedBy String?   @db.Uuid
+
+  reversedAt     DateTime?
+  reversedBy     String?   @db.Uuid
+  reversalReason String?
+
+  // Sales-side cache of accounting-service's own posting state, mirroring
+  // the exact SalesInvoice/SalesReturn pattern. No FK to accounting_db
+  // (separate database; soft reference). The authoritative idempotency guard
+  // is accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never these columns.
+  accountingPostingStatus SalesCreditNotePostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                      @db.Uuid
+  reversalJournalEntryId  String?                      @db.Uuid
+
+  createdBy String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer     Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  salesInvoice SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  items        SalesCreditNoteItem[]
+
+  @@unique([tenantId, creditNoteNumber])
+  @@index([tenantId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@index([tenantId, salesInvoiceId])
+  @@map("sales_credit_notes")
+}
+
+model SalesCreditNoteItem {
+  id                String @id @default(uuid()) @db.Uuid
+  tenantId          String @db.Uuid
+  salesCreditNoteId String @db.Uuid
+
+  // Free-text line description — a Credit Note line is a commercial/
+  // accounting adjustment, not necessarily tied to a specific product/UOM
+  // (unlike SalesInvoiceItem), so no productId/UOM snapshot exists here.
+  description String
+
+  quantity  Decimal @db.Decimal(19, 6)
+  unitPrice Decimal @db.Decimal(19, 4)
+
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  // Tax code resolved fresh via AccountingTaxCodeClient at line-creation time
+  // (mirrors SalesOrdersService.mapLines() — there is no order/invoice line
+  // to copy a tax snapshot from, unlike SalesInvoiceItem).
+  taxCodeId   String? @db.Uuid
+  taxCode     String?
+  taxCodeName String?
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  lineSubtotal Decimal @db.Decimal(19, 4)
+  lineTotal    Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  salesCreditNote SalesCreditNote                   @relation(fields: [salesCreditNoteId], references: [id], onDelete: Cascade)
+  taxComponents   SalesCreditNoteItemTaxComponent[]
+
+  @@index([tenantId])
+  @@index([salesCreditNoteId])
+  @@map("sales_credit_note_items")
+}
+
+// No createdAt/updatedAt — mirrors every other *ItemTaxComponent model in
+// this schema (QuotationItemTaxComponent, ProformaInvoiceItemTaxComponent,
+// SalesOrderItemTaxComponent, SalesInvoiceItemTaxComponent), none of which
+// carry timestamps, unlike their Purchase-side counterparts.
+model SalesCreditNoteItemTaxComponent {
+  id                    String  @id @default(uuid()) @db.Uuid
+  tenantId              String  @db.Uuid
+  salesCreditNoteItemId String  @db.Uuid
+  sequence              Int
+  type                  String
+  name                  String?
+  rate                  Decimal @db.Decimal(7, 4)
+  componentTaxAmount    Decimal @db.Decimal(19, 4)
+
+  salesCreditNoteItem SalesCreditNoteItem @relation(fields: [salesCreditNoteItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([salesCreditNoteItemId])
+  @@map("sales_credit_note_item_tax_components")
 }

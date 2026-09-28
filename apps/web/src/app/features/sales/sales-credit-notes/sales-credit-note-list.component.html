@@ -1,0 +1,310 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Sales Credit Notes</div>
+    <div class="d-flex flex-wrap gap-2">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="min-width: 160px;"
+        placeholder="Filter…"
+        [(ngModel)]="filterText" />
+      <select class="form-select form-select-sm" style="min-width: 160px;" [(ngModel)]="filterCustomerId">
+        <option value="">All customers</option>
+        <option *ngFor="let c of customers" [value]="c.id">{{ c.code }} — {{ c.name }}</option>
+      </select>
+      <select class="form-select form-select-sm" style="min-width: 130px;" [(ngModel)]="filterStatus">
+        <option value="">All statuses</option>
+        <option value="DRAFT">DRAFT</option>
+        <option value="POSTED">POSTED</option>
+        <option value="REVERSED">REVERSED</option>
+      </select>
+      <input type="date" class="form-control form-control-sm" [(ngModel)]="filterFromDate" title="From date" />
+      <input type="date" class="form-control form-control-sm" [(ngModel)]="filterToDate" title="To date" />
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create Credit Note
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Standalone Accounts Receivable adjustment — no physical goods movement, no inventory effect
+      (see Sales Returns for goods-movement returns / invoice-linked credit). Flow:
+      <code>DRAFT</code> → <code>POSTED</code> (posts Dr Sales Revenue / Cr Sales Discount / Dr
+      Output Tax / Cr Accounts Receivable) → optionally <code>REVERSED</code>. A referenced sales
+      invoice is traceability-only and never required.
+    </p>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No sales credit notes yet."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Credit Note #</th>
+              <th>Customer</th>
+              <th>Date</th>
+              <th>Ref. Invoice</th>
+              <th>Reason</th>
+              <th class="text-end">Total</th>
+              <th class="text-center">Status</th>
+              <th class="text-center">Accounting</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.creditNoteNumber }}</code></td>
+              <td>{{ item.customerName }}</td>
+              <td>{{ item.creditNoteDate }}</td>
+              <td>{{ invoiceLabel(item.salesInvoiceId) }}</td>
+              <td>{{ item.reason || '—' }}</td>
+              <td class="text-end"><code>{{ item.total }}</code></td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="postingStatusBadgeClass(item.accountingPostingStatus)">
+                  {{ item.accountingPostingStatus }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canPost && item.status === 'DRAFT'"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  [disabled]="actionId === item.id"
+                  (click)="postCreditNote(item)">
+                  {{ actionId === item.id ? 'Posting…' : 'Post' }}
+                </button>
+                <button
+                  *ngIf="canRetryPosting(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  [disabled]="actionId === item.id"
+                  title="The original accounting posting failed — retry it"
+                  (click)="retryAccountingPosting(item)">
+                  {{ actionId === item.id ? 'Retrying…' : 'Retry Posting' }}
+                </button>
+                <button
+                  *ngIf="canReverseCreditNote(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary me-1"
+                  [disabled]="actionId === item.id"
+                  (click)="reverseCreditNote(item)">
+                  {{ actionId === item.id ? 'Reversing…' : 'Reverse' }}
+                </button>
+                <button
+                  *ngIf="canRetryReversal(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning"
+                  [disabled]="actionId === item.id"
+                  title="The original accounting reversal failed — retry it"
+                  (click)="retryAccountingReversal(item)">
+                  {{ actionId === item.id ? 'Retrying…' : 'Retry Reversal' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Create Sales Credit Note</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="scnCustomer">Customer</label>
+          <select id="scnCustomer" class="form-select" formControlName="customerId">
+            <option value="">Select a customer…</option>
+            <option *ngFor="let c of customers" [value]="c.id">{{ c.code }} — {{ c.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="scnInvoice">Reference invoice (optional)</label>
+          <select id="scnInvoice" class="form-select" formControlName="salesInvoiceId">
+            <option value="">None — standalone credit note</option>
+            <option *ngFor="let inv of eligibleInvoicesForCustomer" [value]="inv.id">
+              {{ inv.invoiceNumber }}
+            </option>
+          </select>
+          <div class="form-text">Traceability only — never required.</div>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="scnDate">Credit note date</label>
+          <input id="scnDate" type="date" class="form-control" formControlName="creditNoteDate" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="scnReason">Reason (optional)</label>
+          <input id="scnReason" type="text" class="form-control" formControlName="reason" maxlength="500" />
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="scnNotes">Notes (optional)</label>
+          <input id="scnNotes" type="text" class="form-control" formControlName="notes" maxlength="500" />
+        </div>
+      </div>
+
+      <div class="table-responsive" formArrayName="items">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style="min-width: 100px;">Qty</th>
+              <th style="min-width: 120px;">Unit price</th>
+              <th style="min-width: 100px;">Discount %</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+              <td>
+                <input class="form-control form-control-sm" formControlName="description" placeholder="Line description" />
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="quantity" />
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="unitPrice" />
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="discountPercent" />
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  [disabled]="lines.length === 1"
+                  (click)="removeLine(i)">
+                  &times;
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary" (click)="addLine()">+ Add line</button>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid || lines.length === 0">
+        {{ saving ? 'Creating…' : 'Create credit note' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Sales credit note details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as scn">
+    <dl class="row">
+      <dt class="col-sm-4">Credit Note #</dt><dd class="col-sm-8"><code>{{ scn.creditNoteNumber }}</code></dd>
+      <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ scn.customerName }}</dd>
+      <dt class="col-sm-4">Date</dt><dd class="col-sm-8">{{ scn.creditNoteDate }}</dd>
+      <dt class="col-sm-4">Reference invoice</dt><dd class="col-sm-8">{{ invoiceLabel(scn.salesInvoiceId) }}</dd>
+      <dt class="col-sm-4">Reason</dt><dd class="col-sm-8">{{ scn.reason || '—' }}</dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ scn.notes || '—' }}</dd>
+      <dt class="col-sm-4">Subtotal</dt><dd class="col-sm-8"><code>{{ scn.subtotal }}</code></dd>
+      <dt class="col-sm-4">Discount</dt><dd class="col-sm-8"><code>{{ scn.discountTotal }}</code></dd>
+      <dt class="col-sm-4">Tax</dt><dd class="col-sm-8"><code>{{ scn.taxTotal }}</code></dd>
+      <dt class="col-sm-4">Total</dt><dd class="col-sm-8"><code>{{ scn.total }}</code></dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8"><span class="badge" [ngClass]="statusBadgeClass(scn.status)">{{ scn.status }}</span></dd>
+      <dt class="col-sm-4">Accounting</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="postingStatusBadgeClass(scn.accountingPostingStatus)">
+          {{ scn.accountingPostingStatus }}
+        </span>
+      </dd>
+      <dt class="col-sm-4" *ngIf="scn.journalEntryId">Journal entry</dt>
+      <dd class="col-sm-8" *ngIf="scn.journalEntryId"><code>{{ scn.journalEntryId }}</code></dd>
+      <dt class="col-sm-4" *ngIf="scn.reversedAt">Reversed at</dt>
+      <dd class="col-sm-8" *ngIf="scn.reversedAt">{{ scn.reversedAt }}</dd>
+      <dt class="col-sm-4" *ngIf="scn.reversalReason">Reversal reason</dt>
+      <dd class="col-sm-8" *ngIf="scn.reversalReason">{{ scn.reversalReason }}</dd>
+      <dt class="col-sm-4" *ngIf="scn.reversalJournalEntryId">Reversal journal entry</dt>
+      <dd class="col-sm-8" *ngIf="scn.reversalJournalEntryId"><code>{{ scn.reversalJournalEntryId }}</code></dd>
+    </dl>
+
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Unit price</th>
+            <th class="text-end">Discount</th>
+            <th class="text-end">Tax</th>
+            <th class="text-end">Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of scn.items">
+            <td>{{ line.description }}</td>
+            <td class="text-end"><code>{{ line.quantity }}</code></td>
+            <td class="text-end"><code>{{ line.unitPrice }}</code></td>
+            <td class="text-end"><code>{{ line.discountAmount }}</code></td>
+            <td class="text-end"><code>{{ line.taxAmount }}</code></td>
+            <td class="text-end"><code>{{ line.lineTotal }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button
+      *ngIf="canPost && viewing?.status === 'DRAFT'"
+      type="button"
+      class="btn btn-success me-auto"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && postCreditNote(viewing)">
+      {{ actionId === viewing?.id ? 'Posting…' : 'Post' }}
+    </button>
+    <button
+      *ngIf="viewing && canRetryPosting(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && retryAccountingPosting(viewing)">
+      {{ actionId === viewing?.id ? 'Retrying…' : 'Retry Posting' }}
+    </button>
+    <button
+      *ngIf="viewing && canReverseCreditNote(viewing)"
+      type="button"
+      class="btn btn-outline-secondary"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && reverseCreditNote(viewing)">
+      {{ actionId === viewing?.id ? 'Reversing…' : 'Reverse' }}
+    </button>
+    <button
+      *ngIf="viewing && canRetryReversal(viewing)"
+      type="button"
+      class="btn btn-outline-warning"
+      [disabled]="actionId === viewing?.id"
+      (click)="viewing && retryAccountingReversal(viewing)">
+      {{ actionId === viewing?.id ? 'Retrying…' : 'Retry Reversal' }}
+    </button>
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>

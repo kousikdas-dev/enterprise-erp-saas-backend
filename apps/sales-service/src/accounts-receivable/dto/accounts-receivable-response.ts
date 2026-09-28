@@ -21,11 +21,20 @@ export interface CustomerArSummaryRow {
   // Phase 3.12 (Sales Return / Credit Note) — cumulative CONFIRMED Sales
   // Return credit against this customer's invoices.
   totalCredited: Prisma.Decimal;
+  // Phase 3.14 (Standalone Sales Credit Note) — Σtotal of this customer's
+  // currently-POSTED (not yet REVERSED) standalone Credit Notes. A REVERSED
+  // one is excluded entirely (its reduction no longer applies), never
+  // subtracted-then-added-back. Deliberately separate from totalCredited
+  // above — a standalone Credit Note is not a SalesReturn.
+  totalCreditNotes: Prisma.Decimal;
   outstandingInvoiceCount: number;
 }
 
 export function toCustomerArSummary(row: CustomerArSummaryRow) {
-  const totalOutstanding = row.totalInvoiced.minus(row.totalPaid).minus(row.totalCredited);
+  const totalOutstanding = row.totalInvoiced
+    .minus(row.totalPaid)
+    .minus(row.totalCredited)
+    .minus(row.totalCreditNotes);
   return {
     customerId: row.customerId,
     customerCode: row.customerCode,
@@ -33,6 +42,7 @@ export function toCustomerArSummary(row: CustomerArSummaryRow) {
     totalInvoiced: moneyToString(row.totalInvoiced),
     totalPaid: moneyToString(row.totalPaid),
     totalCredited: moneyToString(row.totalCredited),
+    totalCreditNotes: moneyToString(row.totalCreditNotes),
     totalOutstanding: moneyToString(totalOutstanding),
     outstandingInvoiceCount: row.outstandingInvoiceCount,
   };
@@ -118,16 +128,19 @@ export function toArAgingRow(row: ArAgingRowInput) {
 }
 
 /** One row from the raw windowed customer-statement query — a single
- * INVOICE, PAYMENT, or CREDIT_NOTE line. CREDIT_NOTE (Phase 3.12) is sourced
- * only from CONFIRMED Sales Returns — a return that is later REVERSED simply
+ * INVOICE, PAYMENT, CREDIT_NOTE, SALES_CREDIT_NOTE, or
+ * SALES_CREDIT_NOTE_REVERSAL line. CREDIT_NOTE (Phase 3.12) is sourced only
+ * from CONFIRMED Sales Returns — a return that is later REVERSED simply
  * stops appearing (its net effect on SalesInvoice.amountCredited is already
  * zero), rather than emitting an offsetting reversal line; mirrors this
  * statement's own existing convention (the PAYMENT line above likewise has
- * no PAYMENT_REVERSAL counterpart). */
+ * no PAYMENT_REVERSAL counterpart). SALES_CREDIT_NOTE /
+ * SALES_CREDIT_NOTE_REVERSAL (Phase 3.14) are the standalone Credit Note's
+ * own, distinct pair — deliberately never merged with CREDIT_NOTE above. */
 export interface CustomerArStatementRawRow {
   id: string;
   date: Date;
-  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'SALES_CREDIT_NOTE' | 'SALES_CREDIT_NOTE_REVERSAL';
   reference: string;
   description: string | null;
   amount: Prisma.Decimal | string;

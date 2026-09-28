@@ -32,6 +32,10 @@ describe('permission helpers', () => {
     expect(PERMISSIONS.SALES_RETURNS_CREATE).toBe('sales-returns.create');
     expect(PERMISSIONS.SALES_RETURNS_CONFIRM).toBe('sales-returns.confirm');
     expect(PERMISSIONS.SALES_RETURNS_REVERSE).toBe('sales-returns.reverse');
+    expect(PERMISSIONS.SALES_CREDIT_NOTES_CREATE).toBe('sales-credit-notes.create');
+    expect(PERMISSIONS.SALES_CREDIT_NOTES_READ).toBe('sales-credit-notes.read');
+    expect(PERMISSIONS.SALES_CREDIT_NOTES_POST).toBe('sales-credit-notes.post');
+    expect(PERMISSIONS.SALES_CREDIT_NOTES_REVERSE).toBe('sales-credit-notes.reverse');
     expect(PERMISSIONS.SHIPMENTS_POST).toBe('shipments.post');
     expect(PERMISSIONS.ACCOUNTS_CREATE).toBe('accounts.create');
     expect(PERMISSIONS.ACCOUNTS_UPDATE).toBe('accounts.update');

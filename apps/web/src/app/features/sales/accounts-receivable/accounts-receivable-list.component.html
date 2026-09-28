@@ -56,6 +56,7 @@
                 <th>Customer</th>
                 <th class="text-end">Total Invoiced</th>
                 <th class="text-end">Total Paid</th>
+                <th class="text-end">Credit Notes</th>
                 <th class="text-end">Outstanding</th>
                 <th class="text-center">Open Invoices</th>
                 <th class="text-end">Actions</th>
@@ -67,6 +68,7 @@
                 <td>{{ c.customerName }}</td>
                 <td class="text-end">{{ c.totalInvoiced }}</td>
                 <td class="text-end">{{ c.totalPaid }}</td>
+                <td class="text-end">{{ c.totalCreditNotes }}</td>
                 <td class="text-end fw-bold">{{ c.totalOutstanding }}</td>
                 <td class="text-center">{{ c.outstandingInvoiceCount }}</td>
                 <td class="text-end">

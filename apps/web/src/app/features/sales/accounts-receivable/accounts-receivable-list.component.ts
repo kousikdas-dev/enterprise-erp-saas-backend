@@ -223,6 +223,9 @@ export class AccountsReceivableListComponent implements OnInit {
   }
 
   statementLineBadgeClass(type: string): string {
-    return type === 'INVOICE' ? 'bg-primary' : 'bg-success'; // PAYMENT
+    if (type === 'INVOICE') return 'bg-primary';
+    if (type === 'SALES_CREDIT_NOTE') return 'bg-danger';
+    if (type === 'SALES_CREDIT_NOTE_REVERSAL') return 'bg-info text-dark';
+    return 'bg-success'; // PAYMENT
   }
 }

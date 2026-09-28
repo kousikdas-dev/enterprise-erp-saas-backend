@@ -573,6 +573,8 @@ export interface CustomerArSummary {
   customerName: string;
   totalInvoiced: string;
   totalPaid: string;
+  /** Phase 3.14 — sum of currently-POSTED (not REVERSED) standalone Sales Credit Notes. */
+  totalCreditNotes: string;
   totalOutstanding: string;
   outstandingInvoiceCount: number;
 }
@@ -626,8 +628,14 @@ export interface ArAgingResult {
 }
 
 /** No PAYMENT_REVERSAL type — Sales Payment has no reversal lifecycle in
- * this phase, unlike Supplier Payment. */
-export type ArStatementLineType = 'INVOICE' | 'PAYMENT';
+ * this phase, unlike Supplier Payment. SALES_CREDIT_NOTE /
+ * SALES_CREDIT_NOTE_REVERSAL (Phase 3.14) are the standalone Credit Note's
+ * own, distinct pair — never merged with Sales Return's own effects. */
+export type ArStatementLineType =
+  | 'INVOICE'
+  | 'PAYMENT'
+  | 'SALES_CREDIT_NOTE'
+  | 'SALES_CREDIT_NOTE_REVERSAL';
 
 export interface CustomerArStatementLine {
   date: string;
@@ -719,5 +727,91 @@ export interface CreateSalesReturnRequest {
 }
 
 export interface ReverseSalesReturnRequest {
+  reason?: string;
+}
+
+// Phase 3.14 — Standalone Sales Credit Note: a standalone Accounts
+// Receivable adjustment document with no physical goods movement.
+// Deliberately separate from SalesReturn above (which remains the
+// physical-goods return / invoice-linked credit document).
+export type SalesCreditNoteStatus = 'DRAFT' | 'POSTED' | 'REVERSED';
+export type SalesCreditNotePostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+
+export interface SalesCreditNoteItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
+export interface SalesCreditNoteItem {
+  id: string;
+  salesCreditNoteId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
+  lineTotal: string;
+  taxComponents: SalesCreditNoteItemTaxComponent[];
+}
+
+export interface SalesCreditNote {
+  id: string;
+  tenantId: string;
+  creditNoteNumber: string;
+  customerId: string;
+  customerName: string;
+  customerGstin: string | null;
+  customerBillingAddress: string | null;
+  /** Optional traceability-only reference — never required. */
+  salesInvoiceId: string | null;
+  creditNoteDate: string;
+  reason: string | null;
+  notes: string | null;
+  subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
+  total: string;
+  status: SalesCreditNoteStatus | string;
+  postedAt: string | null;
+  postedBy: string | null;
+  reversedAt: string | null;
+  reversedBy: string | null;
+  reversalReason: string | null;
+  accountingPostingStatus: SalesCreditNotePostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  items: SalesCreditNoteItem[];
+}
+
+export interface CreateSalesCreditNoteLineRequest {
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  discountPercent?: string;
+  taxCodeId?: string;
+}
+
+export interface CreateSalesCreditNoteRequest {
+  customerId: string;
+  salesInvoiceId?: string;
+  creditNoteDate?: string;
+  reason?: string;
+  notes?: string;
+  items: CreateSalesCreditNoteLineRequest[];
+}
+
+export interface ReverseSalesCreditNoteRequest {
   reason?: string;
 }

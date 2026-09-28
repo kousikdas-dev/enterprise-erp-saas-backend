@@ -93,7 +93,7 @@ export class AccountsReceivableController {
   @ApiOperation({
     summary: 'Customer AR statement',
     description:
-      'A running-balance statement of INVOICE/PAYMENT lines for one customer, paginated. Permission: accounts-receivable.read.',
+      'A running-balance statement of INVOICE/PAYMENT/SALES_CREDIT_NOTE/SALES_CREDIT_NOTE_REVERSAL lines for one customer, paginated. Permission: accounts-receivable.read.',
   })
   @ApiOkResponse({ type: CustomerArStatementDto })
   @ApiManagementErrors()

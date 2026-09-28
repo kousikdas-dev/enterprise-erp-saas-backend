@@ -76,6 +76,19 @@ export class AccountsReceivableService {
       outstandingCounts.map((row) => [row.customerId, row._count._all]),
     );
 
+    // Phase 3.14 — only currently-POSTED (not REVERSED) standalone Credit
+    // Notes reduce AR; a REVERSED one is excluded entirely rather than
+    // netted. Deliberately separate from totalCredited above (SalesReturn's
+    // own amountCredited sum) — a Credit Note is not a SalesReturn.
+    const creditNoteGroups = await this.prisma.salesCreditNote.groupBy({
+      by: ['customerId'],
+      where: { tenantId: actor.tenantId, status: 'POSTED' },
+      _sum: { total: true },
+    });
+    const creditNotesByCustomer = new Map(
+      creditNoteGroups.map((row) => [row.customerId, row._sum.total ?? ZERO]),
+    );
+
     const customerIds = grouped.map((row) => row.customerId);
     const customers = await this.prisma.customer.findMany({
       where: { tenantId: actor.tenantId, id: { in: customerIds } },
@@ -88,6 +101,7 @@ export class AccountsReceivableService {
       const totalInvoiced = row._sum.total ?? ZERO;
       const totalPaid = row._sum.amountPaid ?? ZERO;
       const totalCredited = row._sum.amountCredited ?? ZERO;
+      const totalCreditNotes = creditNotesByCustomer.get(row.customerId) ?? ZERO;
       return {
         customerId: row.customerId,
         customerCode: customer?.code ?? '',
@@ -95,13 +109,18 @@ export class AccountsReceivableService {
         totalInvoiced,
         totalPaid,
         totalCredited,
+        totalCreditNotes,
         outstandingInvoiceCount: outstandingCountByCustomer.get(row.customerId) ?? 0,
       };
     });
 
     const filtered = onlyOutstanding
       ? rows.filter((row) =>
-          row.totalInvoiced.minus(row.totalPaid).minus(row.totalCredited).greaterThan(0),
+          row.totalInvoiced
+            .minus(row.totalPaid)
+            .minus(row.totalCredited)
+            .minus(row.totalCreditNotes)
+            .greaterThan(0),
         )
       : rows;
 
@@ -131,6 +150,10 @@ export class AccountsReceivableService {
         paymentStatus: { not: 'PAID' },
       },
     });
+    const creditNoteAgg = await this.prisma.salesCreditNote.aggregate({
+      where: { tenantId: actor.tenantId, customerId, status: 'POSTED' },
+      _sum: { total: true },
+    });
 
     return toCustomerArSummary({
       customerId: customer.id,
@@ -139,6 +162,7 @@ export class AccountsReceivableService {
       totalInvoiced: agg._sum.total ?? ZERO,
       totalPaid: agg._sum.amountPaid ?? ZERO,
       totalCredited: agg._sum.amountCredited ?? ZERO,
+      totalCreditNotes: creditNoteAgg._sum.total ?? ZERO,
       outstandingInvoiceCount,
     });
   }
@@ -319,9 +343,20 @@ export class AccountsReceivableService {
       where: { tenantId: actor.tenantId, status: 'SENT' },
       _sum: { total: true, amountPaid: true, amountCredited: true },
     });
+    // Phase 3.14 — algebraically equivalent to "posted credit notes minus
+    // reversed credit notes" (a credit note that is later reversed no
+    // longer reduces AR): filtering to status POSTED already excludes
+    // REVERSED rows entirely, so there is nothing left to add back. Mirrors
+    // amountCredited's own SalesReturn-maintained running total (never
+    // re-summed from scratch minus a separate reversal total).
+    const creditNoteAgg = await this.prisma.salesCreditNote.aggregate({
+      where: { tenantId: actor.tenantId, status: 'POSTED' },
+      _sum: { total: true },
+    });
     const subledgerTotalOutstanding = (agg._sum.total ?? ZERO)
       .minus(agg._sum.amountPaid ?? ZERO)
-      .minus(agg._sum.amountCredited ?? ZERO);
+      .minus(agg._sum.amountCredited ?? ZERO)
+      .minus(creditNoteAgg._sum.total ?? ZERO);
 
     const mapping = await this.ledgerClient.findAccountsReceivableMapping(actor);
     if (!mapping) {
@@ -366,7 +401,37 @@ export class AccountsReceivableService {
     const invoiceTotal = invoiceAgg._sum.total ?? ZERO;
     const paymentTotal = paymentAgg._sum.amount ?? ZERO;
     const creditTotal = await this.confirmedCreditTotalBefore(actor, customerId, beforeDate);
-    return invoiceTotal.minus(paymentTotal).minus(creditTotal);
+    // Phase 3.14 — mirrors confirmedCreditTotalBefore's role for SalesReturn:
+    // a Credit Note posted before beforeDate always counted against the
+    // balance at that point in time, and if it was ALSO reversed before
+    // beforeDate, the reversal line adds that amount back — regardless of
+    // the credit note's CURRENT status (unlike the current-outstanding
+    // aggregates above, this is a point-in-time balance).
+    const creditNoteAgg = await this.prisma.salesCreditNote.aggregate({
+      where: {
+        tenantId: actor.tenantId,
+        customerId,
+        status: { in: ['POSTED', 'REVERSED'] },
+        creditNoteDate: { lt: beforeDate },
+      },
+      _sum: { total: true },
+    });
+    const creditNoteReversalAgg = await this.prisma.salesCreditNote.aggregate({
+      where: {
+        tenantId: actor.tenantId,
+        customerId,
+        status: 'REVERSED',
+        reversedAt: { lt: beforeDate },
+      },
+      _sum: { total: true },
+    });
+    const creditNoteTotal = creditNoteAgg._sum.total ?? ZERO;
+    const creditNoteReversalTotal = creditNoteReversalAgg._sum.total ?? ZERO;
+    return invoiceTotal
+      .minus(paymentTotal)
+      .minus(creditTotal)
+      .minus(creditNoteTotal)
+      .plus(creditNoteReversalTotal);
   }
 
   /** Sum of each CONFIRMED Sales Return's own AR-side amount (the sum of its
@@ -394,11 +459,21 @@ export class AccountsReceivableService {
     return rows._sum.lineTotal ?? ZERO;
   }
 
-  /** The two-way UNION behind the customer AR statement: every SENT invoice
+  /** The four-way UNION behind the customer AR statement: every SENT invoice
    * (+total, on invoiceDate) as an INVOICE line, every payment (-amount, on
-   * paymentDate) as a PAYMENT line. No PAYMENT_REVERSAL line type — unlike
-   * Supplier Payment, Sales Payment has no reversal lifecycle in this
-   * phase, so there is nothing to offset. */
+   * paymentDate) as a PAYMENT line, every CONFIRMED Sales Return's
+   * invoice-linked lines (-total, on returnedAt) as a CREDIT_NOTE line
+   * (Phase 3.12), and every ever-POSTED standalone Sales Credit Note
+   * (-total, on creditNoteDate, regardless of current status) as a
+   * SALES_CREDIT_NOTE line plus every REVERSED one additionally (+total, on
+   * reversedAt) as a SALES_CREDIT_NOTE_REVERSAL line (Phase 3.14) — the
+   * exact mirror of the PAYMENT/PAYMENT_REVERSAL pair used on the Purchase
+   * side. Deliberately a DISTINCT type from CREDIT_NOTE above: a standalone
+   * Sales Credit Note is not a SalesReturn (see SalesCreditNote's own model
+   * comment). No PAYMENT_REVERSAL line type here — unlike Supplier Payment,
+   * Sales Payment's reversal lifecycle (Phase 3.11) is not yet reflected in
+   * this statement — a pre-existing gap that predates Phase 3.14 and is out
+   * of this phase's scope (documented, not fixed here). */
   private statementLinesCte(
     actor: ActorContext,
     customerId: string,
@@ -466,6 +541,39 @@ export class AccountsReceivableService {
         AND sr."returnedAt" IS NOT NULL
         AND (${fromDate}::timestamptz IS NULL OR sr."returnedAt" >= ${fromDate}::timestamptz)
         AND (${toDateExclusive}::timestamptz IS NULL OR sr."returnedAt" < ${toDateExclusive}::timestamptz)
+
+      UNION ALL
+
+      SELECT
+        scn.id AS id,
+        scn."creditNoteDate" AS date,
+        'SALES_CREDIT_NOTE' AS type,
+        scn."creditNoteNumber" AS reference,
+        scn.reason AS description,
+        -scn.total AS amount
+      FROM sales_credit_notes scn
+      WHERE scn."tenantId" = ${actor.tenantId}::uuid
+        AND scn."customerId" = ${customerId}::uuid
+        AND scn.status IN ('POSTED'::"SalesCreditNoteStatus", 'REVERSED'::"SalesCreditNoteStatus")
+        AND (${fromDate}::timestamptz IS NULL OR scn."creditNoteDate" >= ${fromDate}::timestamptz)
+        AND (${toDateExclusive}::timestamptz IS NULL OR scn."creditNoteDate" < ${toDateExclusive}::timestamptz)
+
+      UNION ALL
+
+      SELECT
+        scn.id AS id,
+        scn."reversedAt" AS date,
+        'SALES_CREDIT_NOTE_REVERSAL' AS type,
+        scn."creditNoteNumber" AS reference,
+        scn."reversalReason" AS description,
+        scn.total AS amount
+      FROM sales_credit_notes scn
+      WHERE scn."tenantId" = ${actor.tenantId}::uuid
+        AND scn."customerId" = ${customerId}::uuid
+        AND scn.status = 'REVERSED'::"SalesCreditNoteStatus"
+        AND scn."reversedAt" IS NOT NULL
+        AND (${fromDate}::timestamptz IS NULL OR scn."reversedAt" >= ${fromDate}::timestamptz)
+        AND (${toDateExclusive}::timestamptz IS NULL OR scn."reversedAt" < ${toDateExclusive}::timestamptz)
     `;
   }
 }

@@ -86,6 +86,10 @@ export class CustomerArSummaryDto {
   @ApiProperty() customerName!: string;
   @ApiProperty() totalInvoiced!: string;
   @ApiProperty() totalPaid!: string;
+  @ApiProperty({
+    description: 'Phase 3.14 — sum of currently-POSTED (not REVERSED) standalone Sales Credit Notes.',
+  })
+  totalCreditNotes!: string;
   @ApiProperty() totalOutstanding!: string;
   @ApiProperty() outstandingInvoiceCount!: number;
 }
@@ -151,9 +155,9 @@ export class ArAgingResultDto {
 export class CustomerArStatementLineDto {
   @ApiProperty() date!: string;
   @ApiProperty({
-    enum: ['INVOICE', 'PAYMENT'],
+    enum: ['INVOICE', 'PAYMENT', 'SALES_CREDIT_NOTE', 'SALES_CREDIT_NOTE_REVERSAL'],
     description:
-      'No PAYMENT_REVERSAL type — Sales Payment has no reversal lifecycle in this phase, unlike Supplier Payment.',
+      'SALES_CREDIT_NOTE / SALES_CREDIT_NOTE_REVERSAL (Phase 3.14) are the standalone Credit Note\'s own pair. No PAYMENT_REVERSAL type — Sales Payment has no reversal lifecycle in this phase, unlike Supplier Payment.',
   })
   type!: string;
   @ApiProperty() reference!: string;

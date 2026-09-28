@@ -62,6 +62,51 @@ class SalesInvoicesRetryProbeController {
   }
 }
 
+@Controller('sales-credit-notes-probe')
+class SalesCreditNotesProbeController {
+  @Post()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_CREDIT_NOTES_CREATE)
+  create(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Get()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_CREDIT_NOTES_READ)
+  list(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('post')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_CREDIT_NOTES_POST)
+  post(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('retry-accounting-posting')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_CREDIT_NOTES_POST)
+  retryPosting(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('reverse')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_CREDIT_NOTES_REVERSE)
+  reverse(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('retry-accounting-reversal')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SALES_CREDIT_NOTES_REVERSE)
+  retryReversal(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 @Controller('sales-invoices-payment-probe')
 class SalesInvoicesPaymentProbeController {
   @Post('retry-accounting-posting')
@@ -106,6 +151,7 @@ describe('sales JWT and RBAC', () => {
         ShipmentsProbeController,
         SalesInvoicesRetryProbeController,
         SalesInvoicesPaymentProbeController,
+        SalesCreditNotesProbeController,
       ],
       providers: [
         JwtStrategy,
@@ -262,5 +308,81 @@ describe('sales JWT and RBAC', () => {
       .post('/shipments-probe/post')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(201);
+  });
+
+  it('requires sales-credit-notes.create to create', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_READ]);
+    await request(server)
+      .post('/sales-credit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_CREATE]);
+    await request(server)
+      .post('/sales-credit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires sales-credit-notes.read to list', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_CREATE]);
+    await request(server)
+      .get('/sales-credit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_READ]);
+    await request(server)
+      .get('/sales-credit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(200);
+  });
+
+  it('requires sales-credit-notes.post to post and to retry accounting posting', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_REVERSE]);
+    await request(server)
+      .post('/sales-credit-notes-probe/post')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+    await request(server)
+      .post('/sales-credit-notes-probe/retry-accounting-posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_POST]);
+    await request(server)
+      .post('/sales-credit-notes-probe/post')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+    await request(server)
+      .post('/sales-credit-notes-probe/retry-accounting-posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires sales-credit-notes.reverse to reverse and to retry accounting reversal', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_POST]);
+    await request(server)
+      .post('/sales-credit-notes-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+    await request(server)
+      .post('/sales-credit-notes-probe/retry-accounting-reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SALES_CREDIT_NOTES_REVERSE]);
+    await request(server)
+      .post('/sales-credit-notes-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+    await request(server)
+      .post('/sales-credit-notes-probe/retry-accounting-reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('returns 401 without JWT on the sales-credit-notes probe', async () => {
+    await request(server).get('/sales-credit-notes-probe').expect(401);
   });
 });

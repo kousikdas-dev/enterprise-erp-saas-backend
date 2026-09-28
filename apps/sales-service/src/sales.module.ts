@@ -12,6 +12,7 @@ import { QuotationsModule } from './quotations/quotations.module';
 import { SalesInvoicesModule } from './sales-invoices/sales-invoices.module';
 import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { SalesReturnsModule } from './sales-returns/sales-returns.module';
+import { SalesCreditNotesModule } from './sales-credit-notes/sales-credit-notes.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 
 @Module({
@@ -32,6 +33,7 @@ import { ShipmentsModule } from './shipments/shipments.module';
     SalesOrdersModule,
     ShipmentsModule,
     SalesReturnsModule,
+    SalesCreditNotesModule,
     AccountsReceivableModule,
     MessagingModule.register(),
   ],

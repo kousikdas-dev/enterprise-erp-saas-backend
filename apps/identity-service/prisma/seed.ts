@@ -432,6 +432,26 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Reverse sales returns / credit notes and retry their accounting reversal',
   },
   {
+    resource: 'sales-credit-notes',
+    action: 'create',
+    description: 'Create standalone sales credit notes',
+  },
+  {
+    resource: 'sales-credit-notes',
+    action: 'read',
+    description: 'Read standalone sales credit notes',
+  },
+  {
+    resource: 'sales-credit-notes',
+    action: 'post',
+    description: 'Post standalone sales credit notes and retry their accounting posting',
+  },
+  {
+    resource: 'sales-credit-notes',
+    action: 'reverse',
+    description: 'Reverse standalone sales credit notes and retry their accounting reversal',
+  },
+  {
     resource: 'accounts-receivable',
     action: 'read',
     description: 'Read Accounts Receivable customer summaries, invoice ledger, aging, statements, and GL reconciliation',
