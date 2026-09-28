@@ -45,6 +45,15 @@ export class CreateStockAdjustmentDto {
   @IsString()
   quantity!: string;
 
+  @ApiPropertyOptional({
+    example: '12.50',
+    description:
+      'Required for ADJUSTMENT_IN (there is no other source of cost for stock entering via this endpoint). Must be omitted for ADJUSTMENT_OUT, whose cost is always the current moving average, computed server-side.',
+  })
+  @IsOptional()
+  @IsString()
+  unitCost?: string;
+
   @ApiPropertyOptional({ example: 'Physical stock count' })
   @IsOptional()
   @IsString()
@@ -152,6 +161,12 @@ export class StockMovementDto {
 
   @ApiProperty()
   createdAt!: string;
+
+  @ApiProperty({ enum: ['NOT_POSTED', 'POSTED', 'FAILED'] })
+  accountingPostingStatus!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  journalEntryId!: string | null;
 }
 
 export class StockMovementListDto {

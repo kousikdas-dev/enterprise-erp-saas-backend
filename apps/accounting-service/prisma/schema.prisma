@@ -73,6 +73,18 @@ enum AccountMappingPurpose {
   GOODS_RECEIVED_NOT_INVOICED
   PURCHASE_PRICE_VARIANCE
   OPENING_BALANCE_EQUITY
+  // Phase 3.15 (Inventory Adjustment Accounting) — the contra account for a
+  // Stock Adjustment (ADJUSTMENT_IN/ADJUSTMENT_OUT) journal's non-Inventory-
+  // Asset side (shrinkage, found stock, damage write-off, and similar pure
+  // inventory-valuation corrections). None of the five inventory purposes
+  // above fit: INVENTORY_ASSET is the debit/credit target itself (not the
+  // offset), COGS/GOODS_RECEIVED_NOT_INVOICED/PURCHASE_PRICE_VARIANCE are
+  // each scoped to a specific existing document flow (shipment/receipt/
+  // invoice matching), and OPENING_BALANCE_EQUITY is specifically for
+  // Opening Stock's own equity contra-account. Resolves through the
+  // existing AccountMapping mechanism exactly like every purpose above —
+  // no new resolution logic.
+  INVENTORY_ADJUSTMENT
 }
 
 model Account {

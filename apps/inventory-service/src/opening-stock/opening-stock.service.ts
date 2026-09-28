@@ -1,14 +1,20 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  OpeningStockPostingStatus,
   OpeningStockStatus,
   Prisma,
   StockMovementType,
 } from '../../generated/prisma-client';
+import {
+  AccountingJournalClient,
+  CreateJournalPostingRequest,
+} from '../accounting/accounting-journal.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
 import {
@@ -27,6 +33,16 @@ import {
 } from './dto/opening-stock.dto';
 
 const REFERENCE_TYPE = 'opening_stock';
+const ACCOUNTING_SOURCE_SERVICE = 'inventory-service';
+
+/** Minimal shape needed to build an OpeningStock's accounting posting
+ * request — one line per product+warehouse, only unitCost/baseQuantity are
+ * ever read. */
+interface OpeningStockPostingSource {
+  id: string;
+  documentNumber: string;
+  lines: Array<{ baseQuantity: Prisma.Decimal; unitCost: Prisma.Decimal | null }>;
+}
 
 const LINE_INCLUDE = { lines: { orderBy: { createdAt: 'asc' as const } } };
 
@@ -57,9 +73,12 @@ function sortedPairs(
 
 @Injectable()
 export class OpeningStockService {
+  private readonly logger = new Logger(OpeningStockService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: IdentityAuditClient,
+    private readonly accountingJournal: AccountingJournalClient,
   ) {}
 
   async create(
@@ -409,7 +428,23 @@ export class OpeningStockService {
       });
     }
 
-    return this.toResponse(header, { code: outcome.alreadyPosted ? 'OPENING_ALREADY_POSTED' : undefined });
+    // Post-commit, best-effort (Phase 3.15): accounting-service is a
+    // separate database, so this is never attempted inside the transaction
+    // above. A failure here never fails post() itself — the document is
+    // already, correctly, POSTED regardless of accounting's availability;
+    // only accountingPostingStatus reflects the outcome, retryable via
+    // retryAccountingPosting(). Skipped entirely on an idempotent replay
+    // (alreadyPosted) — a second attempt would just idempotently replay the
+    // same accounting-service call anyway, but there is nothing new to do.
+    let finalHeader = header;
+    if (!outcome.alreadyPosted) {
+      const { openingStock } = await this.attemptOpeningStockPosting(actor, header, request);
+      finalHeader = openingStock;
+    }
+
+    return this.toResponse(finalHeader, {
+      code: outcome.alreadyPosted ? 'OPENING_ALREADY_POSTED' : undefined,
+    });
   }
 
   /**
@@ -585,9 +620,275 @@ export class OpeningStockService {
       });
     }
 
-    return this.toResponse(header, {
+    // Reversal itself is already committed and correct at this point,
+    // independent of everything below (same principle as
+    // GoodsReceiptsService.reverse() / PurchaseInvoicesService.cancel()).
+    //
+    // - accountingPostingStatus POSTED (a journal really was posted): the
+    //   only case with anything to reverse — attempt it, post-commit,
+    //   best-effort.
+    // - NOT_POSTED or FAILED: there is no posted journal to reverse — do
+    //   nothing accounting-side, leave the status exactly as it was.
+    // - Skipped entirely on an idempotent replay (alreadyReversed).
+    let finalHeader = header;
+    if (
+      !outcome.alreadyReversed &&
+      header.accountingPostingStatus === OpeningStockPostingStatus.POSTED &&
+      header.journalEntryId
+    ) {
+      const { openingStock } = await this.attemptOpeningStockReversal(actor, header, request);
+      finalHeader = openingStock;
+    }
+
+    return this.toResponse(finalHeader, {
       code: outcome.alreadyReversed ? 'OPENING_ALREADY_REVERSED' : undefined,
     });
+  }
+
+  /**
+   * Manual retry for a POSTED document whose accounting posting is
+   * currently FAILED (or never attempted). Rejected once the document is
+   * REVERSED — posting a fresh journal for a reversed opening balance would
+   * create a real Inventory Asset effect for a document the business no
+   * longer considers valid. Already-POSTED is a no-op (never calls
+   * accounting-service again). Unlike post()'s post-commit best-effort
+   * call, a failure here is surfaced to the caller. Mirrors
+   * GoodsReceiptsService.retryAccountingPosting() exactly.
+   */
+  async retryAccountingPosting(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+    if (existing.status === OpeningStockStatus.REVERSED) {
+      throw new ConflictException(
+        'Cannot post accounting for a reversed opening stock document',
+      );
+    }
+    if (existing.accountingPostingStatus === OpeningStockPostingStatus.POSTED) {
+      return this.toResponse(existing);
+    }
+
+    const { openingStock, error } = await this.attemptOpeningStockPosting(
+      actor,
+      existing,
+      request,
+    );
+    if (error) throw error;
+
+    await this.audit.record({
+      actor,
+      action: 'opening_stock.accounting-posting-retried',
+      resource: 'opening_stock',
+      resourceId: openingStock.id,
+      metadata: { journalEntryId: openingStock.journalEntryId },
+      request,
+    });
+
+    return this.toResponse(openingStock);
+  }
+
+  /**
+   * Manual retry for a REVERSED document whose accounting reversal
+   * (attempted post-commit inside reverse()) failed. Distinguishes
+   * accountingPostingStatus POSTED (a journal really was posted and never
+   * got reversed — the only case with anything to retry) from FAILED/
+   * NOT_POSTED (there was never a posted journal to reverse — a 409, not a
+   * silent no-op). Already-REVERSED (accounting-wise) is a harmless no-op.
+   * Mirrors GoodsReceiptsService.retryAccountingReversal() exactly.
+   */
+  async retryAccountingReversal(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+    if (existing.status !== OpeningStockStatus.REVERSED) {
+      throw new ConflictException(
+        'Only a REVERSED opening stock document can have its accounting reversal retried',
+      );
+    }
+    if (existing.accountingPostingStatus === OpeningStockPostingStatus.REVERSED) {
+      return this.toResponse(existing);
+    }
+    if (
+      existing.accountingPostingStatus !== OpeningStockPostingStatus.POSTED ||
+      !existing.journalEntryId
+    ) {
+      throw new ConflictException(
+        'This opening stock document has no posted accounting journal to reverse',
+      );
+    }
+
+    const { openingStock, error } = await this.attemptOpeningStockReversal(
+      actor,
+      existing,
+      request,
+    );
+    if (error) throw error;
+
+    await this.audit.record({
+      actor,
+      action: 'opening_stock.accounting-reversal-retried',
+      resource: 'opening_stock',
+      resourceId: openingStock.id,
+      metadata: { reversalJournalEntryId: openingStock.reversalJournalEntryId },
+      request,
+    });
+
+    return this.toResponse(openingStock);
+  }
+
+  /**
+   * GRNI-style accrual, but for opening balances: Dr INVENTORY_ASSET /
+   * Cr OPENING_BALANCE_EQUITY, summed across every line that carries a
+   * unitCost. Lines with no unitCost contribute 0 (mirrors
+   * GoodsReceiptsService.buildGrniPostingRequest()'s own "cost is optional,
+   * a missing one simply contributes nothing" convention exactly). Returns
+   * null when there is nothing postable (every line costless) — the caller
+   * leaves accountingPostingStatus at NOT_POSTED rather than posting a
+   * zero-amount journal.
+   */
+  private buildOpeningStockPostingRequest(
+    openingStock: OpeningStockPostingSource,
+  ): CreateJournalPostingRequest | null {
+    let total = new Prisma.Decimal(0);
+    for (const line of openingStock.lines) {
+      if (!line.unitCost) continue;
+      total = total.plus(line.baseQuantity.mul(line.unitCost));
+    }
+    if (total.lte(0)) return null;
+
+    return {
+      sourceService: ACCOUNTING_SOURCE_SERVICE,
+      sourceType: 'OPENING_STOCK',
+      sourceId: openingStock.id,
+      description: `Opening Stock ${openingStock.documentNumber}`,
+      lines: [
+        { role: 'INVENTORY_ASSET', side: 'DEBIT', amount: moneyToString(total) },
+        { role: 'OPENING_BALANCE_EQUITY', side: 'CREDIT', amount: moneyToString(total) },
+      ],
+    };
+  }
+
+  /**
+   * Attempts to post (or idempotently replay) this document's accounting
+   * journal and persists the outcome as an Inventory-side cache — never
+   * throws: the caller decides whether a failure should be surfaced
+   * (retryAccountingPosting does; post()'s post-commit call does not).
+   * Mirrors GoodsReceiptsService.attemptGrniPosting() exactly.
+   */
+  private async attemptOpeningStockPosting<
+    T extends OpeningStockPostingSource & { id: string },
+  >(actor: ActorContext, openingStock: T, request?: RequestAuditMeta) {
+    const postingRequest = this.buildOpeningStockPostingRequest(openingStock);
+    if (!postingRequest) {
+      return { openingStock, error: undefined as unknown };
+    }
+
+    try {
+      const result = await this.accountingJournal.post(actor, postingRequest);
+      const updated = await this.prisma.openingStock.update({
+        where: { id: openingStock.id },
+        data: {
+          accountingPostingStatus: OpeningStockPostingStatus.POSTED,
+          journalEntryId: result.id,
+        },
+        include: LINE_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'opening_stock.accounting-posted',
+        resource: 'opening_stock',
+        resourceId: openingStock.id,
+        metadata: { journalEntryId: result.id, idempotentReplay: result.idempotentReplay },
+        request,
+      });
+      return { openingStock: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to post accounting journal for opening stock ${openingStock.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      try {
+        await this.prisma.openingStock.update({
+          where: { id: openingStock.id },
+          data: { accountingPostingStatus: OpeningStockPostingStatus.FAILED },
+        });
+      } catch (updateError) {
+        this.logger.error(
+          `Failed to record FAILED accounting posting status for opening stock ${openingStock.id}`,
+          updateError instanceof Error ? updateError.stack : undefined,
+        );
+      }
+      const refreshed = await this.require(actor, openingStock.id);
+      return { openingStock: refreshed, error };
+    }
+  }
+
+  /**
+   * Attempts to reverse (or idempotently replay the reversal of) this
+   * document's already-POSTED accounting journal. The original journal
+   * entry is never touched — looked up read-only inside accounting-service
+   * and stays POSTED permanently (no VOID). On failure,
+   * accountingPostingStatus is deliberately left at POSTED so
+   * retryAccountingReversal() can recover it. Mirrors
+   * GoodsReceiptsService's own reversal-attempt helper exactly.
+   */
+  private async attemptOpeningStockReversal(
+    actor: ActorContext,
+    openingStock: { id: string; documentNumber: string },
+    request?: RequestAuditMeta,
+  ) {
+    try {
+      const result = await this.accountingJournal.reverse(actor, {
+        sourceService: ACCOUNTING_SOURCE_SERVICE,
+        sourceType: 'OPENING_STOCK',
+        sourceId: openingStock.id,
+        reversalSourceType: 'OPENING_STOCK_REVERSAL',
+        description: `Reversal of Opening Stock ${openingStock.documentNumber}`,
+      });
+      const updated = await this.prisma.openingStock.update({
+        where: { id: openingStock.id },
+        data: {
+          accountingPostingStatus: OpeningStockPostingStatus.REVERSED,
+          reversalJournalEntryId: result.id,
+        },
+        include: LINE_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'opening_stock.accounting-reversed',
+        resource: 'opening_stock',
+        resourceId: openingStock.id,
+        metadata: {
+          reversalJournalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { openingStock: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse accounting journal for reversed opening stock ${openingStock.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      const refreshed = await this.require(actor, openingStock.id);
+      return { openingStock: refreshed, error };
+    }
+  }
+
+  /** Tenant-scoped lookup for retry endpoints — mirrors this service's own
+   * getById() but returns the raw row (with LINE_INCLUDE) rather than the
+   * mapped response. */
+  private async require(actor: ActorContext, id: string) {
+    const row = await this.prisma.openingStock.findFirst({
+      where: { id, tenantId: actor.tenantId },
+      include: LINE_INCLUDE,
+    });
+    if (!row) throw new NotFoundException('Opening stock document not found');
+    return row;
   }
 
   /** Locks the header row for any DRAFT-only mutation (update/addLine/removeLine). */
@@ -744,6 +1045,9 @@ export class OpeningStockService {
       createdBy: string;
       createdAt: Date;
       updatedAt: Date;
+      accountingPostingStatus: OpeningStockPostingStatus;
+      journalEntryId: string | null;
+      reversalJournalEntryId: string | null;
       lines: Array<{
         id: string;
         productId: string;
@@ -776,6 +1080,9 @@ export class OpeningStockService {
       createdBy: row.createdBy,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      accountingPostingStatus: row.accountingPostingStatus,
+      journalEntryId: row.journalEntryId,
+      reversalJournalEntryId: row.reversalJournalEntryId,
       lines: row.lines.map((line) => ({
         id: line.id,
         productId: line.productId,

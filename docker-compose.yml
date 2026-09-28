@@ -112,6 +112,10 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
       RABBITMQ_QUEUE: inventory.events
       IDENTITY_SERVICE_URL: http://identity-service:3001
+      # Phase 3.15 (Inventory Adjustment Accounting) — Stock Adjustment /
+      # Opening Stock journals are posted directly to accounting-service,
+      # mirroring purchase-service's/sales-service's own identical override.
+      ACCOUNTING_SERVICE_URL: http://accounting-service:3004
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
       LOG_LEVEL: info
     # Gateway reaches this at http://inventory-service:3003 (container network).
@@ -127,6 +131,8 @@ services:
       rabbitmq:
         condition: service_healthy
       identity-service:
+        condition: service_started
+      accounting-service:
         condition: service_started
 
   accounting-service:

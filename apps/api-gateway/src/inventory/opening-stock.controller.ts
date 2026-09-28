@@ -217,6 +217,59 @@ export class OpeningStockController {
     return result;
   }
 
+  @Post(':id/retry-accounting-posting')
+  @RequirePermissions(PERMISSIONS.OPENING_STOCK_POST)
+  @ApiOperation({
+    summary: 'Retry opening stock accounting posting',
+    description:
+      'Retries posting the accounting journal for a POSTED document whose posting previously failed. No-op if already POSTED. Permission: opening-stock.post.',
+  })
+  @ApiOkResponse({ type: OpeningStockDto })
+  @ApiConflictResponse({
+    description: 'Cannot post accounting for a reversed opening stock document',
+  })
+  @ApiManagementErrors()
+  retryAccountingPosting(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<OpeningStockDto> {
+    return this.inventory.forward<OpeningStockDto>({
+      method: 'POST',
+      path: `/api/v1/opening-stock/${id}/retry-accounting-posting`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.OPENING_STOCK_REVERSE)
+  @ApiOperation({
+    summary: 'Retry opening stock accounting reversal',
+    description:
+      'Retries reversing the accounting journal for a REVERSED document whose accounting reversal previously failed. No-op if already reversed. Permission: opening-stock.reverse.',
+  })
+  @ApiOkResponse({ type: OpeningStockDto })
+  @ApiConflictResponse({
+    description:
+      'Only a REVERSED opening stock document can have its accounting reversal retried, or it has no posted accounting journal to reverse',
+  })
+  @ApiManagementErrors()
+  retryAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<OpeningStockDto> {
+    return this.inventory.forward<OpeningStockDto>({
+      method: 'POST',
+      path: `/api/v1/opening-stock/${id}/retry-accounting-reversal`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
   @Post(':id/reverse')
   @RequirePermissions(PERMISSIONS.OPENING_STOCK_REVERSE)
   @ApiOperation({

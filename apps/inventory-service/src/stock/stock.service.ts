@@ -1,9 +1,13 @@
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { Prisma, StockMovementType } from '../../generated/prisma-client';
+  Prisma,
+  StockMovementPostingStatus,
+  StockMovementType,
+} from '../../generated/prisma-client';
+import {
+  AccountingJournalClient,
+  CreateJournalPostingRequest,
+} from '../accounting/accounting-journal.client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ActorContext, RequestAuditMeta } from '../auth/actor-context';
 import {
@@ -20,11 +24,38 @@ import {
   StockQueryDto,
 } from './dto/stock.dto';
 
+const ACCOUNTING_SOURCE_SERVICE = 'inventory-service';
+
+/** The full StockMovement row shape used throughout this service — shared
+ * by toMovement(), buildAdjustmentPostingRequest(), and
+ * attemptAdjustmentPosting() so a single object flows through all three
+ * without narrowing/widening type mismatches. */
+interface StockMovementRow {
+  id: string;
+  tenantId: string;
+  productId: string;
+  warehouseId: string;
+  type: StockMovementType;
+  quantity: Prisma.Decimal;
+  referenceType: string | null;
+  referenceId: string | null;
+  reason: string | null;
+  createdBy: string;
+  createdAt: Date;
+  unitCost: Prisma.Decimal | null;
+  totalCost: Prisma.Decimal | null;
+  accountingPostingStatus: StockMovementPostingStatus;
+  journalEntryId: string | null;
+}
+
 @Injectable()
 export class StockService {
+  private readonly logger = new Logger(StockService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: IdentityAuditClient,
+    private readonly accountingJournal: AccountingJournalClient,
   ) {}
 
   async list(actor: ActorContext, query: StockQueryDto) {
@@ -203,6 +234,19 @@ export class StockService {
       request,
     });
 
+    // Post-commit, best-effort (Phase 3.15): accounting-service is a
+    // separate database, so this is never attempted inside the transaction
+    // above. A failure here never fails adjust() itself — the movement/stock
+    // are already, correctly, written regardless of accounting's
+    // availability; only the movement's own accountingPostingStatus reflects
+    // the outcome, retryable via retryAccountingPosting(). Mirrors
+    // PurchaseInvoicesService.confirm()'s post-commit call exactly.
+    const { movement: finalMovement } = await this.attemptAdjustmentPosting(
+      actor,
+      result.movement,
+      request,
+    );
+
     return {
       stock: {
         id: result.stock.id,
@@ -214,8 +258,149 @@ export class StockService {
         createdAt: result.stock.createdAt,
         updatedAt: result.stock.updatedAt,
       },
-      movement: this.toMovement(result.movement),
+      movement: this.toMovement(finalMovement),
     };
+  }
+
+  /**
+   * Manual retry for an ADJUSTMENT_IN/ADJUSTMENT_OUT movement whose
+   * accounting posting is currently FAILED (or never attempted). Rejected
+   * for any other movement type — including the ADJUSTMENT_OUT movements
+   * OpeningStockService.reverse() creates internally, which never carry an
+   * accounting cache of their own (see StockMovementPostingStatus's own
+   * schema comment). Already-POSTED is a no-op (never calls
+   * accounting-service again) rather than an error. Unlike adjust()'s
+   * post-commit best-effort call, a failure here is surfaced to the caller:
+   * retrying IS the primary action being requested. Mirrors
+   * PurchaseInvoicesService.retryAccountingPosting() exactly.
+   */
+  async retryAccountingPosting(
+    actor: ActorContext,
+    movementId: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.prisma.stockMovement.findFirst({
+      where: { id: movementId, tenantId: actor.tenantId },
+    });
+    if (!existing) throw new NotFoundException('Stock movement not found');
+    if (
+      existing.type !== StockMovementType.ADJUSTMENT_IN &&
+      existing.type !== StockMovementType.ADJUSTMENT_OUT
+    ) {
+      throw new ConflictException(
+        'Only an ADJUSTMENT_IN or ADJUSTMENT_OUT movement can have its accounting posting retried',
+      );
+    }
+    if (existing.accountingPostingStatus === StockMovementPostingStatus.POSTED) {
+      return this.toMovement(existing);
+    }
+
+    const { movement, error } = await this.attemptAdjustmentPosting(actor, existing, request);
+    if (error) throw error;
+
+    await this.audit.record({
+      actor,
+      action: 'stock.accounting-posting-retried',
+      resource: 'stock-movement',
+      resourceId: movement.id,
+      metadata: { journalEntryId: movement.journalEntryId },
+      request,
+    });
+
+    return this.toMovement(movement);
+  }
+
+  /**
+   * Dr INVENTORY_ASSET / Cr INVENTORY_ADJUSTMENT for ADJUSTMENT_IN (stock
+   * value increases); the exact mirror for ADJUSTMENT_OUT. Reuses the
+   * existing INVENTORY_ASSET role (already provisioned for GRNI/COGS) and
+   * the new INVENTORY_ADJUSTMENT contra role — no other purpose fits a
+   * generic inventory valuation correction (see the schema's own
+   * AccountMappingPurpose.INVENTORY_ADJUSTMENT comment). Returns null when
+   * there is nothing postable (a zero-value adjustment — e.g. ADJUSTMENT_OUT
+   * against stock that was already valued at 0), mirroring the repo-wide
+   * "never post a zero-amount journal" convention.
+   */
+  private buildAdjustmentPostingRequest(
+    movement: StockMovementRow,
+  ): CreateJournalPostingRequest | null {
+    if (!movement.totalCost || movement.totalCost.lte(0)) return null;
+    const amount = moneyToString(movement.totalCost);
+
+    const lines: CreateJournalPostingRequest['lines'] =
+      movement.type === StockMovementType.ADJUSTMENT_IN
+        ? [
+            { role: 'INVENTORY_ASSET', side: 'DEBIT', amount },
+            { role: 'INVENTORY_ADJUSTMENT', side: 'CREDIT', amount },
+          ]
+        : [
+            { role: 'INVENTORY_ADJUSTMENT', side: 'DEBIT', amount },
+            { role: 'INVENTORY_ASSET', side: 'CREDIT', amount },
+          ];
+
+    return {
+      sourceService: ACCOUNTING_SOURCE_SERVICE,
+      sourceType: 'STOCK_ADJUSTMENT',
+      sourceId: movement.id,
+      description: `Stock Adjustment ${movement.id}`,
+      lines,
+    };
+  }
+
+  /**
+   * Attempts to post (or idempotently replay) a Stock Adjustment movement's
+   * accounting journal and persists the outcome as an Inventory-side cache
+   * — never throws: the caller decides whether a failure should be surfaced
+   * (retryAccountingPosting does; adjust()'s post-commit call does not).
+   * Mirrors PurchaseInvoicesService.attemptInvoicePosting() exactly.
+   */
+  private async attemptAdjustmentPosting(
+    actor: ActorContext,
+    movement: StockMovementRow,
+    request?: RequestAuditMeta,
+  ) {
+    const postingRequest = this.buildAdjustmentPostingRequest(movement);
+    if (!postingRequest) {
+      return { movement, error: undefined as unknown };
+    }
+
+    try {
+      const result = await this.accountingJournal.post(actor, postingRequest);
+      const updated = await this.prisma.stockMovement.update({
+        where: { id: movement.id },
+        data: {
+          accountingPostingStatus: StockMovementPostingStatus.POSTED,
+          journalEntryId: result.id,
+        },
+      });
+      await this.audit.record({
+        actor,
+        action: 'stock.accounting-posted',
+        resource: 'stock-movement',
+        resourceId: movement.id,
+        metadata: { journalEntryId: result.id, idempotentReplay: result.idempotentReplay },
+        request,
+      });
+      return { movement: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to post accounting journal for stock movement ${movement.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      let updated = movement;
+      try {
+        updated = await this.prisma.stockMovement.update({
+          where: { id: movement.id },
+          data: { accountingPostingStatus: StockMovementPostingStatus.FAILED },
+        });
+      } catch (updateError) {
+        this.logger.error(
+          `Failed to record FAILED accounting posting status for stock movement ${movement.id}`,
+          updateError instanceof Error ? updateError.stack : undefined,
+        );
+      }
+      return { movement: updated, error };
+    }
   }
 
   private dateRange(from?: string, to?: string) {
@@ -226,21 +411,7 @@ export class StockService {
     return range;
   }
 
-  private toMovement(row: {
-    id: string;
-    tenantId: string;
-    productId: string;
-    warehouseId: string;
-    type: StockMovementType;
-    quantity: Prisma.Decimal;
-    referenceType: string | null;
-    referenceId: string | null;
-    reason: string | null;
-    createdBy: string;
-    createdAt: Date;
-    unitCost: Prisma.Decimal | null;
-    totalCost: Prisma.Decimal | null;
-  }) {
+  private toMovement(row: StockMovementRow) {
     return {
       id: row.id,
       tenantId: row.tenantId,
@@ -258,6 +429,11 @@ export class StockService {
       // legacy pre-Phase-2 movement rows.
       unitCost: row.unitCost ? moneyToString(row.unitCost) : null,
       totalCost: row.totalCost ? moneyToString(row.totalCost) : null,
+      // Phase 3.15 (Inventory Adjustment Accounting) — populated only for
+      // ADJUSTMENT_IN/ADJUSTMENT_OUT movements created via adjust(); every
+      // other movement type stays at its NOT_POSTED/null default.
+      accountingPostingStatus: row.accountingPostingStatus,
+      journalEntryId: row.journalEntryId,
     };
   }
 }

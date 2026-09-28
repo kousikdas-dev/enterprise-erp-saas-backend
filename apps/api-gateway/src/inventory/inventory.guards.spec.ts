@@ -38,6 +38,39 @@ class StockAdjustProbeController {
   }
 }
 
+// Phase 3.15 — these retry routes deliberately reuse the same permission as
+// the action they retry (stock.adjust / opening-stock.post /
+// opening-stock.reverse), never a dedicated new permission.
+@Controller('stock-retry-accounting-probe')
+class StockRetryAccountingProbeController {
+  @Post()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STOCK_ADJUST)
+  retry(): { ok: true } {
+    return { ok: true };
+  }
+}
+
+@Controller('opening-stock-retry-posting-probe')
+class OpeningStockRetryPostingProbeController {
+  @Post()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.OPENING_STOCK_POST)
+  retry(): { ok: true } {
+    return { ok: true };
+  }
+}
+
+@Controller('opening-stock-retry-reversal-probe')
+class OpeningStockRetryReversalProbeController {
+  @Post()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.OPENING_STOCK_REVERSE)
+  retry(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 describe('inventory JWT and RBAC', () => {
   const secret = 'test-access-secret-change-me';
   let app: INestApplication;
@@ -53,7 +86,13 @@ describe('inventory JWT and RBAC', () => {
         PassportModule.register({ defaultStrategy: 'jwt' }),
         JwtModule.register({ secret }),
       ],
-      controllers: [ProductsProbeController, StockAdjustProbeController],
+      controllers: [
+        ProductsProbeController,
+        StockAdjustProbeController,
+        StockRetryAccountingProbeController,
+        OpeningStockRetryPostingProbeController,
+        OpeningStockRetryReversalProbeController,
+      ],
       providers: [
         JwtStrategy,
         JwtAuthGuard,
@@ -130,5 +169,55 @@ describe('inventory JWT and RBAC', () => {
       .post('/stock-adjust-probe')
       .set('Authorization', `Bearer ${token}`)
       .expect(201);
+  });
+
+  describe('Phase 3.15 — accounting retry routes reuse existing permissions', () => {
+    it('the stock-movement retry route is gated by stock.adjust, not a new permission', async () => {
+      getPermissionKeys.mockResolvedValue([]);
+      const noPerm = signAccess({ email: 'viewer@demo.local' });
+      await request(server)
+        .post('/stock-retry-accounting-probe')
+        .set('Authorization', `Bearer ${noPerm}`)
+        .expect(403);
+
+      getPermissionKeys.mockResolvedValue([PERMISSIONS.STOCK_ADJUST]);
+      const withPerm = signAccess();
+      await request(server)
+        .post('/stock-retry-accounting-probe')
+        .set('Authorization', `Bearer ${withPerm}`)
+        .expect(201);
+    });
+
+    it('the opening-stock retry-posting route is gated by opening-stock.post, not a new permission', async () => {
+      getPermissionKeys.mockResolvedValue([]);
+      const noPerm = signAccess({ email: 'viewer@demo.local' });
+      await request(server)
+        .post('/opening-stock-retry-posting-probe')
+        .set('Authorization', `Bearer ${noPerm}`)
+        .expect(403);
+
+      getPermissionKeys.mockResolvedValue([PERMISSIONS.OPENING_STOCK_POST]);
+      const withPerm = signAccess();
+      await request(server)
+        .post('/opening-stock-retry-posting-probe')
+        .set('Authorization', `Bearer ${withPerm}`)
+        .expect(201);
+    });
+
+    it('the opening-stock retry-reversal route is gated by opening-stock.reverse, not a new permission', async () => {
+      getPermissionKeys.mockResolvedValue([]);
+      const noPerm = signAccess({ email: 'viewer@demo.local' });
+      await request(server)
+        .post('/opening-stock-retry-reversal-probe')
+        .set('Authorization', `Bearer ${noPerm}`)
+        .expect(403);
+
+      getPermissionKeys.mockResolvedValue([PERMISSIONS.OPENING_STOCK_REVERSE]);
+      const withPerm = signAccess();
+      await request(server)
+        .post('/opening-stock-retry-reversal-probe')
+        .set('Authorization', `Bearer ${withPerm}`)
+        .expect(201);
+    });
   });
 });

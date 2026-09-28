@@ -99,6 +99,24 @@ export class OpeningStockController {
     return result;
   }
 
+  @Post(':id/retry-accounting-posting')
+  retryAccountingPosting(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.openingStock.retryAccountingPosting(actor, id, requestAuditMeta(request));
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  retryAccountingReversal(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.openingStock.retryAccountingReversal(actor, id, requestAuditMeta(request));
+  }
+
   @Post(':id/reverse')
   async reverse(
     @CurrentActor() actor: ActorContext,

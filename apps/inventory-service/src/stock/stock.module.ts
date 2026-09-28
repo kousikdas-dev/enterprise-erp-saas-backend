@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AccountingClientModule } from '../accounting/accounting-client.module';
 import { InternalServiceGuard } from '../auth/internal-service.guard';
 import { InternalStockIssuesController } from './internal-stock-issues.controller';
 import { InternalStockReceiptsController } from './internal-stock-receipts.controller';
@@ -10,6 +11,7 @@ import { StockReturnsService } from './stock-returns.service';
 import { StockService } from './stock.service';
 
 @Module({
+  imports: [AccountingClientModule],
   controllers: [
     StockController,
     InternalStockReceiptsController,

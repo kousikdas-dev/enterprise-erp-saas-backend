@@ -21,10 +21,22 @@ describe('OpeningStockService', () => {
     return new Prisma.Decimal(v);
   }
 
-  function buildService(overrides?: { prisma?: object; audit?: object }) {
+  function defaultAccountingJournal() {
+    return {
+      post: jest.fn().mockResolvedValue({ id: 'journal-1', idempotentReplay: false }),
+      reverse: jest.fn().mockResolvedValue({ id: 'journal-1-reversal', idempotentReplay: false }),
+    };
+  }
+
+  function buildService(overrides?: {
+    prisma?: object;
+    audit?: object;
+    accountingJournal?: object;
+  }) {
     return new OpeningStockService(
       (overrides?.prisma ?? {}) as never,
       (overrides?.audit ?? { record: jest.fn() }) as never,
+      (overrides?.accountingJournal ?? defaultAccountingJournal()) as never,
     );
   }
 
@@ -837,26 +849,36 @@ describe('OpeningStockService', () => {
       prisma: { $transaction: jest.Mock },
       lines: Array<Record<string, unknown>>,
     ) {
+      const header = {
+        id: openingStockId,
+        tenantId,
+        documentNumber: 'OB-00000001',
+        status: OpeningStockStatus.POSTED,
+        effectiveDate: new Date(),
+        postedAt: new Date(),
+        postedBy: actor.userId,
+        reversedAt: null,
+        reversedBy: null,
+        reversalReason: null,
+        notes: null,
+        createdBy: actor.userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        accountingPostingStatus: 'NOT_POSTED',
+        journalEntryId: null,
+        reversalJournalEntryId: null,
+        lines,
+      };
       return {
         ...prisma,
         openingStock: {
-          findFirstOrThrow: jest.fn().mockResolvedValue({
-            id: openingStockId,
-            tenantId,
-            documentNumber: 'OB-00000001',
-            status: OpeningStockStatus.POSTED,
-            effectiveDate: new Date(),
-            postedAt: new Date(),
-            postedBy: actor.userId,
-            reversedAt: null,
-            reversedBy: null,
-            reversalReason: null,
-            notes: null,
-            createdBy: actor.userId,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            lines,
+          findFirstOrThrow: jest.fn().mockResolvedValue(header),
+          update: jest.fn().mockResolvedValue({
+            ...header,
+            accountingPostingStatus: 'POSTED',
+            journalEntryId: 'journal-1',
           }),
+          findFirst: jest.fn().mockResolvedValue(header),
         },
       };
     }
@@ -1018,6 +1040,335 @@ describe('OpeningStockService', () => {
         where: { id: 'stock-1' },
         data: { quantity: decimal('0'), totalValue: decimal(0) },
       });
+    });
+  });
+
+  describe('Accounting integration (Phase 3.15 — Opening Stock)', () => {
+    function draftLine(overrides?: Partial<Record<string, unknown>>) {
+      return {
+        id: 'line-1',
+        openingStockId,
+        productId,
+        warehouseId,
+        quantity: decimal('100'),
+        unitOfMeasureId: uomId,
+        uomCode: 'PCS',
+        uomName: 'Piece',
+        conversionFactor: decimal('1'),
+        baseQuantity: decimal('100'),
+        unitCost: decimal('10'),
+        stockMovementId: null,
+        ...overrides,
+      };
+    }
+
+    function buildPostTx(lines: Array<Record<string, unknown>>) {
+      return {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: openingStockId, status: OpeningStockStatus.DRAFT }])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([{ id: 'marker-1' }]),
+        openingStockLine: {
+          findMany: jest.fn().mockResolvedValue(lines),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        openingStockActiveLine: {
+          create: jest.fn().mockResolvedValue({}),
+          findFirst: jest.fn(),
+          deleteMany: jest.fn(),
+        },
+        stockMovement: {
+          create: jest.fn().mockResolvedValue({ id: 'mv-1', type: StockMovementType.OPENING }),
+          findMany: jest.fn().mockResolvedValue([]),
+          findFirst: jest.fn(),
+        },
+        stock: { update: jest.fn(), create: jest.fn() },
+        openingStock: { update: jest.fn().mockResolvedValue({}), findFirst: jest.fn() },
+      };
+    }
+
+    function fullHeader(lines: Array<Record<string, unknown>>, overrides?: Partial<Record<string, unknown>>) {
+      return {
+        id: openingStockId,
+        tenantId,
+        documentNumber: 'OB-00000001',
+        status: OpeningStockStatus.POSTED,
+        effectiveDate: new Date(),
+        postedAt: new Date(),
+        postedBy: actor.userId,
+        reversedAt: null,
+        reversedBy: null,
+        reversalReason: null,
+        notes: null,
+        createdBy: actor.userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        accountingPostingStatus: 'NOT_POSTED',
+        journalEntryId: null,
+        reversalJournalEntryId: null,
+        lines,
+        ...overrides,
+      };
+    }
+
+    function accountingJournalMock() {
+      return {
+        post: jest.fn().mockResolvedValue({ id: 'journal-1', idempotentReplay: false }),
+        reverse: jest.fn().mockResolvedValue({ id: 'journal-1-reversal', idempotentReplay: false }),
+      };
+    }
+
+    it('post() posts a balanced Dr INVENTORY_ASSET / Cr OPENING_BALANCE_EQUITY journal summing every costed line', async () => {
+      const lines = [
+        draftLine({ id: 'line-1', productId, warehouseId, baseQuantity: decimal('100'), unitCost: decimal('10') }),
+        draftLine({
+          id: 'line-2',
+          productId: product2Id,
+          warehouseId: warehouse2Id,
+          baseQuantity: decimal('5'),
+          unitCost: decimal('20'),
+        }),
+      ];
+      const tx = buildPostTx(lines);
+      tx.$queryRaw
+        .mockReset()
+        .mockResolvedValueOnce([{ id: openingStockId, status: OpeningStockStatus.DRAFT }])
+        .mockResolvedValueOnce([]) // line-1 pair: no existing stock
+        .mockResolvedValueOnce([]) // line-2 pair: no existing stock
+        .mockResolvedValueOnce([{ id: 'marker-1' }])
+        .mockResolvedValueOnce([{ id: 'marker-2' }]);
+      const header = fullHeader(lines);
+      const accountingJournal = accountingJournalMock();
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+        openingStock: {
+          findFirstOrThrow: jest.fn().mockResolvedValue(header),
+          update: jest.fn().mockResolvedValue({
+            ...header,
+            accountingPostingStatus: 'POSTED',
+            journalEntryId: 'journal-1',
+          }),
+        },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() }, accountingJournal });
+
+      await service.post(actor, openingStockId);
+
+      // 100×10 + 5×20 = 1100
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      const [, request] = (accountingJournal.post as jest.Mock).mock.calls[0];
+      expect(request.sourceService).toBe('inventory-service');
+      expect(request.sourceType).toBe('OPENING_STOCK');
+      expect(request.sourceId).toBe(openingStockId);
+      expect(request.lines).toEqual([
+        { role: 'INVENTORY_ASSET', side: 'DEBIT', amount: '1100.0000' },
+        { role: 'OPENING_BALANCE_EQUITY', side: 'CREDIT', amount: '1100.0000' },
+      ]);
+      const debitTotal = request.lines
+        .filter((l: { side: string }) => l.side === 'DEBIT')
+        .reduce((sum: number, l: { amount: string }) => sum + Number(l.amount), 0);
+      const creditTotal = request.lines
+        .filter((l: { side: string }) => l.side === 'CREDIT')
+        .reduce((sum: number, l: { amount: string }) => sum + Number(l.amount), 0);
+      expect(debitTotal).toBe(creditTotal);
+      expect(prisma.openingStock.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: openingStockId },
+          data: { accountingPostingStatus: 'POSTED', journalEntryId: 'journal-1' },
+        }),
+      );
+    });
+
+    it('post() never posts a journal when every line is costless (unitCost null)', async () => {
+      const lines = [draftLine({ unitCost: null })];
+      const tx = buildPostTx(lines);
+      const header = fullHeader(lines);
+      const accountingJournal = accountingJournalMock();
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+        openingStock: { findFirstOrThrow: jest.fn().mockResolvedValue(header) },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() }, accountingJournal });
+
+      await service.post(actor, openingStockId);
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+    });
+
+    it('retryAccountingPosting is a no-op that never calls accounting-service again once already POSTED (idempotent)', async () => {
+      const lines = [draftLine()];
+      const header = fullHeader(lines, {
+        accountingPostingStatus: 'POSTED',
+        journalEntryId: 'journal-existing',
+      });
+      const accountingJournal = accountingJournalMock();
+      const prisma = { openingStock: { findFirst: jest.fn().mockResolvedValue(header) } };
+      const service = buildService({ prisma, accountingJournal });
+
+      const result = await service.retryAccountingPosting(actor, openingStockId);
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(result.journalEntryId).toBe('journal-existing');
+    });
+
+    it('retryAccountingPosting recovers a FAILED document and stamps the new journalEntryId', async () => {
+      const lines = [draftLine()];
+      const header = fullHeader(lines, { accountingPostingStatus: 'FAILED', journalEntryId: null });
+      const accountingJournal = accountingJournalMock();
+      const prisma = {
+        openingStock: {
+          findFirst: jest.fn().mockResolvedValue(header),
+          update: jest.fn().mockResolvedValue({
+            ...header,
+            accountingPostingStatus: 'POSTED',
+            journalEntryId: 'journal-1',
+          }),
+        },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() }, accountingJournal });
+
+      const result = await service.retryAccountingPosting(actor, openingStockId);
+
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe('POSTED');
+      expect(result.journalEntryId).toBe('journal-1');
+    });
+
+    it('an accounting-service failure never fails post() itself — the document stays POSTED, only accountingPostingStatus becomes FAILED', async () => {
+      const lines = [draftLine()];
+      const tx = buildPostTx(lines);
+      const header = fullHeader(lines);
+      const accountingJournal = accountingJournalMock();
+      accountingJournal.post.mockRejectedValue(new Error('accounting-service unreachable'));
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+        openingStock: {
+          findFirstOrThrow: jest.fn().mockResolvedValue(header),
+          update: jest.fn().mockResolvedValue({ ...header, accountingPostingStatus: 'FAILED' }),
+          findFirst: jest.fn().mockResolvedValue({ ...header, accountingPostingStatus: 'FAILED' }),
+        },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() }, accountingJournal });
+
+      const result = await service.post(actor, openingStockId);
+
+      // The DRAFT→POSTED transition already committed inside the DB
+      // transaction, before accounting was ever attempted.
+      expect(result.status).toBe(OpeningStockStatus.POSTED);
+      expect(result.accountingPostingStatus).toBe('FAILED');
+    });
+
+    it('reverse() reverses the accounting journal when the original was POSTED', async () => {
+      const lines = [
+        draftLine({ stockMovementId: 'mv-original', unitCost: decimal('10'), baseQuantity: decimal('100') }),
+      ];
+      const tx = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: openingStockId, status: OpeningStockStatus.POSTED }])
+          .mockResolvedValueOnce([
+            { id: 'stock-1', quantity: decimal('100'), totalValue: decimal('1000') },
+          ]),
+        openingStockLine: { findMany: jest.fn().mockResolvedValue(lines) },
+        stockMovement: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: 'mv-original',
+              sequenceNumber: 5n,
+              type: StockMovementType.OPENING,
+              createdAt: new Date(),
+              unitCost: decimal('10'),
+              totalCost: decimal('1000'),
+            },
+          ]),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'mv-reversal' }),
+        },
+        stock: { update: jest.fn() },
+        openingStockActiveLine: { deleteMany: jest.fn() },
+        openingStock: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const header = fullHeader(lines, {
+        status: OpeningStockStatus.REVERSED,
+        accountingPostingStatus: 'POSTED',
+        journalEntryId: 'journal-1',
+      });
+      const accountingJournal = accountingJournalMock();
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+        openingStock: {
+          findFirstOrThrow: jest.fn().mockResolvedValue(header),
+          update: jest.fn().mockResolvedValue({
+            ...header,
+            accountingPostingStatus: 'REVERSED',
+            reversalJournalEntryId: 'journal-1-reversal',
+          }),
+        },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() }, accountingJournal });
+
+      const result = await service.reverse(actor, openingStockId, {});
+
+      expect(accountingJournal.reverse).toHaveBeenCalledTimes(1);
+      const [, request] = (accountingJournal.reverse as jest.Mock).mock.calls[0];
+      expect(request.sourceService).toBe('inventory-service');
+      expect(request.sourceType).toBe('OPENING_STOCK');
+      expect(request.sourceId).toBe(openingStockId);
+      expect(result.accountingPostingStatus).toBe('REVERSED');
+      expect(result.reversalJournalEntryId).toBe('journal-1-reversal');
+    });
+
+    it('reverse() never calls accounting-service when the original was never POSTED', async () => {
+      const lines = [draftLine({ stockMovementId: 'mv-original' })];
+      const tx = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: openingStockId, status: OpeningStockStatus.POSTED }])
+          .mockResolvedValueOnce([
+            { id: 'stock-1', quantity: decimal('100'), totalValue: decimal('1000') },
+          ]),
+        openingStockLine: { findMany: jest.fn().mockResolvedValue(lines) },
+        stockMovement: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'mv-original', sequenceNumber: 5n, type: StockMovementType.OPENING, createdAt: new Date() },
+          ]),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'mv-reversal' }),
+        },
+        stock: { update: jest.fn() },
+        openingStockActiveLine: { deleteMany: jest.fn() },
+        openingStock: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const header = fullHeader(lines, {
+        status: OpeningStockStatus.REVERSED,
+        accountingPostingStatus: 'NOT_POSTED',
+        journalEntryId: null,
+      });
+      const accountingJournal = accountingJournalMock();
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+        openingStock: { findFirstOrThrow: jest.fn().mockResolvedValue(header) },
+      };
+      const service = buildService({ prisma, audit: { record: jest.fn() }, accountingJournal });
+
+      await service.reverse(actor, openingStockId, {});
+
+      expect(accountingJournal.reverse).not.toHaveBeenCalled();
+    });
+
+    it('retryAccountingPosting is tenant-scoped — 404s rather than posting for a document belonging to another tenant', async () => {
+      const accountingJournal = accountingJournalMock();
+      const prisma = { openingStock: { findFirst: jest.fn().mockResolvedValue(null) } };
+      const service = buildService({ prisma, accountingJournal });
+
+      await expect(
+        service.retryAccountingPosting(actor, 'someone-elses-document'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(prisma.openingStock.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'someone-elses-document', tenantId: actor.tenantId } }),
+      );
     });
   });
 });

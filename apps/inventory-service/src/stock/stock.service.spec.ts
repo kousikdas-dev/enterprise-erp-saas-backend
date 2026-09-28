@@ -1,5 +1,9 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Prisma, StockMovementType } from '../../generated/prisma-client';
+import {
+  Prisma,
+  StockMovementPostingStatus,
+  StockMovementType,
+} from '../../generated/prisma-client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ImplementedStockAdjustmentType } from './dto/stock.dto';
 import { StockService } from './stock.service';
@@ -56,17 +60,37 @@ describe('StockService', () => {
       product: { findFirst: jest.fn() },
       warehouse: { findFirst: jest.fn() },
       stock: { findMany: jest.fn() },
-      stockMovement: { findMany: jest.fn(), findFirst: jest.fn() },
+      stockMovement: {
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        // Merges the update onto whatever tx.stockMovement.create most
+        // recently resolved to, mirroring Prisma's real "update returns the
+        // full row" behavior so toMovement() downstream sees a complete,
+        // test-accurate movement rather than a bare {accountingPostingStatus}.
+        update: jest
+          .fn()
+          .mockImplementation(async (args: { data: Record<string, unknown> }) => {
+            const results = tx.stockMovement.create.mock.results;
+            const last = results[results.length - 1];
+            const base = last ? await last.value : movement();
+            return { ...(base as Record<string, unknown>), ...args.data };
+          }),
+      },
       $transaction: jest.fn(
         async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
       ),
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const accountingJournal = {
+      post: jest.fn().mockResolvedValue({ id: 'journal-1', idempotentReplay: false }),
+      reverse: jest.fn().mockResolvedValue({ id: 'journal-1-reversal', idempotentReplay: false }),
+    };
     const service = new StockService(
       prisma as never,
       audit as unknown as IdentityAuditClient,
+      accountingJournal as never,
     );
-    return { service, prisma, tx, audit };
+    return { service, prisma, tx, audit, accountingJournal };
   }
 
   it('lists stock scoped to the actor tenant', async () => {
@@ -559,6 +583,182 @@ describe('StockService', () => {
       expect((first.tx.stock.update as jest.Mock).mock.calls[0][0].data.totalValue.toString()).toBe(
         '800',
       );
+    });
+  });
+
+  describe('Accounting integration (Phase 3.15 — Inventory Adjustment)', () => {
+    it('ADJUSTMENT_IN posts a balanced Dr INVENTORY_ASSET / Cr INVENTORY_ADJUSTMENT journal for exactly the valuation increase', async () => {
+      const { service, prisma, tx, accountingJournal } = createService();
+      prisma.product.findFirst.mockResolvedValue({ id: productId });
+      prisma.warehouse.findFirst.mockResolvedValue({ id: warehouseId });
+      tx.$queryRaw.mockResolvedValue([]);
+      tx.stockMovement.create.mockResolvedValue(
+        movement({ unitCost: new Prisma.Decimal('10'), totalCost: new Prisma.Decimal('1000') }),
+      );
+      tx.stock.create.mockResolvedValue(stockRow('100', '1000'));
+
+      await service.adjust(actor, {
+        productId,
+        warehouseId,
+        type: ImplementedStockAdjustmentType.ADJUSTMENT_IN,
+        quantity: '100',
+        unitCost: '10',
+        reason: 'Stock count correction',
+      });
+
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      const [, request] = (accountingJournal.post as jest.Mock).mock.calls[0];
+      expect(request.sourceService).toBe('inventory-service');
+      expect(request.sourceType).toBe('STOCK_ADJUSTMENT');
+      expect(request.lines).toEqual([
+        { role: 'INVENTORY_ASSET', side: 'DEBIT', amount: '1000.0000' },
+        { role: 'INVENTORY_ADJUSTMENT', side: 'CREDIT', amount: '1000.0000' },
+      ]);
+      const debitTotal = request.lines
+        .filter((l: { side: string }) => l.side === 'DEBIT')
+        .reduce((sum: number, l: { amount: string }) => sum + Number(l.amount), 0);
+      const creditTotal = request.lines
+        .filter((l: { side: string }) => l.side === 'CREDIT')
+        .reduce((sum: number, l: { amount: string }) => sum + Number(l.amount), 0);
+      expect(debitTotal).toBe(creditTotal);
+    });
+
+    it('ADJUSTMENT_OUT posts the mirrored Dr INVENTORY_ADJUSTMENT / Cr INVENTORY_ASSET journal for exactly the valuation decrease', async () => {
+      const { service, prisma, tx, accountingJournal } = createService();
+      prisma.product.findFirst.mockResolvedValue({ id: productId });
+      prisma.warehouse.findFirst.mockResolvedValue({ id: warehouseId });
+      tx.$queryRaw.mockResolvedValue([
+        {
+          id: stockRow('100').id,
+          quantity: new Prisma.Decimal('100'),
+          totalValue: new Prisma.Decimal('1000'),
+        },
+      ]);
+      tx.stockMovement.create.mockResolvedValue(
+        movement({
+          type: StockMovementType.ADJUSTMENT_OUT,
+          quantity: new Prisma.Decimal('20'),
+          unitCost: new Prisma.Decimal('10'),
+          totalCost: new Prisma.Decimal('200'),
+        }),
+      );
+      tx.stock.update.mockResolvedValue(stockRow('80', '800'));
+
+      await service.adjust(actor, {
+        productId,
+        warehouseId,
+        type: ImplementedStockAdjustmentType.ADJUSTMENT_OUT,
+        quantity: '20',
+      });
+
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      const [, request] = (accountingJournal.post as jest.Mock).mock.calls[0];
+      expect(request.lines).toEqual([
+        { role: 'INVENTORY_ADJUSTMENT', side: 'DEBIT', amount: '200.0000' },
+        { role: 'INVENTORY_ASSET', side: 'CREDIT', amount: '200.0000' },
+      ]);
+    });
+
+    it('never posts a journal for a zero-value adjustment (ADJUSTMENT_OUT against stock already valued at 0)', async () => {
+      const { service, prisma, tx, accountingJournal } = createService();
+      prisma.product.findFirst.mockResolvedValue({ id: productId });
+      prisma.warehouse.findFirst.mockResolvedValue({ id: warehouseId });
+      tx.$queryRaw.mockResolvedValue([
+        { id: stockRow('100').id, quantity: new Prisma.Decimal('100'), totalValue: new Prisma.Decimal('0') },
+      ]);
+      tx.stockMovement.create.mockResolvedValue(
+        movement({
+          type: StockMovementType.ADJUSTMENT_OUT,
+          quantity: new Prisma.Decimal('20'),
+          unitCost: new Prisma.Decimal('0'),
+          totalCost: new Prisma.Decimal('0'),
+        }),
+      );
+      tx.stock.update.mockResolvedValue(stockRow('80', '0'));
+
+      await service.adjust(actor, {
+        productId,
+        warehouseId,
+        type: ImplementedStockAdjustmentType.ADJUSTMENT_OUT,
+        quantity: '20',
+      });
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+    });
+
+    it('retryAccountingPosting is a no-op that never calls accounting-service again once already POSTED (idempotent)', async () => {
+      const { service, prisma, accountingJournal } = createService();
+      const posted = movement({
+        accountingPostingStatus: StockMovementPostingStatus.POSTED,
+        journalEntryId: 'journal-existing',
+      });
+      prisma.stockMovement.findFirst.mockResolvedValue(posted);
+
+      const result = await service.retryAccountingPosting(actor, posted.id);
+
+      expect(accountingJournal.post).not.toHaveBeenCalled();
+      expect(result.journalEntryId).toBe('journal-existing');
+    });
+
+    it('retryAccountingPosting recovers a FAILED movement and stamps the new journalEntryId', async () => {
+      const { service, prisma, accountingJournal } = createService();
+      const failed = movement({
+        unitCost: new Prisma.Decimal('10'),
+        totalCost: new Prisma.Decimal('1000'),
+        accountingPostingStatus: StockMovementPostingStatus.FAILED,
+        journalEntryId: null,
+      });
+      prisma.stockMovement.findFirst.mockResolvedValue(failed);
+
+      const result = await service.retryAccountingPosting(actor, failed.id);
+
+      expect(accountingJournal.post).toHaveBeenCalledTimes(1);
+      expect(result.accountingPostingStatus).toBe(StockMovementPostingStatus.POSTED);
+      expect(result.journalEntryId).toBe('journal-1');
+    });
+
+    it('an accounting-service failure never fails adjust() itself — Stock/Movement stay committed, only accountingPostingStatus becomes FAILED', async () => {
+      const { service, prisma, tx, accountingJournal } = createService();
+      prisma.product.findFirst.mockResolvedValue({ id: productId });
+      prisma.warehouse.findFirst.mockResolvedValue({ id: warehouseId });
+      tx.$queryRaw.mockResolvedValue([]);
+      tx.stockMovement.create.mockResolvedValue(
+        movement({ unitCost: new Prisma.Decimal('10'), totalCost: new Prisma.Decimal('1000') }),
+      );
+      tx.stock.create.mockResolvedValue(stockRow('100', '1000'));
+      accountingJournal.post.mockRejectedValue(new Error('accounting-service unreachable'));
+
+      const result = await service.adjust(actor, {
+        productId,
+        warehouseId,
+        type: ImplementedStockAdjustmentType.ADJUSTMENT_IN,
+        quantity: '100',
+        unitCost: '10',
+        reason: 'test',
+      });
+
+      // The Stock/Movement write already committed inside the DB
+      // transaction, before accounting was ever attempted — an
+      // accounting-service outage cannot roll that back.
+      expect(result.stock.totalValue).toBe('1000.0000');
+      expect(prisma.stockMovement.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { accountingPostingStatus: StockMovementPostingStatus.FAILED },
+        }),
+      );
+      expect(result.movement.accountingPostingStatus).toBe(StockMovementPostingStatus.FAILED);
+    });
+
+    it('retryAccountingPosting is tenant-scoped — 404s rather than posting for a movement belonging to another tenant', async () => {
+      const { service, prisma } = createService();
+      prisma.stockMovement.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.retryAccountingPosting(actor, 'someone-elses-movement'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.stockMovement.findFirst).toHaveBeenCalledWith({
+        where: { id: 'someone-elses-movement', tenantId: actor.tenantId },
+      });
     });
   });
 });

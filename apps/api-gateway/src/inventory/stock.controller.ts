@@ -140,4 +140,31 @@ export class StockController {
       userAgent: headerString(request.headers['user-agent']),
     });
   }
+
+  @Post('stock-movements/:id/retry-accounting-posting')
+  @RequirePermissions(PERMISSIONS.STOCK_ADJUST)
+  @ApiTags('Stock Adjustments')
+  @ApiOperation({
+    summary: 'Retry stock adjustment accounting posting',
+    description:
+      'Retries posting the accounting journal for an ADJUSTMENT_IN/ADJUSTMENT_OUT movement whose posting previously failed. No-op if already POSTED. Permission: stock.adjust.',
+  })
+  @ApiOkResponse({ type: StockMovementDto })
+  @ApiConflictResponse({
+    description: 'Only an ADJUSTMENT_IN or ADJUSTMENT_OUT movement can have its accounting posting retried',
+  })
+  @ApiManagementErrors()
+  retryAccountingPosting(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<StockMovementDto> {
+    return this.inventory.forward<StockMovementDto>({
+      method: 'POST',
+      path: `/api/v1/stock-movements/${id}/retry-accounting-posting`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
 }

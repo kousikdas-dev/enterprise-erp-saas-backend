@@ -70,6 +70,36 @@ enum OpeningStockStatus {
   REVERSED
 }
 
+// Phase 3.15 (Inventory Adjustment Accounting) — OpeningStock header-level
+// accounting cache, mirrors GoodsReceiptPostingStatus's exact four-value
+// shape (Opening Stock DOES have a reversal lifecycle, unlike Stock
+// Adjustment below). No third "reversal failed" value: a failed reversal
+// attempt deliberately leaves this at POSTED, exactly like every other
+// reversal in this codebase.
+enum OpeningStockPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
+// Phase 3.15 (Inventory Adjustment Accounting) — StockMovement-level
+// accounting cache for ADJUSTMENT_IN/ADJUSTMENT_OUT movements created via
+// StockService.adjust() only (never populated for any other movement type,
+// including the ADJUSTMENT_OUT movements OpeningStockService.reverse()
+// creates internally for its own quantity bookkeeping — those are
+// accounted for separately, by reversing the OPENING journal itself, never
+// by a fresh Stock Adjustment journal). Mirrors ShipmentPostingStatus's
+// narrower three-value shape exactly: a plain Stock Adjustment has no
+// reversal/undo lifecycle of its own (Phase 3.15 audit confirmed this —
+// see StockService.adjust()'s own doc comment), so REVERSED is not
+// representable here.
+enum StockMovementPostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+}
+
 enum ProductType {
   GOODS
   SERVICE
@@ -276,6 +306,21 @@ model StockMovement {
   // can never overshoot.
   returnedQuantity Decimal @default(0) @db.Decimal(19, 6)
 
+  // Phase 3.15 (Inventory Adjustment Accounting) — Inventory-side cache of
+  // accounting-service's own posting state, mirroring the exact
+  // GoodsReceipt/Shipment pattern. Populated ONLY for ADJUSTMENT_IN/
+  // ADJUSTMENT_OUT movements created via StockService.adjust() — every
+  // other movement type (OPENING, PURCHASE, SALE, TRANSFER_*, returns, and
+  // the ADJUSTMENT_OUT movements OpeningStockService.reverse() creates
+  // internally) leaves this at its NOT_POSTED default and journalEntryId
+  // null, exactly mirroring unitCost/totalCost's own "populated for X
+  // types only" convention on this same model. No FK to accounting_db
+  // (separate database; soft reference). The authoritative idempotency
+  // guard is accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never this column.
+  accountingPostingStatus StockMovementPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                    @db.Uuid
+
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
@@ -310,6 +355,18 @@ model OpeningStock {
   createdBy      String             @db.Uuid
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
+
+  // Phase 3.15 (Inventory Adjustment Accounting) — Inventory-side cache of
+  // accounting-service's own posting state, mirroring the exact
+  // GoodsReceipt pattern: post() posts Dr INVENTORY_ASSET /
+  // Cr OPENING_BALANCE_EQUITY (summed across every line that carries a
+  // cost); reverse() posts the mirrored reversal journal. No FK to
+  // accounting_db (separate database; soft reference). The authoritative
+  // idempotency guard is accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never these columns.
+  accountingPostingStatus OpeningStockPostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                   @db.Uuid
+  reversalJournalEntryId  String?                   @db.Uuid
 
   lines OpeningStockLine[]
 

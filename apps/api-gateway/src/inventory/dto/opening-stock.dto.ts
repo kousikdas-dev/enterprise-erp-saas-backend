@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsISO8601,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
@@ -27,6 +28,15 @@ export class CreateOpeningStockLineDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
   unitOfMeasureId!: string;
+
+  @ApiProperty({
+    example: '15.00',
+    description: 'Mandatory unit cost per BASE unit (Inventory Valuation V1, Phase 2).',
+  })
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : String(value)))
+  @IsString()
+  @IsNotEmpty()
+  unitCost!: string;
 }
 
 export class CreateOpeningStockDto {
@@ -126,6 +136,9 @@ export class OpeningStockLineDto {
   @ApiProperty({ example: '100.000000' })
   baseQuantity!: string;
 
+  @ApiPropertyOptional({ example: '15.0000', nullable: true })
+  unitCost!: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   stockMovementId!: string | null;
 }
@@ -172,6 +185,15 @@ export class OpeningStockDto {
 
   @ApiProperty()
   updatedAt!: string;
+
+  @ApiProperty({ enum: ['NOT_POSTED', 'POSTED', 'FAILED', 'REVERSED'] })
+  accountingPostingStatus!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  journalEntryId!: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  reversalJournalEntryId!: string | null;
 
   @ApiProperty({ type: [OpeningStockLineDto] })
   lines!: OpeningStockLineDto[];

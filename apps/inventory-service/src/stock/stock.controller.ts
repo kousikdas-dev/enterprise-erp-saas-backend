@@ -55,4 +55,13 @@ export class StockController {
   ) {
     return this.stock.adjust(actor, dto, requestAuditMeta(request));
   }
+
+  @Post('stock-movements/:id/retry-accounting-posting')
+  retryAccountingPosting(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.stock.retryAccountingPosting(actor, id, requestAuditMeta(request));
+  }
 }
