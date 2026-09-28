@@ -55,6 +55,51 @@ class PurchaseInvoicesRetryProbeController {
   }
 }
 
+@Controller('purchase-debit-notes-probe')
+class PurchaseDebitNotesProbeController {
+  @Post()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PURCHASE_DEBIT_NOTES_CREATE)
+  create(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Get()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PURCHASE_DEBIT_NOTES_READ)
+  list(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('post')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PURCHASE_DEBIT_NOTES_POST)
+  post(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('retry-accounting-posting')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PURCHASE_DEBIT_NOTES_POST)
+  retryPosting(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('reverse')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PURCHASE_DEBIT_NOTES_REVERSE)
+  reverse(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('retry-accounting-reversal')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PURCHASE_DEBIT_NOTES_REVERSE)
+  retryReversal(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 @Controller('purchase-invoices-payment-probe')
 class PurchaseInvoicesPaymentProbeController {
   @Post('retry-accounting-posting')
@@ -99,6 +144,7 @@ describe('purchase JWT and RBAC', () => {
         GoodsReceiptsProbeController,
         PurchaseInvoicesRetryProbeController,
         PurchaseInvoicesPaymentProbeController,
+        PurchaseDebitNotesProbeController,
       ],
       providers: [
         JwtStrategy,
@@ -231,6 +277,78 @@ describe('purchase JWT and RBAC', () => {
     ]);
     await request(server)
       .post('/purchase-invoices-payment-probe/retry-accounting-reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires purchase-debit-notes.create to create', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_READ]);
+    await request(server)
+      .post('/purchase-debit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_CREATE]);
+    await request(server)
+      .post('/purchase-debit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires purchase-debit-notes.read to list', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_CREATE]);
+    await request(server)
+      .get('/purchase-debit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_READ]);
+    await request(server)
+      .get('/purchase-debit-notes-probe')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(200);
+  });
+
+  it('requires purchase-debit-notes.post to post and to retry accounting posting', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_REVERSE]);
+    await request(server)
+      .post('/purchase-debit-notes-probe/post')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+    await request(server)
+      .post('/purchase-debit-notes-probe/retry-accounting-posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_POST]);
+    await request(server)
+      .post('/purchase-debit-notes-probe/post')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+    await request(server)
+      .post('/purchase-debit-notes-probe/retry-accounting-posting')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires purchase-debit-notes.reverse to reverse and to retry accounting reversal', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_POST]);
+    await request(server)
+      .post('/purchase-debit-notes-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+    await request(server)
+      .post('/purchase-debit-notes-probe/retry-accounting-reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.PURCHASE_DEBIT_NOTES_REVERSE]);
+    await request(server)
+      .post('/purchase-debit-notes-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+    await request(server)
+      .post('/purchase-debit-notes-probe/retry-accounting-reversal')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(201);
   });

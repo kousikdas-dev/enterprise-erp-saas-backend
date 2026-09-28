@@ -18,6 +18,7 @@ describe('AccountsPayableService', () => {
     purchaseInvoice?: Record<string, jest.Mock>;
     supplier?: Record<string, jest.Mock>;
     supplierPayment?: Record<string, jest.Mock>;
+    purchaseDebitNote?: Record<string, jest.Mock>;
     queryRaw?: jest.Mock;
     ledgerClient?: Partial<AccountingLedgerClient>;
   } = {}) {
@@ -37,6 +38,13 @@ describe('AccountsPayableService', () => {
       supplierPayment: {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
         ...overrides.supplierPayment,
+      },
+      // Phase 3.13 — defaults to "no Debit Notes at all" so every
+      // pre-existing test above is unaffected unless it opts in.
+      purchaseDebitNote: {
+        groupBy: jest.fn().mockResolvedValue([]),
+        aggregate: jest.fn().mockResolvedValue({ _sum: { total: null } }),
+        ...overrides.purchaseDebitNote,
       },
       $queryRaw: overrides.queryRaw ?? jest.fn().mockResolvedValue([]),
     };
@@ -113,6 +121,47 @@ describe('AccountsPayableService', () => {
         }),
       ]);
     });
+
+    it('Phase 3.13 — subtracts posted Debit Notes from totalOutstanding and can flip a supplier to fully-settled', async () => {
+      const { service } = buildService({
+        purchaseInvoice: {
+          groupBy: jest.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
+            if ('paymentStatus' in (args.where ?? {})) {
+              return Promise.resolve([{ supplierId, _count: { _all: 1 } }]);
+            }
+            return Promise.resolve([
+              { supplierId, _sum: { total: decimal('500.0000'), amountPaid: decimal('300.0000') } },
+            ]);
+          }),
+          aggregate: jest.fn(),
+          count: jest.fn(),
+          findMany: jest.fn(),
+        },
+        supplier: {
+          findFirst: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([{ id: supplierId, code: 'SUP-1', name: 'Acme' }]),
+        },
+        purchaseDebitNote: {
+          groupBy: jest
+            .fn()
+            .mockResolvedValue([{ supplierId, _sum: { total: decimal('200.0000') } }]),
+          aggregate: jest.fn(),
+        },
+      });
+      const result = await service.listSupplierSummaries(actor, true);
+      // totalOutstanding = 500 - 300 - 200 = 0 -> excluded by onlyOutstanding.
+      expect(result.items).toEqual([]);
+
+      const resultAll = await service.listSupplierSummaries(actor, false);
+      expect(resultAll.items[0]).toEqual(
+        expect.objectContaining({
+          totalInvoiced: '500.0000',
+          totalPaid: '300.0000',
+          totalDebitNotes: '200.0000',
+          totalOutstanding: '0.0000',
+        }),
+      );
+    });
   });
 
   describe('getSupplierSummary', () => {
@@ -145,6 +194,36 @@ describe('AccountsPayableService', () => {
           totalPaid: '200.0000',
           totalOutstanding: '300.0000',
           outstandingInvoiceCount: 2,
+        }),
+      );
+    });
+
+    it('Phase 3.13 — includes posted Debit Notes in totalOutstanding', async () => {
+      const { service } = buildService({
+        supplier: {
+          findFirst: jest.fn().mockResolvedValue({ id: supplierId, code: 'SUP-1', name: 'Acme' }),
+          findMany: jest.fn(),
+        },
+        purchaseInvoice: {
+          groupBy: jest.fn(),
+          aggregate: jest
+            .fn()
+            .mockResolvedValue({ _sum: { total: decimal('500.0000'), amountPaid: decimal('200.0000') } }),
+          count: jest.fn().mockResolvedValue(2),
+          findMany: jest.fn(),
+        },
+        purchaseDebitNote: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { total: decimal('120.0000') } }),
+        },
+      });
+      const result = await service.getSupplierSummary(actor, supplierId);
+      expect(result).toEqual(
+        expect.objectContaining({
+          totalInvoiced: '500.0000',
+          totalPaid: '200.0000',
+          totalDebitNotes: '120.0000',
+          totalOutstanding: '180.0000',
         }),
       );
     });
@@ -335,6 +414,28 @@ describe('AccountsPayableService', () => {
       expect(result.total).toBe(3);
     });
 
+    it('Phase 3.13 — produces two lines (DEBIT_NOTE + DEBIT_NOTE_REVERSAL) for a reversed debit note, negative amount', async () => {
+      const queryRaw = jest
+        .fn()
+        .mockResolvedValueOnce([{ signed: '0.0000', cnt: 2 }])
+        .mockResolvedValueOnce([
+          { id: 'pdn-1', date: new Date('2026-01-05T00:00:00.000Z'), type: 'DEBIT_NOTE', reference: 'PDN-1', description: 'price correction', amount: '-100.0000', cumulative: '-100.0000' },
+          { id: 'pdn-1', date: new Date('2026-01-10T00:00:00.000Z'), type: 'DEBIT_NOTE_REVERSAL', reference: 'PDN-1', description: 'undo', amount: '100.0000', cumulative: '0.0000' },
+        ]);
+      const { service } = buildService({
+        supplier: { findFirst: jest.fn().mockResolvedValue({ id: supplierId, name: 'Acme' }), findMany: jest.fn() },
+        queryRaw,
+      });
+
+      const result = await service.getStatement(actor, supplierId, { page: 1, limit: 50 } as any);
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].type).toBe('DEBIT_NOTE');
+      expect(result.items[0].amount).toBe('-100.0000');
+      expect(result.items[1].type).toBe('DEBIT_NOTE_REVERSAL');
+      expect(result.items[1].amount).toBe('100.0000');
+      expect(result.closingBalance).toBe('0.0000');
+    });
+
     it('keeps total/closingBalance correct even when the requested page is beyond the last page', async () => {
       const queryRaw = jest
         .fn()
@@ -395,6 +496,23 @@ describe('AccountsPayableService', () => {
         difference: '0.0000',
         matches: true,
       });
+    });
+
+    it('Phase 3.13 — subtracts posted Debit Notes from the subledger total', async () => {
+      const { service } = buildService({
+        purchaseInvoice: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { total: decimal('300.0000'), amountPaid: decimal('100.0000') } }),
+          count: jest.fn(),
+          findMany: jest.fn(),
+        },
+        purchaseDebitNote: {
+          groupBy: jest.fn(),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { total: decimal('50.0000') } }),
+        },
+      });
+      const result = await service.getReconciliation(actor);
+      expect(result.subledgerTotalOutstanding).toBe('150.0000');
     });
 
     it('reports matches=false with the correct difference on a mismatch', async () => {

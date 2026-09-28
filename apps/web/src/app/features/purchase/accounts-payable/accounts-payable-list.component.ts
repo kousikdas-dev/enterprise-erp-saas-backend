@@ -225,6 +225,8 @@ export class AccountsPayableListComponent implements OnInit {
   statementLineBadgeClass(type: string): string {
     if (type === 'INVOICE') return 'bg-primary';
     if (type === 'PAYMENT_REVERSAL') return 'bg-warning text-dark';
+    if (type === 'DEBIT_NOTE') return 'bg-danger';
+    if (type === 'DEBIT_NOTE_REVERSAL') return 'bg-info text-dark';
     return 'bg-success'; // PAYMENT
   }
 }

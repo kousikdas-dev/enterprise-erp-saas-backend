@@ -73,8 +73,11 @@ model Supplier {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  purchaseOrders PurchaseOrder[]
-  addresses      SupplierAddress[]
+  purchaseOrders     PurchaseOrder[]
+  addresses          SupplierAddress[]
+  // Phase 3.13 (Purchase Debit Note) — a Debit Note is always tied to a
+  // Supplier, never optional, unlike its optional PurchaseInvoice reference.
+  purchaseDebitNotes PurchaseDebitNote[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -282,8 +285,8 @@ model GoodsReceipt {
   reversedAt             DateTime?
   reversalReason         String?
 
-  purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
-  items         GoodsReceiptItem[]
+  purchaseOrder   PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  items           GoodsReceiptItem[]
   // Phase 3.5 (Purchase Return) — a Purchase Return is scoped to exactly one
   // GoodsReceipt (see PurchaseReturn's own model comment for the rationale).
   purchaseReturns PurchaseReturn[]
@@ -366,8 +369,8 @@ model GoodsReceiptItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  goodsReceipt         GoodsReceipt          @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  purchaseOrderItem    PurchaseOrderItem     @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  goodsReceipt         GoodsReceipt                      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem    PurchaseOrderItem                 @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
   purchaseInvoiceItems PurchaseInvoiceItem[]
   // Phase 3.2 (GRNI Clearing / PPV) — at most one match row per receipt
   // item (see PurchaseInvoiceGoodsReceiptMatch below), created lazily the
@@ -493,6 +496,10 @@ model PurchaseInvoice {
   purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   items         PurchaseInvoiceItem[]
   payments      SupplierPayment[]
+  // Phase 3.13 (Purchase Debit Note) — optional, traceability-only back
+  // reference; a Debit Note is never required to reference an invoice (see
+  // PurchaseDebitNote.purchaseInvoiceId below).
+  debitNotes    PurchaseDebitNote[]
 
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId])
@@ -634,15 +641,15 @@ model PurchaseInvoiceItemTaxComponent {
 // locks) between goods_receipt_items and this table when a MATCHED_INVOICE
 // allocation is needed — never after this table.
 model PurchaseInvoiceGoodsReceiptMatch {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @db.Uuid
-  goodsReceiptItemId String   @unique @db.Uuid
+  id                 String @id @default(uuid()) @db.Uuid
+  tenantId           String @db.Uuid
+  goodsReceiptItemId String @unique @db.Uuid
 
   // Base-UOM quantity matched to CONFIRMED PurchaseInvoiceItems so far.
   // Accumulated only at PurchaseInvoice CONFIRM time, reversed on CONFIRMED
   // invoice cancellation — mirrors PurchaseOrderItem.invoicedQuantity. Never
   // touched by a Purchase Return (Phase 3.5) — see the model comment above.
-  matchedQuantity Decimal @default(0) @db.Decimal(19, 6)
+  matchedQuantity  Decimal @default(0) @db.Decimal(19, 6)
   // Phase 3.5 (Purchase Return) — base-UOM quantity returned via
   // MATCHED_INVOICE allocations only (the matched bucket). Bound:
   // returnedQuantity <= matchedQuantity. See the model comment above for
@@ -802,10 +809,10 @@ model PurchaseReturn {
 }
 
 model PurchaseReturnItem {
-  id                 String  @id @default(uuid()) @db.Uuid
-  tenantId           String  @db.Uuid
-  purchaseReturnId   String  @db.Uuid
-  goodsReceiptItemId String  @db.Uuid
+  id                 String @id @default(uuid()) @db.Uuid
+  tenantId           String @db.Uuid
+  purchaseReturnId   String @db.Uuid
+  goodsReceiptItemId String @db.Uuid
 
   // Product/UOM snapshot — copied verbatim from the parent GoodsReceiptItem
   // at creation time, never re-fetched (same convention as
@@ -888,4 +895,168 @@ model PurchaseReturnItemAllocation {
   @@index([purchaseReturnItemId])
   @@index([purchaseInvoiceItemId])
   @@map("purchase_return_item_allocations")
+}
+
+// ============================================================================
+// Purchase Debit Note V1 (Phase 3.13) — a standalone Accounts Payable
+// adjustment document. Deliberately independent of Purchase Return/
+// GoodsReceipt: a Debit Note records a buyer-side reduction of the amount
+// owed to a supplier (price correction, quality claim, commercial rebate,
+// short supply claim, other financial adjustment) WITHOUT any physical goods
+// movement — it must never call InventoryStockClient. purchaseInvoiceId is
+// optional, retained only as traceability when supplied; a standalone Debit
+// Note with no invoice reference is equally valid.
+//
+// Document-level lifecycle: DRAFT -> POSTED -> REVERSED (never CANCELLED —
+// mirrors PurchaseReturnStatus/GoodsReceiptStatus's own "undo a posted,
+// effect-bearing document" vocabulary, not PurchaseInvoice's pre-effect
+// CANCELLED). No third "reversal failed" posting status — a failed reversal
+// attempt deliberately leaves accountingPostingStatus at POSTED, exactly like
+// every other reversal in this module (see PurchaseDebitNotesService.reverse()'s
+// own doc comment).
+//
+// Accounting (mirrors PurchaseInvoice's own confirm() postings, reversed):
+//   Dr ACCOUNTS_PAYABLE   total
+//   Cr PURCHASE_EXPENSE   subtotal - discountTotal
+//   Cr INPUT_TAX          taxTotal, when > 0
+// sourceService 'purchase-service', sourceType 'PURCHASE_DEBIT_NOTE'. Reuses
+// the existing PURCHASE_EXPENSE/ACCOUNTS_PAYABLE/INPUT_TAX roles and account
+// mappings — no new GL account-mapping purpose.
+// ============================================================================
+
+enum DebitNoteStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+// Mirrors PurchaseInvoicePostingStatus/PurchaseReturnPostingStatus's exact
+// four-value shape. No third "reversal failed" value — see the model-group
+// comment above.
+enum DebitNotePostingStatus {
+  NOT_POSTED
+  POSTED
+  FAILED
+  REVERSED
+}
+
+model PurchaseDebitNote {
+  id              String @id @default(uuid()) @db.Uuid
+  tenantId        String @db.Uuid
+  debitNoteNumber String
+  supplierId      String @db.Uuid
+
+  // Supplier snapshot — frozen at create time from the live Supplier record,
+  // never re-fetched afterwards (same "snapshot, never re-derive" convention
+  // as PurchaseOrder/PurchaseInvoice's own supplier snapshots).
+  supplierName           String
+  supplierGstin          String?
+  supplierBillingAddress String?
+
+  // Optional — when present, ties this Debit Note to a specific CONFIRMED
+  // PurchaseInvoice for traceability only (verified to exist, belong to this
+  // tenant, and be CONFIRMED at create time). Never required: a standalone
+  // Debit Note with no invoice reference is equally valid and creates no
+  // invoice-side effect (no quantity/amount field on PurchaseInvoice is ever
+  // touched by a Debit Note).
+  purchaseInvoiceId String? @db.Uuid
+
+  debitNoteDate DateTime
+  reason        String?
+  notes         String?
+
+  subtotal      Decimal @db.Decimal(19, 4)
+  discountTotal Decimal @default(0) @db.Decimal(19, 4)
+  taxTotal      Decimal @default(0) @db.Decimal(19, 4)
+  total         Decimal @db.Decimal(19, 4)
+
+  status DebitNoteStatus @default(DRAFT)
+
+  postedAt DateTime?
+  postedBy String?   @db.Uuid
+
+  reversedAt     DateTime?
+  reversedBy     String?   @db.Uuid
+  reversalReason String?
+
+  // Purchase-side cache of accounting-service's own posting state, mirroring
+  // the exact PurchaseInvoice/PurchaseReturn pattern. No FK to accounting_db
+  // (separate database; soft reference). The authoritative idempotency guard
+  // is accounting-service's own unique constraint on
+  // (tenantId, sourceService, sourceType, sourceId), never these columns.
+  accountingPostingStatus DebitNotePostingStatus @default(NOT_POSTED)
+  journalEntryId          String?                @db.Uuid
+  reversalJournalEntryId  String?                @db.Uuid
+
+  createdBy String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier        Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseInvoice PurchaseInvoice?        @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+  items           PurchaseDebitNoteItem[]
+
+  @@unique([tenantId, debitNoteNumber])
+  @@index([tenantId])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, status])
+  @@index([tenantId, purchaseInvoiceId])
+  @@map("purchase_debit_notes")
+}
+
+model PurchaseDebitNoteItem {
+  id                  String @id @default(uuid()) @db.Uuid
+  tenantId            String @db.Uuid
+  purchaseDebitNoteId String @db.Uuid
+
+  // Free-text line description — a Debit Note line is a commercial/
+  // accounting adjustment, not necessarily tied to a specific product/UOM
+  // (unlike PurchaseInvoiceItem), so no productId/UOM snapshot exists here.
+  description String
+
+  quantity Decimal @db.Decimal(19, 6)
+  unitCost Decimal @db.Decimal(19, 4)
+
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  // Tax code resolved fresh via AccountingTaxCodeClient at line-creation time
+  // (mirrors PurchaseOrdersService.mapLines() — there is no PO/GR line to
+  // copy a tax snapshot from, unlike PurchaseInvoiceItem).
+  taxCodeId   String? @db.Uuid
+  taxCode     String?
+  taxCodeName String?
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  lineSubtotal Decimal @db.Decimal(19, 4)
+  lineTotal    Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchaseDebitNote PurchaseDebitNote                   @relation(fields: [purchaseDebitNoteId], references: [id], onDelete: Cascade)
+  taxComponents     PurchaseDebitNoteItemTaxComponent[]
+
+  @@index([tenantId])
+  @@index([purchaseDebitNoteId])
+  @@map("purchase_debit_note_items")
+}
+
+model PurchaseDebitNoteItemTaxComponent {
+  id                      String   @id @default(uuid()) @db.Uuid
+  tenantId                String   @db.Uuid
+  purchaseDebitNoteItemId String   @db.Uuid
+  sequence                Int
+  type                    String
+  name                    String?
+  rate                    Decimal  @db.Decimal(7, 4)
+  componentTaxAmount      Decimal  @db.Decimal(19, 4)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  purchaseDebitNoteItem PurchaseDebitNoteItem @relation(fields: [purchaseDebitNoteItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([purchaseDebitNoteItemId])
+  @@map("purchase_debit_note_item_tax_components")
 }

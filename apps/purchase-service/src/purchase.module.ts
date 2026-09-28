@@ -10,6 +10,7 @@ import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { PurchaseInvoicesModule } from './purchase-invoices/purchase-invoices.module';
 import { PurchaseReturnsModule } from './purchase-returns/purchase-returns.module';
+import { PurchaseDebitNotesModule } from './purchase-debit-notes/purchase-debit-notes.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     GoodsReceiptsModule,
     PurchaseInvoicesModule,
     PurchaseReturnsModule,
+    PurchaseDebitNotesModule,
     AccountsPayableModule,
     MessagingModule.register(),
   ],

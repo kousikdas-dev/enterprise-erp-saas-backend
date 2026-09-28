@@ -56,6 +56,7 @@
                 <th>Supplier</th>
                 <th class="text-end">Total Invoiced</th>
                 <th class="text-end">Total Paid</th>
+                <th class="text-end">Debit Notes</th>
                 <th class="text-end">Outstanding</th>
                 <th class="text-center">Open Invoices</th>
                 <th class="text-end">Actions</th>
@@ -67,6 +68,7 @@
                 <td>{{ s.supplierName }}</td>
                 <td class="text-end">{{ s.totalInvoiced }}</td>
                 <td class="text-end">{{ s.totalPaid }}</td>
+                <td class="text-end">{{ s.totalDebitNotes }}</td>
                 <td class="text-end fw-bold">{{ s.totalOutstanding }}</td>
                 <td class="text-center">{{ s.outstandingInvoiceCount }}</td>
                 <td class="text-end">

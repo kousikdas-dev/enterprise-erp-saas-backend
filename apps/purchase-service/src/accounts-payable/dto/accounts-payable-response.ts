@@ -18,17 +18,22 @@ export interface SupplierApSummaryRow {
   supplierName: string;
   totalInvoiced: Prisma.Decimal;
   totalPaid: Prisma.Decimal;
+  /** Phase 3.13 — Σtotal of this supplier's currently-POSTED (not yet
+   * REVERSED) Debit Notes. A REVERSED Debit Note is excluded entirely
+   * (its reduction no longer applies), never subtracted-then-added-back. */
+  totalDebitNotes: Prisma.Decimal;
   outstandingInvoiceCount: number;
 }
 
 export function toSupplierApSummary(row: SupplierApSummaryRow) {
-  const totalOutstanding = row.totalInvoiced.minus(row.totalPaid);
+  const totalOutstanding = row.totalInvoiced.minus(row.totalPaid).minus(row.totalDebitNotes);
   return {
     supplierId: row.supplierId,
     supplierCode: row.supplierCode,
     supplierName: row.supplierName,
     totalInvoiced: moneyToString(row.totalInvoiced),
     totalPaid: moneyToString(row.totalPaid),
+    totalDebitNotes: moneyToString(row.totalDebitNotes),
     totalOutstanding: moneyToString(totalOutstanding),
     outstandingInvoiceCount: row.outstandingInvoiceCount,
   };
@@ -117,12 +122,12 @@ export function toApAgingRow(row: ApAgingRowInput) {
 }
 
 /** One row from the raw windowed supplier-statement query — a single
- * INVOICE, PAYMENT, or PAYMENT_REVERSAL line, mirroring
- * AccountLedgerRawRow's shape/role in accounting-service. */
+ * INVOICE, PAYMENT, PAYMENT_REVERSAL, DEBIT_NOTE, or DEBIT_NOTE_REVERSAL
+ * line, mirroring AccountLedgerRawRow's shape/role in accounting-service. */
 export interface SupplierApStatementRawRow {
   id: string;
   date: Date;
-  type: 'INVOICE' | 'PAYMENT' | 'PAYMENT_REVERSAL';
+  type: 'INVOICE' | 'PAYMENT' | 'PAYMENT_REVERSAL' | 'DEBIT_NOTE' | 'DEBIT_NOTE_REVERSAL';
   reference: string;
   description: string | null;
   amount: Prisma.Decimal | string;

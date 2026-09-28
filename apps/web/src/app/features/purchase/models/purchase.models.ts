@@ -466,6 +466,8 @@ export interface SupplierApSummary {
   supplierName: string;
   totalInvoiced: string;
   totalPaid: string;
+  /** Sum of currently-POSTED (not REVERSED) Debit Notes. */
+  totalDebitNotes: string;
   totalOutstanding: string;
   outstandingInvoiceCount: number;
 }
@@ -519,7 +521,12 @@ export interface ApAgingResult {
   totalsByBucket: Record<string, string>;
 }
 
-export type ApStatementLineType = 'INVOICE' | 'PAYMENT' | 'PAYMENT_REVERSAL';
+export type ApStatementLineType =
+  | 'INVOICE'
+  | 'PAYMENT'
+  | 'PAYMENT_REVERSAL'
+  | 'DEBIT_NOTE'
+  | 'DEBIT_NOTE_REVERSAL';
 
 export interface SupplierApStatementLine {
   date: string;
@@ -549,4 +556,90 @@ export interface ApReconciliationSummary {
   glAccountsPayableBalance: string | null;
   difference: string | null;
   matches: boolean;
+}
+
+// Phase 3.13 — Purchase Debit Note: a standalone Accounts Payable adjustment
+// document with no physical goods movement. Deliberately separate from
+// PurchaseReturn (see PurchaseReturn above, which remains the physical-goods
+// return document).
+export type DebitNoteStatus = 'DRAFT' | 'POSTED' | 'REVERSED';
+export type DebitNotePostingStatus = 'NOT_POSTED' | 'POSTED' | 'FAILED' | 'REVERSED';
+
+export interface PurchaseDebitNoteItemTaxComponent {
+  id: string;
+  sequence: number;
+  type: string;
+  name: string | null;
+  rate: string;
+  componentTaxAmount: string;
+}
+
+export interface PurchaseDebitNoteItem {
+  id: string;
+  purchaseDebitNoteId: string;
+  description: string;
+  quantity: string;
+  unitCost: string;
+  discountPercent: string;
+  discountAmount: string;
+  taxCodeId: string | null;
+  taxCode: string | null;
+  taxCodeName: string | null;
+  taxAmount: string;
+  lineSubtotal: string;
+  lineTotal: string;
+  taxComponents: PurchaseDebitNoteItemTaxComponent[];
+}
+
+export interface PurchaseDebitNote {
+  id: string;
+  tenantId: string;
+  debitNoteNumber: string;
+  supplierId: string;
+  supplierName: string;
+  supplierGstin: string | null;
+  supplierBillingAddress: string | null;
+  /** Optional traceability-only reference — never required. */
+  purchaseInvoiceId: string | null;
+  debitNoteDate: string;
+  reason: string | null;
+  notes: string | null;
+  subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
+  total: string;
+  status: DebitNoteStatus | string;
+  postedAt: string | null;
+  postedBy: string | null;
+  reversedAt: string | null;
+  reversedBy: string | null;
+  reversalReason: string | null;
+  accountingPostingStatus: DebitNotePostingStatus | string;
+  journalEntryId: string | null;
+  reversalJournalEntryId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  items: PurchaseDebitNoteItem[];
+}
+
+export interface CreatePurchaseDebitNoteLineRequest {
+  description: string;
+  quantity: string;
+  unitCost: string;
+  discountPercent?: string;
+  taxCodeId?: string;
+}
+
+export interface CreatePurchaseDebitNoteRequest {
+  supplierId: string;
+  purchaseInvoiceId?: string;
+  debitNoteDate?: string;
+  reason?: string;
+  notes?: string;
+  items: CreatePurchaseDebitNoteLineRequest[];
+}
+
+export interface ReversePurchaseDebitNoteRequest {
+  reason?: string;
 }

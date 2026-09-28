@@ -8,6 +8,7 @@ import { PurchaseForwardService } from './purchase-forward.service';
 import { PurchaseInvoicesController } from './purchase-invoices.controller';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseReturnsController } from './purchase-returns.controller';
+import { PurchaseDebitNotesController } from './purchase-debit-notes.controller';
 import { SupplierAddressesController } from './supplier-addresses.controller';
 import { SuppliersController } from './suppliers.controller';
 
@@ -27,6 +28,7 @@ import { SuppliersController } from './suppliers.controller';
     GoodsReceiptsController,
     PurchaseInvoicesController,
     PurchaseReturnsController,
+    PurchaseDebitNotesController,
     AccountsPayableController,
   ],
   providers: [PurchaseForwardService],

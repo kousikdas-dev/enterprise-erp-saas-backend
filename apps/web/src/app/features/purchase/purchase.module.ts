@@ -8,6 +8,7 @@ import { GoodsReceiptListComponent } from './goods-receipts/goods-receipt-list.c
 import { PurchaseOrderListComponent } from './purchase-orders/purchase-order-list.component';
 import { PurchaseInvoiceListComponent } from './purchase-invoices/purchase-invoice-list.component';
 import { PurchaseReturnListComponent } from './purchase-returns/purchase-return-list.component';
+import { PurchaseDebitNoteListComponent } from './purchase-debit-notes/purchase-debit-note-list.component';
 import { SupplierListComponent } from './suppliers/supplier-list.component';
 
 const routes: Routes = [
@@ -38,6 +39,11 @@ const routes: Routes = [
     data: { extraParameter: 'purchaseMenu' },
   },
   {
+    path: 'purchase-debit-notes',
+    component: PurchaseDebitNoteListComponent,
+    data: { extraParameter: 'purchaseMenu' },
+  },
+  {
     path: 'accounts-payable',
     component: AccountsPayableListComponent,
     data: { extraParameter: 'purchaseMenu' },
@@ -51,6 +57,7 @@ const routes: Routes = [
     GoodsReceiptListComponent,
     PurchaseInvoiceListComponent,
     PurchaseReturnListComponent,
+    PurchaseDebitNoteListComponent,
     AccountsPayableListComponent,
   ],
   imports: [

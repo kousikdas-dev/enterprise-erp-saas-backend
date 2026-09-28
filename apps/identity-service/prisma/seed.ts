@@ -272,6 +272,26 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Reverse supplier payments and retry their accounting posting/reversal',
   },
   {
+    resource: 'purchase-debit-notes',
+    action: 'create',
+    description: 'Create purchase debit notes',
+  },
+  {
+    resource: 'purchase-debit-notes',
+    action: 'read',
+    description: 'Read purchase debit notes',
+  },
+  {
+    resource: 'purchase-debit-notes',
+    action: 'post',
+    description: 'Post purchase debit notes and retry their accounting posting',
+  },
+  {
+    resource: 'purchase-debit-notes',
+    action: 'reverse',
+    description: 'Reverse purchase debit notes and retry their accounting reversal',
+  },
+  {
     resource: 'accounts-payable',
     action: 'read',
     description: 'Read Accounts Payable supplier summaries, invoice ledger, aging, statements, and GL reconciliation',

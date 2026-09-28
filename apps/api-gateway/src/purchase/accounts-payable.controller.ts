@@ -93,7 +93,7 @@ export class AccountsPayableController {
   @ApiOperation({
     summary: 'Supplier AP statement',
     description:
-      'A running-balance statement of INVOICE/PAYMENT/PAYMENT_REVERSAL lines for one supplier, paginated. Permission: accounts-payable.read.',
+      'A running-balance statement of INVOICE/PAYMENT/PAYMENT_REVERSAL/DEBIT_NOTE/DEBIT_NOTE_REVERSAL lines for one supplier, paginated. Permission: accounts-payable.read.',
   })
   @ApiOkResponse({ type: SupplierApStatementDto })
   @ApiManagementErrors()

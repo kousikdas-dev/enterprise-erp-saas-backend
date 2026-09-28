@@ -86,6 +86,8 @@ export class SupplierApSummaryDto {
   @ApiProperty() supplierName!: string;
   @ApiProperty() totalInvoiced!: string;
   @ApiProperty() totalPaid!: string;
+  @ApiProperty({ description: 'Sum of currently-POSTED (not REVERSED) Debit Notes.' })
+  totalDebitNotes!: string;
   @ApiProperty() totalOutstanding!: string;
   @ApiProperty() outstandingInvoiceCount!: number;
 }
@@ -153,7 +155,10 @@ export class ApAgingResultDto {
 
 export class SupplierApStatementLineDto {
   @ApiProperty() date!: string;
-  @ApiProperty({ enum: ['INVOICE', 'PAYMENT', 'PAYMENT_REVERSAL'] }) type!: string;
+  @ApiProperty({
+    enum: ['INVOICE', 'PAYMENT', 'PAYMENT_REVERSAL', 'DEBIT_NOTE', 'DEBIT_NOTE_REVERSAL'],
+  })
+  type!: string;
   @ApiProperty() reference!: string;
   @ApiPropertyOptional({ nullable: true }) description!: string | null;
   @ApiProperty() amount!: string;

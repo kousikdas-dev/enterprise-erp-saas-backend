@@ -75,6 +75,17 @@ export class AccountsPayableService {
       outstandingCounts.map((row) => [row.supplierId, row._count._all]),
     );
 
+    // Phase 3.13 — only currently-POSTED (not REVERSED) Debit Notes reduce
+    // AP; a REVERSED one is excluded entirely rather than netted.
+    const debitNoteGroups = await this.prisma.purchaseDebitNote.groupBy({
+      by: ['supplierId'],
+      where: { tenantId: actor.tenantId, status: 'POSTED' },
+      _sum: { total: true },
+    });
+    const debitNotesBySupplier = new Map(
+      debitNoteGroups.map((row) => [row.supplierId, row._sum.total ?? ZERO]),
+    );
+
     const supplierIds = grouped.map((row) => row.supplierId);
     const suppliers = await this.prisma.supplier.findMany({
       where: { tenantId: actor.tenantId, id: { in: supplierIds } },
@@ -86,18 +97,22 @@ export class AccountsPayableService {
       const supplier = supplierById.get(row.supplierId);
       const totalInvoiced = row._sum.total ?? ZERO;
       const totalPaid = row._sum.amountPaid ?? ZERO;
+      const totalDebitNotes = debitNotesBySupplier.get(row.supplierId) ?? ZERO;
       return {
         supplierId: row.supplierId,
         supplierCode: supplier?.code ?? '',
         supplierName: supplier?.name ?? '',
         totalInvoiced,
         totalPaid,
+        totalDebitNotes,
         outstandingInvoiceCount: outstandingCountBySupplier.get(row.supplierId) ?? 0,
       };
     });
 
     const filtered = onlyOutstanding
-      ? rows.filter((row) => row.totalInvoiced.minus(row.totalPaid).greaterThan(0))
+      ? rows.filter((row) =>
+          row.totalInvoiced.minus(row.totalPaid).minus(row.totalDebitNotes).greaterThan(0),
+        )
       : rows;
 
     filtered.sort((a, b) => a.supplierName.localeCompare(b.supplierName));
@@ -126,6 +141,10 @@ export class AccountsPayableService {
         paymentStatus: { not: 'PAID' },
       },
     });
+    const debitNoteAgg = await this.prisma.purchaseDebitNote.aggregate({
+      where: { tenantId: actor.tenantId, supplierId, status: 'POSTED' },
+      _sum: { total: true },
+    });
 
     return toSupplierApSummary({
       supplierId: supplier.id,
@@ -133,6 +152,7 @@ export class AccountsPayableService {
       supplierName: supplier.name,
       totalInvoiced: agg._sum.total ?? ZERO,
       totalPaid: agg._sum.amountPaid ?? ZERO,
+      totalDebitNotes: debitNoteAgg._sum.total ?? ZERO,
       outstandingInvoiceCount,
     });
   }
@@ -315,9 +335,19 @@ export class AccountsPayableService {
       where: { tenantId: actor.tenantId, status: 'CONFIRMED' },
       _sum: { total: true, amountPaid: true },
     });
-    const subledgerTotalOutstanding = (agg._sum.total ?? ZERO).minus(
-      agg._sum.amountPaid ?? ZERO,
-    );
+    // Phase 3.13 — algebraically equivalent to "posted debit notes minus
+    // reversed debit notes" (a debit note that is later reversed no longer
+    // reduces AP): filtering to status POSTED already excludes REVERSED
+    // rows entirely, so there is nothing left to add back. Mirrors
+    // amountPaid's own reversal-aware running total (never re-summed from
+    // scratch minus a separate reversal total).
+    const debitNoteAgg = await this.prisma.purchaseDebitNote.aggregate({
+      where: { tenantId: actor.tenantId, status: 'POSTED' },
+      _sum: { total: true },
+    });
+    const subledgerTotalOutstanding = (agg._sum.total ?? ZERO)
+      .minus(agg._sum.amountPaid ?? ZERO)
+      .minus(debitNoteAgg._sum.total ?? ZERO);
 
     const mapping = await this.ledgerClient.findAccountsPayableMapping(actor);
     if (!mapping) {
@@ -367,19 +397,56 @@ export class AccountsPayableService {
       },
       _sum: { amount: true },
     });
+    // Phase 3.13 — mirrors the payment/reversal pair immediately above: a
+    // Debit Note posted before beforeDate always counted against the
+    // balance at that point in time, and if it was ALSO reversed before
+    // beforeDate, the reversal line adds that amount back — regardless of
+    // the debit note's CURRENT status (unlike the current-outstanding
+    // aggregates above, this is a point-in-time balance).
+    const debitNoteAgg = await this.prisma.purchaseDebitNote.aggregate({
+      where: {
+        tenantId: actor.tenantId,
+        supplierId,
+        status: { in: ['POSTED', 'REVERSED'] },
+        debitNoteDate: { lt: beforeDate },
+      },
+      _sum: { total: true },
+    });
+    const debitNoteReversalAgg = await this.prisma.purchaseDebitNote.aggregate({
+      where: {
+        tenantId: actor.tenantId,
+        supplierId,
+        status: 'REVERSED',
+        reversedAt: { lt: beforeDate },
+      },
+      _sum: { total: true },
+    });
 
     const invoiceTotal = invoiceAgg._sum.total ?? ZERO;
     const paymentTotal = paymentAgg._sum.amount ?? ZERO;
     const reversalTotal = reversalAgg._sum.amount ?? ZERO;
-    return invoiceTotal.minus(paymentTotal).plus(reversalTotal);
+    const debitNoteTotal = debitNoteAgg._sum.total ?? ZERO;
+    const debitNoteReversalTotal = debitNoteReversalAgg._sum.total ?? ZERO;
+    return invoiceTotal
+      .minus(paymentTotal)
+      .plus(reversalTotal)
+      .minus(debitNoteTotal)
+      .plus(debitNoteReversalTotal);
   }
 
-  /** The three-way UNION behind the supplier AP statement: every CONFIRMED
+  /** The five-way UNION behind the supplier AP statement: every CONFIRMED
    * invoice (+total, on invoiceDate) as an INVOICE line, every payment
-   * (-amount, on paymentDate, regardless of status) as a PAYMENT line, and
-   * every REVERSED payment additionally (+amount, on reversedAt) as a
-   * PAYMENT_REVERSAL line — so a reversed payment always nets to zero
-   * across its two lines rather than being silently omitted. */
+   * (-amount, on paymentDate, regardless of status) as a PAYMENT line, every
+   * REVERSED payment additionally (+amount, on reversedAt) as a
+   * PAYMENT_REVERSAL line (so a reversed payment always nets to zero across
+   * its two lines rather than being silently omitted), every ever-POSTED
+   * debit note (-total, on debitNoteDate, regardless of current status) as a
+   * DEBIT_NOTE line, and every REVERSED debit note additionally (+total, on
+   * reversedAt) as a DEBIT_NOTE_REVERSAL line — the exact mirror of the
+   * PAYMENT/PAYMENT_REVERSAL pair, opposite sign (a debit note reduces AP,
+   * a payment also reduces AP — both negative — while their reversals add
+   * the amount back, both positive). A DRAFT debit note (never posted)
+   * never appears here at all. */
   private statementLinesCte(
     actor: ActorContext,
     supplierId: string,
@@ -436,6 +503,39 @@ export class AccountsPayableService {
         AND sp."reversedAt" IS NOT NULL
         AND (${fromDate}::timestamptz IS NULL OR sp."reversedAt" >= ${fromDate}::timestamptz)
         AND (${toDateExclusive}::timestamptz IS NULL OR sp."reversedAt" < ${toDateExclusive}::timestamptz)
+
+      UNION ALL
+
+      SELECT
+        pdn.id AS id,
+        pdn."debitNoteDate" AS date,
+        'DEBIT_NOTE' AS type,
+        pdn."debitNoteNumber" AS reference,
+        pdn.reason AS description,
+        -pdn.total AS amount
+      FROM purchase_debit_notes pdn
+      WHERE pdn."tenantId" = ${actor.tenantId}::uuid
+        AND pdn."supplierId" = ${supplierId}::uuid
+        AND pdn.status IN ('POSTED'::"DebitNoteStatus", 'REVERSED'::"DebitNoteStatus")
+        AND (${fromDate}::timestamptz IS NULL OR pdn."debitNoteDate" >= ${fromDate}::timestamptz)
+        AND (${toDateExclusive}::timestamptz IS NULL OR pdn."debitNoteDate" < ${toDateExclusive}::timestamptz)
+
+      UNION ALL
+
+      SELECT
+        pdn.id AS id,
+        pdn."reversedAt" AS date,
+        'DEBIT_NOTE_REVERSAL' AS type,
+        pdn."debitNoteNumber" AS reference,
+        pdn."reversalReason" AS description,
+        pdn.total AS amount
+      FROM purchase_debit_notes pdn
+      WHERE pdn."tenantId" = ${actor.tenantId}::uuid
+        AND pdn."supplierId" = ${supplierId}::uuid
+        AND pdn.status = 'REVERSED'::"DebitNoteStatus"
+        AND pdn."reversedAt" IS NOT NULL
+        AND (${fromDate}::timestamptz IS NULL OR pdn."reversedAt" >= ${fromDate}::timestamptz)
+        AND (${toDateExclusive}::timestamptz IS NULL OR pdn."reversedAt" < ${toDateExclusive}::timestamptz)
     `;
   }
 }
