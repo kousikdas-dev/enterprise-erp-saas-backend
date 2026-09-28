@@ -22,7 +22,7 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto): Promise<LoginResult> {
-    const tenantCode = dto.tenantCode.trim();
+    const tenantCode = dto.tenantCode.trim().toUpperCase();
     const email = dto.email.trim().toLowerCase();
 
     const tenant = await this.prisma.tenant.findUnique({

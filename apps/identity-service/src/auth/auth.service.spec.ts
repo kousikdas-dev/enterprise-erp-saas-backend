@@ -10,7 +10,7 @@ import { TokenService } from './token.service';
 const TENANT_A = {
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Acme',
-  code: 'acme',
+  code: 'ACME',
   status: TenantStatus.ACTIVE,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -19,7 +19,7 @@ const TENANT_A = {
 const TENANT_B = {
   id: '22222222-2222-4222-8222-222222222222',
   name: 'Globex',
-  code: 'globex',
+  code: 'GLOBEX',
   status: TenantStatus.ACTIVE,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -156,6 +156,21 @@ describe('AuthService', () => {
     expect(payload).not.toHaveProperty('password');
     expect(payload).not.toHaveProperty('passwordHash');
     expect(payload).not.toHaveProperty('firstName');
+  });
+
+  it('normalizes a lower/mixed-case tenantCode to uppercase before lookup, so login still succeeds', async () => {
+    prisma.tenant.findUnique.mockResolvedValue(TENANT_A);
+    prisma.user.findUnique.mockResolvedValue(userRecord(UserStatus.ACTIVE));
+
+    const result = await service.login({
+      ...loginDto,
+      tenantCode: '  Acme  ',
+    });
+
+    expect(prisma.tenant.findUnique).toHaveBeenCalledWith({
+      where: { code: TENANT_A.code },
+    });
+    expect(result.accessToken.split('.')).toHaveLength(3);
   });
 
   it('rejects an invalid password with a generic error', async () => {
