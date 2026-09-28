@@ -103,6 +103,15 @@ export class ResolveShipmentLineConversionDto {
   note?: string;
 }
 
+// Phase 3.16 (Shipment Cancellation / COGS Reversal)
+export class ReverseShipmentDto {
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 export class ShipmentDto {
   @ApiProperty()
   id!: string;
@@ -118,6 +127,30 @@ export class ShipmentDto {
 
   @ApiProperty()
   status!: string;
+
+  @ApiProperty({ nullable: true })
+  shippedAt!: string | null;
+
+  @ApiProperty()
+  createdAt!: string;
+
+  @ApiProperty()
+  updatedAt!: string;
+
+  @ApiProperty({ enum: ['NOT_POSTED', 'POSTED', 'FAILED', 'REVERSED'] })
+  accountingPostingStatus!: string;
+
+  @ApiProperty({ format: 'uuid', nullable: true })
+  journalEntryId!: string | null;
+
+  @ApiProperty({ format: 'uuid', nullable: true })
+  reversalJournalEntryId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  reversedAt!: string | null;
+
+  @ApiProperty({ nullable: true })
+  reversalReason!: string | null;
 
   @ApiProperty({ type: [ShipmentItemDto] })
   items!: ShipmentItemDto[];

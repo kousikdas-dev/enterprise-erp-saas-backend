@@ -113,6 +113,7 @@ export const PERMISSIONS = {
   SHIPMENTS_READ: 'shipments.read',
   SHIPMENTS_POST: 'shipments.post',
   SHIPMENTS_RESOLVE_CONVERSION: 'shipments.resolve-conversion',
+  SHIPMENTS_REVERSE: 'shipments.reverse',
   ACCOUNTS_CREATE: 'accounts.create',
   ACCOUNTS_READ: 'accounts.read',
   ACCOUNTS_UPDATE: 'accounts.update',

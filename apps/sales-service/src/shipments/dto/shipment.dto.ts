@@ -48,3 +48,11 @@ export class ResolveShipmentLineConversionDto {
   @MaxLength(500)
   note?: string;
 }
+
+// Phase 3.16 (Shipment Cancellation / COGS Reversal)
+export class ReverseShipmentDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}

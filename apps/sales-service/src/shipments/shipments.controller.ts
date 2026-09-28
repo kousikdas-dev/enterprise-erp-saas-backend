@@ -17,6 +17,7 @@ import { requestAuditMeta } from '../http/request-audit-meta';
 import {
   CreateShipmentDto,
   ResolveShipmentLineConversionDto,
+  ReverseShipmentDto,
 } from './dto/shipment.dto';
 import { ShipmentsService } from './shipments.service';
 
@@ -63,6 +64,29 @@ export class ShipmentsController {
     @Req() request: Request,
   ) {
     return this.shipments.retryAccountingPosting(
+      actor,
+      id,
+      requestAuditMeta(request),
+    );
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseShipmentDto,
+    @Req() request: Request,
+  ) {
+    return this.shipments.reverse(actor, id, dto, requestAuditMeta(request));
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  retryAccountingReversal(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.shipments.retryAccountingReversal(
       actor,
       id,
       requestAuditMeta(request),

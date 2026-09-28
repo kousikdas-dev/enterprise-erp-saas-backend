@@ -48,18 +48,26 @@ enum ShipmentStatus {
   PENDING_STOCK
   POSTED
   UOM_RESOLUTION_REQUIRED
+  // Phase 3.16 (Shipment Cancellation / COGS Reversal) — undoes a POSTED
+  // shipment's effects on Inventory, COGS accounting, and
+  // SalesOrderItem.shippedQuantity / SalesOrder.status. Full-shipment-only
+  // (never partial), and only when zero downstream activity exists (no
+  // Sales Return recorded against any line) — see ShipmentsService.reverse()'s
+  // own doc comment. Mirrors GoodsReceiptStatus.REVERSED (Phase 3.7) exactly.
+  REVERSED
 }
 
-// Phase 3.3 (Sales Shipment COGS) — Shipment posting can only ever be
-// NOT_POSTED/POSTED/FAILED: Shipment reversal is not implemented (there is
-// no cancel/reverse operation on Shipment at all), so no REVERSED value is
-// representable here (mirrors GoodsReceiptPostingStatus on the Purchase
-// side exactly — same rationale, same narrower shape than an invoice-style
-// posting-status enum).
+// Phase 3.3 (Sales Shipment COGS) / Phase 3.16 (Shipment Cancellation) —
+// Shipment posting mirrors GoodsReceiptPostingStatus's exact four-value
+// shape (Shipment DOES have a reversal lifecycle, as of Phase 3.16). No
+// third "reversal failed" value: a failed reversal attempt deliberately
+// leaves this at POSTED, exactly like every other reversal in this codebase
+// — retryAccountingReversal() is the dedicated recovery path.
 enum ShipmentPostingStatus {
   NOT_POSTED
   POSTED
   FAILED
+  REVERSED
 }
 
 enum CustomerAddressType {
@@ -501,14 +509,22 @@ model Shipment {
 
   // Phase 3.3 (Sales Shipment COGS) — Sales-side cache of accounting-
   // service's own posting state, mirroring GoodsReceipt's identical Phase
-  // 3.1 pattern exactly. No reversalJournalEntryId: Shipment reversal is
-  // not implemented (no cancel/reverse operation exists on Shipment at all)
-  // — see ShipmentPostingStatus. No FK to accounting_db (separate database;
-  // soft reference). The authoritative idempotency guard is
-  // accounting-service's own unique constraint on
-  // (tenantId, sourceService, sourceType, sourceId), never this column.
+  // 3.1 pattern exactly. No FK to accounting_db (separate database; soft
+  // reference). The authoritative idempotency guard is accounting-service's
+  // own unique constraint on (tenantId, sourceService, sourceType,
+  // sourceId), never this column.
   accountingPostingStatus ShipmentPostingStatus @default(NOT_POSTED)
   journalEntryId          String?               @db.Uuid
+
+  // Phase 3.16 (Shipment Cancellation / COGS Reversal) — populated only
+  // once the accounting reversal succeeds (mirrors GoodsReceipt.
+  // reversalJournalEntryId exactly). NULL while status is REVERSED but the
+  // accounting reversal hasn't (yet) succeeded — retryable via
+  // retryAccountingReversal(), same shape as every other reversal in this
+  // codebase.
+  reversalJournalEntryId String?   @db.Uuid
+  reversedAt             DateTime?
+  reversalReason         String?
 
   salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
   items      ShipmentItem[]

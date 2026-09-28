@@ -17,6 +17,10 @@ type ShipmentWithItems = {
   // Phase 3.3 (Sales Shipment COGS)
   accountingPostingStatus: ShipmentPostingStatus;
   journalEntryId: string | null;
+  // Phase 3.16 (Shipment Cancellation / COGS Reversal)
+  reversalJournalEntryId: string | null;
+  reversedAt: Date | null;
+  reversalReason: string | null;
   items: Array<{
     id: string;
     tenantId: string;
@@ -55,6 +59,9 @@ export function toShipmentResponse(row: ShipmentWithItems) {
     updatedAt: row.updatedAt,
     accountingPostingStatus: row.accountingPostingStatus,
     journalEntryId: row.journalEntryId,
+    reversalJournalEntryId: row.reversalJournalEntryId,
+    reversedAt: row.reversedAt,
+    reversalReason: row.reversalReason,
     items: row.items.map((item) => ({
       id: item.id,
       tenantId: item.tenantId,

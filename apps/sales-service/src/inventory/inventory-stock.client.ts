@@ -53,8 +53,12 @@ export interface InventoryStockIssueResult {
 // own InventoryStockPurchaseReturnRequest shape exactly). Additive on the
 // inventory side (stock comes back in from the customer); costed at the
 // ORIGINAL SALE movement's own unitCost, never client-supplied.
+// Phase 3.16 (Shipment Cancellation / COGS Reversal) adds
+// 'shipment_reversal' — undoes the original SALE movement directly (the
+// root shipment-issue movement, never a derivative), also additive, also
+// costed at that SALE movement's own unitCost.
 export interface InventoryStockSalesReturnRequest {
-  referenceType: 'sales_return' | 'sales_return_reversal';
+  referenceType: 'sales_return' | 'sales_return_reversal' | 'shipment_reversal';
   referenceId: string;
   warehouseId: string;
   lines: Array<{

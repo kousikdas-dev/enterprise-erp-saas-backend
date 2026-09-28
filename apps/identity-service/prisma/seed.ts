@@ -469,6 +469,12 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Manually resolve a legacy shipment line UOM conversion',
   },
   {
+    resource: 'shipments',
+    action: 'reverse',
+    description:
+      'Reverse a POSTED shipment: undo its Inventory movement(s), restore SalesOrderItem.shippedQuantity/SalesOrder.status, and reverse the COGS journal',
+  },
+  {
     resource: 'accounts',
     action: 'create',
     description: 'Create chart of accounts entries',

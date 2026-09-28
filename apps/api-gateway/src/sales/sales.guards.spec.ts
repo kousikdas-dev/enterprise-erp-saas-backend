@@ -43,6 +43,20 @@ class ShipmentsProbeController {
   post(): { ok: true } {
     return { ok: true };
   }
+
+  @Post('reverse')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SHIPMENTS_REVERSE)
+  reverse(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Post('retry-accounting-reversal')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SHIPMENTS_REVERSE)
+  retryAccountingReversal(): { ok: true } {
+    return { ok: true };
+  }
 }
 
 @Controller('sales-invoices-retry-probe')
@@ -218,6 +232,34 @@ describe('sales JWT and RBAC', () => {
     getPermissionKeys.mockResolvedValue([PERMISSIONS.SHIPMENTS_POST]);
     await request(server)
       .post('/shipments-probe/post')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('requires shipments.reverse separately from post — reuses no other permission', async () => {
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SHIPMENTS_POST]);
+    await request(server)
+      .post('/shipments-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SHIPMENTS_REVERSE]);
+    await request(server)
+      .post('/shipments-probe/reverse')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(201);
+  });
+
+  it('gates the retry-accounting-reversal route by shipments.reverse, the same permission as reverse', async () => {
+    getPermissionKeys.mockResolvedValue([]);
+    await request(server)
+      .post('/shipments-probe/retry-accounting-reversal')
+      .set('Authorization', `Bearer ${signAccess()}`)
+      .expect(403);
+
+    getPermissionKeys.mockResolvedValue([PERMISSIONS.SHIPMENTS_REVERSE]);
+    await request(server)
+      .post('/shipments-probe/retry-accounting-reversal')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(201);
   });

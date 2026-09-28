@@ -38,6 +38,11 @@ export class CreateStockReturnDto {
   // but with SALE_RETURN's own direction inverted, since SALE_RETURN is
   // additive where PURCHASE_RETURN is subtractive; also sets
   // reversesMovementId).
+  // Phase 3.16 adds 'shipment_reversal' — reversing the original SALE
+  // movement directly (additive, mirrors goods_receipt_reversal's exact
+  // "undo the root movement directly" structure but with SALE's own
+  // direction inverted, since SALE is subtractive where PURCHASE is
+  // additive; also sets reversesMovementId).
   // Each maps to its own original-movement type and stock direction — see
   // StockReturnsService's RETURN_CONFIG.
   @IsIn([
@@ -46,13 +51,15 @@ export class CreateStockReturnDto {
     'purchase_return_reversal',
     'goods_receipt_reversal',
     'sales_return_reversal',
+    'shipment_reversal',
   ])
   referenceType!:
     | 'sales_return'
     | 'purchase_return'
     | 'purchase_return_reversal'
     | 'goods_receipt_reversal'
-    | 'sales_return_reversal';
+    | 'sales_return_reversal'
+    | 'shipment_reversal';
 
   @IsUUID()
   referenceId!: string;

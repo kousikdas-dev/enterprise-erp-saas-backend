@@ -30,6 +30,7 @@ import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import {
   CreateShipmentDto,
   ResolveShipmentLineConversionDto,
+  ReverseShipmentDto,
   ShipmentDto,
   ShipmentListDto,
 } from './dto/shipment.dto';
@@ -88,6 +89,59 @@ export class ShipmentsController {
     return this.sales.forward<ShipmentDto>({
       method: 'POST',
       path: `/api/v1/shipments/${id}/post`,
+      user,
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/reverse')
+  @RequirePermissions(PERMISSIONS.SHIPMENTS_REVERSE)
+  @ApiOperation({
+    summary: 'Reverse shipment',
+    description:
+      'Undoes a POSTED shipment in full: reverses its Inventory movement(s), restores SalesOrderItem.shippedQuantity and SalesOrder.status, and reverses the COGS journal. Only permitted when zero downstream activity exists (no Sales Return recorded against any line). Idempotent if already REVERSED. Permission: shipments.reverse.',
+  })
+  @ApiOkResponse({ type: ShipmentDto })
+  @ApiConflictResponse({
+    description:
+      'Only a POSTED shipment can be reversed, a line has a Sales Return recorded against it, has no captured inventory movement reference, or the shipped quantity has since been consumed elsewhere (insufficient stock)',
+  })
+  @ApiManagementErrors()
+  reverse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseShipmentDto,
+    @Req() request: Request,
+  ): Promise<ShipmentDto> {
+    return this.sales.forward<ShipmentDto>({
+      method: 'POST',
+      path: `/api/v1/shipments/${id}/reverse`,
+      user,
+      body: { ...dto },
+      ip: request.ip,
+      userAgent: headerString(request.headers['user-agent']),
+    });
+  }
+
+  @Post(':id/retry-accounting-reversal')
+  @RequirePermissions(PERMISSIONS.SHIPMENTS_REVERSE)
+  @ApiOperation({
+    summary: 'Retry shipment accounting reversal',
+    description:
+      'Retries the COGS journal reversal for a REVERSED shipment whose post-reversal accounting attempt failed (still accountingPostingStatus POSTED). A no-op returning the shipment unchanged if already REVERSED. Same permission as reverse. Permission: shipments.reverse.',
+  })
+  @ApiOkResponse({ type: ShipmentDto })
+  @ApiConflictResponse({ description: 'Shipment is not REVERSED, or has no posted journal to reverse' })
+  @ApiManagementErrors()
+  retryAccountingReversal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<ShipmentDto> {
+    return this.sales.forward<ShipmentDto>({
+      method: 'POST',
+      path: `/api/v1/shipments/${id}/retry-accounting-reversal`,
       user,
       ip: request.ip,
       userAgent: headerString(request.headers['user-agent']),

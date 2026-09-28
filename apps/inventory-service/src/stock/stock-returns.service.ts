@@ -21,7 +21,8 @@ type ReturnReferenceType =
   | 'purchase_return'
   | 'purchase_return_reversal'
   | 'goods_receipt_reversal'
-  | 'sales_return_reversal';
+  | 'sales_return_reversal'
+  | 'shipment_reversal';
 
 // Phase 3.5 — each supported referenceType maps to its own original-movement
 // type and stock direction. sales_return (Phase 3.4) is additive (mirrors a
@@ -105,6 +106,23 @@ const RETURN_CONFIG: Record<
     originalType: StockMovementType.SALE_RETURN,
     resultType: StockMovementType.SALE_RETURN_REVERSAL,
     direction: 'subtractive',
+    setsReversesMovementId: true,
+  },
+  // Phase 3.16 (Shipment Cancellation / COGS Reversal) — undoes a specific,
+  // identified SALE movement DIRECTLY (the root shipment-issue movement,
+  // never a derivative — a Shipment's own originalMovementId is always
+  // null, so the grandparent-decrement branch below correctly never fires
+  // for this entry). Additive (mirrors a receipt — stock coming back in,
+  // since SALE itself was subtractive), costed at that SALE movement's own
+  // unitCost verbatim. Always full-quantity — Shipment reversal is
+  // all-or-nothing by design (ShipmentsService.reverse() never sends a
+  // partial line). Sets reversesMovementId, giving the same DB-enforced
+  // "at most one reversal, ever" guarantee goods_receipt_reversal/
+  // sales_return_reversal get.
+  shipment_reversal: {
+    originalType: StockMovementType.SALE,
+    resultType: StockMovementType.SALE_REVERSAL,
+    direction: 'additive',
     setsReversesMovementId: true,
   },
 };

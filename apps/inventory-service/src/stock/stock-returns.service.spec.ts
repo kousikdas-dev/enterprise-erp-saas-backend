@@ -1238,4 +1238,171 @@ describe('StockReturnsService', () => {
       expect(result.movements[0].type).toBe(StockMovementType.PURCHASE_REVERSAL);
     });
   });
+
+  describe('shipment_reversal (Phase 3.16)', () => {
+    const reversalDto: CreateStockReturnDto = {
+      referenceType: 'shipment_reversal',
+      referenceId: shipmentId,
+      warehouseId,
+      lines: [{ productId, quantity: '20', originalMovementId }],
+    };
+
+    function originalSaleMovementRow(overrides: Record<string, unknown> = {}) {
+      return originalMovementRow({
+        type: 'SALE',
+        referenceType: 'shipment',
+        referenceId: shipmentId,
+        unitCost: decimal('12.0000'),
+        // A root SALE movement never has its own originalMovementId set —
+        // confirms the grandparent-decrement branch correctly never fires.
+        originalMovementId: null,
+        ...overrides,
+      });
+    }
+
+    it('applies a new shipment_reversal: SALE_REVERSAL movement at the ORIGINAL SALE cost, Stock increases, reversesMovementId set, no grandparent lock attempted', async () => {
+      const { service, tx } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          [originalSaleMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('0') })],
+          [{ id: 's1', quantity: decimal('30'), totalValue: decimal('360') }],
+        ],
+        movementCreate: {
+          id: 'mmmmmmmm-mmmm-4mmm-8mmm-mmmmmmmmmmmm',
+          tenantId: actor.tenantId,
+          productId,
+          warehouseId,
+          type: StockMovementType.SALE_REVERSAL,
+          quantity: decimal('20'),
+          referenceType: 'shipment_reversal',
+          referenceId: reversalDto.referenceId,
+          originalMovementId,
+          createdBy: actor.userId,
+          createdAt: new Date(),
+          unitCost: decimal('12'),
+          totalCost: decimal('240'),
+        },
+      });
+
+      const result = await service.apply(actor, reversalDto);
+
+      expect(result.created).toBe(true);
+      expect(result.movements[0].type).toBe(StockMovementType.SALE_REVERSAL);
+      expect(tx.stockMovement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: StockMovementType.SALE_REVERSAL,
+            referenceType: 'shipment_reversal',
+            originalMovementId,
+            reversesMovementId: originalMovementId,
+          }),
+        }),
+      );
+      const createData = (tx.stockMovement.create as jest.Mock).mock.calls[0][0].data;
+      // Original SALE movement's own unitCost (12), never the current stock
+      // average.
+      expect((createData.unitCost as Prisma.Decimal).toString()).toBe('12');
+      expect((createData.totalCost as Prisma.Decimal).toString()).toBe('240');
+      const stockUpdateData = (tx.stock.update as jest.Mock).mock.calls[0][0].data;
+      // Additive: 30 + 20 = 50 (opposite direction from the original issue).
+      expect((stockUpdateData.quantity as Prisma.Decimal).toString()).toBe('50');
+      expect((stockUpdateData.totalValue as Prisma.Decimal).toString()).toBe('600'); // 360 + 240
+      // No grandparent lock/update attempted — a root SALE movement has no
+      // originalMovementId of its own.
+      expect(tx.stockMovement.update).toHaveBeenCalledTimes(1); // only the target's own returnedQuantity update
+    });
+
+    it('rejects when the original movement is not a SALE (e.g. a SALE_RETURN)', async () => {
+      const { service } = createService({
+        queryResponses: [[{ id: 'app-1' }], [originalSaleMovementRow({ type: 'SALE_RETURN' })]],
+      });
+      await expect(service.apply(actor, reversalDto)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('caps at one full reversal via the shared returnedQuantity cap check (a second reversal attempt is rejected)', async () => {
+      const { service } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          // The SALE movement was already fully reversed once
+          // (returnedQuantity === quantity) — a second reversal must be
+          // rejected the same way a double return is.
+          [originalSaleMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('20') })],
+        ],
+      });
+      await expect(service.apply(actor, reversalDto)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('propagates a DB-level reversesMovementId unique-constraint violation rather than silently succeeding (defense-in-depth double-reversal guard)', async () => {
+      const uniqueConstraintError = Object.assign(
+        new Error('Unique constraint failed on the fields: (`reversesMovementId`)'),
+        { code: 'P2002', meta: { target: ['reversesMovementId'] } },
+      );
+      const { service, tx } = createService({
+        queryResponses: [
+          [{ id: 'app-1' }],
+          [originalSaleMovementRow({ quantity: decimal('20'), returnedQuantity: decimal('0') })],
+          [{ id: 's1', quantity: decimal('30'), totalValue: decimal('360') }],
+        ],
+      });
+      (tx.stockMovement.create as jest.Mock).mockRejectedValueOnce(uniqueConstraintError);
+
+      await expect(service.apply(actor, reversalDto)).rejects.toBe(uniqueConstraintError);
+    });
+
+    it('replays an existing shipment_reversal without creating a duplicate movement or updating stock again', async () => {
+      const { service, tx } = createService({ queryResponses: [[]] });
+      tx.stockReceiptApplication.findFirst.mockResolvedValue({
+        id: 'app-1',
+        tenantId: actor.tenantId,
+        referenceType: 'shipment_reversal',
+        referenceId: reversalDto.referenceId,
+        warehouseId,
+        payloadHash: stockReturnPayloadHash({
+          warehouseId,
+          originalReferenceType: undefined,
+          originalReferenceId: undefined,
+          lines: [{ productId, quantity: '20.000000', originalMovementId }],
+        }),
+      });
+      tx.stockMovement.findMany.mockResolvedValue([
+        {
+          id: 'm1',
+          tenantId: actor.tenantId,
+          productId,
+          warehouseId,
+          type: StockMovementType.SALE_REVERSAL,
+          quantity: decimal('20'),
+          referenceType: 'shipment_reversal',
+          referenceId: reversalDto.referenceId,
+          originalMovementId,
+          createdBy: actor.userId,
+          createdAt: new Date(),
+          unitCost: decimal('12'),
+          totalCost: decimal('240'),
+        },
+      ]);
+      tx.stock.findFirst.mockResolvedValue({
+        id: 's1',
+        tenantId: actor.tenantId,
+        productId,
+        warehouseId,
+        quantity: decimal('50'),
+        totalValue: decimal('600'),
+      });
+
+      const result = await service.apply(actor, {
+        ...reversalDto,
+        lines: [{ ...reversalDto.lines[0], quantity: '20.000000' }],
+      });
+
+      expect(result.created).toBe(false);
+      expect(tx.stockMovement.create).not.toHaveBeenCalled();
+      expect(tx.stock.update).not.toHaveBeenCalled();
+      expect(result.movements[0].type).toBe(StockMovementType.SALE_REVERSAL);
+    });
+  });
 });

@@ -1441,4 +1441,419 @@ describe('ShipmentsService', () => {
       });
     });
   });
+
+  describe('Phase 3.16 — Shipment Cancellation / COGS Reversal', () => {
+    const reverseShipmentId = '99999999-9999-4999-8999-999999999998';
+    const reverseSoItemId = 'r1111111-1111-4111-8111-111111111111';
+    const originalMovementId = 'mmmmmmmm-1111-4111-8111-111111111111';
+
+    function postedShipmentForReversal(overrides: Record<string, unknown> = {}) {
+      return {
+        id: reverseShipmentId,
+        tenantId,
+        salesOrderId: 'so1',
+        warehouseId,
+        status: ShipmentStatus.POSTED,
+        shippedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        accountingPostingStatus: 'POSTED',
+        journalEntryId: 'je-1',
+        reversalJournalEntryId: null,
+        reversedAt: null,
+        reversalReason: null,
+        items: [
+          {
+            id: 'shi-r1',
+            tenantId,
+            shipmentId: reverseShipmentId,
+            salesOrderItemId: reverseSoItemId,
+            productId,
+            productSku: 'SKU',
+            productName: 'Widget',
+            quantity: decimal('10'),
+            baseQuantity: decimal('10'),
+            inventoryMovementId: originalMovementId,
+            returnedQuantity: decimal('0'),
+            unitCost: decimal('12'),
+            totalCost: decimal('120'),
+            productTracksInventory: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+        ...overrides,
+      };
+    }
+
+    /** Builds the transaction client restoreAndReverseShipment() runs against. */
+    function buildReverseTx(shipment: ReturnType<typeof postedShipmentForReversal>) {
+      return {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([
+            { id: shipment.id, status: ShipmentStatus.POSTED, salesOrderId: shipment.salesOrderId },
+          ]) // 1: header lock
+          .mockResolvedValueOnce([]) // 2: sales_orders lock (bare)
+          .mockResolvedValueOnce(
+            shipment.items.map((item: { id: string; returnedQuantity: Prisma.Decimal }) => ({
+              id: item.id,
+              returnedQuantity: item.returnedQuantity,
+            })),
+          ) // 3: shipment_items lock
+          .mockResolvedValueOnce([]), // 4: sales_order_items lock (bare)
+        shipment: {
+          findFirstOrThrow: jest.fn().mockResolvedValue(shipment),
+          update: jest.fn().mockResolvedValue({
+            ...shipment,
+            status: ShipmentStatus.REVERSED,
+            reversedAt: new Date(),
+            reversalReason: null,
+          }),
+        },
+        salesOrderItem: {
+          findMany: jest
+            .fn()
+            .mockResolvedValueOnce([
+              { id: reverseSoItemId, quantity: decimal('100'), shippedQuantity: decimal('10') },
+            ])
+            .mockResolvedValueOnce([
+              { id: reverseSoItemId, quantity: decimal('100'), shippedQuantity: decimal('0') },
+            ]),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        salesOrder: { update: jest.fn().mockResolvedValue({}) },
+      };
+    }
+
+    function buildReverseHarness(overrides?: {
+      shipment?: ReturnType<typeof postedShipmentForReversal>;
+      accountingJournal?: ReturnType<typeof defaultAccountingJournal>;
+    }) {
+      const shipment = overrides?.shipment ?? postedShipmentForReversal();
+      const tx = buildReverseTx(shipment);
+      const prisma = {
+        shipment: {
+          findFirst: jest.fn().mockResolvedValue(shipment),
+          // attemptShipmentReversal()'s SUCCESS path — called post-commit,
+          // outside the transaction, directly via this.prisma (not tx).
+          update: jest.fn().mockResolvedValue({
+            ...shipment,
+            status: ShipmentStatus.REVERSED,
+            accountingPostingStatus: 'REVERSED',
+            reversalJournalEntryId: 'je-1-reversal',
+            reversedAt: new Date(),
+          }),
+        },
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+      };
+      const inventory = {
+        applyIssue: jest.fn(),
+        applyReturn: jest.fn().mockResolvedValue({ created: true, movements: [] }),
+      };
+      const accountingJournal =
+        overrides?.accountingJournal ??
+        defaultAccountingJournal({
+          reverse: jest
+            .fn()
+            .mockResolvedValue({ id: 'je-1-reversal', idempotentReplay: false }),
+        });
+      const audit = { record: jest.fn().mockResolvedValue(undefined) };
+      const service = buildService({ prisma, inventory, accountingJournal, audit });
+      return { service, prisma, tx, inventory, accountingJournal, audit, shipment };
+    }
+
+    it('reverses a POSTED shipment: calls Inventory applyReturn with the original movement id/baseQuantity, restores shippedQuantity/SalesOrder status, flips to REVERSED', async () => {
+      const { service, tx, inventory, audit } = buildReverseHarness();
+
+      const result = await service.reverse(actor, reverseShipmentId, {
+        reason: 'Customer cancelled',
+      });
+
+      expect(inventory.applyReturn).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          referenceType: 'shipment_reversal',
+          referenceId: reverseShipmentId,
+          warehouseId,
+          lines: [
+            { productId, quantity: '10.000000', originalMovementId },
+          ],
+        }),
+      );
+      expect(tx.salesOrderItem.update).toHaveBeenCalledWith({
+        where: { id: reverseSoItemId },
+        data: { shippedQuantity: decimal('0') },
+      });
+      expect(tx.salesOrder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: SalesOrderStatus.CONFIRMED } }),
+      );
+      expect(result.status).toBe(ShipmentStatus.REVERSED);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'shipment.reversed' }),
+      );
+    });
+
+    it('posts a mirrored reversal accounting entry and leaves the ORIGINAL journal untouched (no VOID) — reversalJournalEntryId set, journalEntryId unchanged', async () => {
+      const { service, accountingJournal } = buildReverseHarness();
+
+      const result = await service.reverse(actor, reverseShipmentId, {});
+
+      expect(accountingJournal.reverse).toHaveBeenCalledWith(
+        actor,
+        expect.objectContaining({
+          sourceService: 'sales-service',
+          sourceType: 'SHIPMENT',
+          sourceId: reverseShipmentId,
+          reversalSourceType: 'SHIPMENT_REVERSAL',
+        }),
+      );
+      expect(accountingJournal.reverse).toHaveBeenCalledTimes(1);
+      // The mirrored reversal is a SEPARATE journal (je-1-reversal) — the
+      // original (je-1) is never called with .post() again and its own id
+      // is never mutated by this flow.
+      expect(result.journalEntryId).toBe('je-1');
+      expect(result.reversalJournalEntryId).toBe('je-1-reversal');
+      expect(result.accountingPostingStatus).toBe('REVERSED');
+    });
+
+    it('duplicate reversal is idempotent: a second call on an already-REVERSED shipment returns the same reversalJournalEntryId and never calls Inventory or accounting-service again', async () => {
+      const reversedShipment = postedShipmentForReversal({
+        status: ShipmentStatus.REVERSED,
+        accountingPostingStatus: 'REVERSED',
+        reversalJournalEntryId: 'je-1-reversal',
+        reversedAt: new Date(),
+      });
+      const prisma = { shipment: { findFirst: jest.fn().mockResolvedValue(reversedShipment) } };
+      const inventory = { applyIssue: jest.fn(), applyReturn: jest.fn() };
+      const accountingJournal = defaultAccountingJournal();
+      const service = buildService({ prisma, inventory, accountingJournal });
+
+      const result = await service.reverse(actor, reverseShipmentId, {});
+
+      expect(inventory.applyReturn).not.toHaveBeenCalled();
+      expect(accountingJournal.reverse).not.toHaveBeenCalled();
+      expect(result.status).toBe(ShipmentStatus.REVERSED);
+      expect(result.reversalJournalEntryId).toBe('je-1-reversal');
+    });
+
+    it('rejects reversing a shipment that is not POSTED (e.g. PENDING_STOCK)', async () => {
+      const pending = postedShipmentForReversal({ status: ShipmentStatus.PENDING_STOCK });
+      const prisma = { shipment: { findFirst: jest.fn().mockResolvedValue(pending) } };
+      const inventory = { applyIssue: jest.fn(), applyReturn: jest.fn() };
+      const service = buildService({ prisma, inventory });
+
+      await expect(service.reverse(actor, reverseShipmentId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(inventory.applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('rejects reversal when a Sales Return has been recorded against a line (returnedQuantity > 0), and never calls Inventory', async () => {
+      const shipmentWithReturn = postedShipmentForReversal({
+        items: [
+          {
+            ...postedShipmentForReversal().items[0],
+            returnedQuantity: decimal('2'),
+          },
+        ],
+      });
+      const prisma = { shipment: { findFirst: jest.fn().mockResolvedValue(shipmentWithReturn) } };
+      const inventory = { applyIssue: jest.fn(), applyReturn: jest.fn() };
+      const service = buildService({ prisma, inventory });
+
+      await expect(service.reverse(actor, reverseShipmentId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(inventory.applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('a shipment whose COGS was never POSTED (e.g. NOT_POSTED) reverses inventory/status but never attempts an accounting reversal', async () => {
+      const notPosted = postedShipmentForReversal({
+        accountingPostingStatus: 'NOT_POSTED',
+        journalEntryId: null,
+      });
+      const { service, accountingJournal, inventory } = buildReverseHarness({ shipment: notPosted });
+
+      const result = await service.reverse(actor, reverseShipmentId, {});
+
+      expect(inventory.applyReturn).toHaveBeenCalledTimes(1);
+      expect(accountingJournal.reverse).not.toHaveBeenCalled();
+      expect(result.status).toBe(ShipmentStatus.REVERSED);
+      expect(result.accountingPostingStatus).toBe('NOT_POSTED');
+    });
+
+    it('rejects a line with no captured inventory movement reference, before calling Inventory', async () => {
+      const noMovement = postedShipmentForReversal({
+        items: [{ ...postedShipmentForReversal().items[0], inventoryMovementId: null }],
+      });
+      const prisma = { shipment: { findFirst: jest.fn().mockResolvedValue(noMovement) } };
+      const inventory = { applyIssue: jest.fn(), applyReturn: jest.fn() };
+      const service = buildService({ prisma, inventory });
+
+      await expect(service.reverse(actor, reverseShipmentId, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(inventory.applyReturn).not.toHaveBeenCalled();
+    });
+
+    it('is tenant-scoped: 404s rather than reversing a shipment belonging to another tenant', async () => {
+      const prisma = { shipment: { findFirst: jest.fn().mockResolvedValue(null) } };
+      const inventory = { applyIssue: jest.fn(), applyReturn: jest.fn() };
+      const service = buildService({ prisma, inventory });
+
+      await expect(
+        service.reverse(actor, 'someone-elses-shipment', {}),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.shipment.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'someone-elses-shipment', tenantId } }),
+      );
+    });
+
+    it('an accounting-service outage during reverse() leaves the shipment REVERSED with accountingPostingStatus still POSTED (not REVERSED) — internally consistent, retryable', async () => {
+      const shipment = postedShipmentForReversal();
+      const tx = buildReverseTx(shipment);
+      const reversedRow = {
+        ...shipment,
+        status: ShipmentStatus.REVERSED,
+        reversedAt: new Date(),
+      };
+      // reverse()'s own require() sees the still-POSTED shipment; the
+      // SECOND findFirst call — from attemptShipmentReversal()'s catch
+      // branch, AFTER the DB transaction has already committed REVERSED —
+      // sees the post-transaction REVERSED row. Nothing about the
+      // accounting failure below ever un-commits that transaction.
+      const prisma = {
+        shipment: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValueOnce(shipment)
+            .mockResolvedValueOnce(reversedRow),
+        },
+        $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
+      };
+      tx.shipment.update = jest.fn().mockResolvedValue(reversedRow);
+      const inventory = {
+        applyIssue: jest.fn(),
+        applyReturn: jest.fn().mockResolvedValue({ created: true, movements: [] }),
+      };
+      const accountingJournal = defaultAccountingJournal({
+        reverse: jest.fn().mockRejectedValue(new Error('accounting service down')),
+      });
+      const service = buildService({ prisma, inventory, accountingJournal });
+
+      const result = await service.reverse(actor, reverseShipmentId, {});
+
+      expect(result.status).toBe(ShipmentStatus.REVERSED);
+      // Reversal attempt failed — accountingPostingStatus deliberately left
+      // at whatever it already was (POSTED), never silently flipped.
+      expect(result.accountingPostingStatus).toBe('POSTED');
+      expect(result.reversalJournalEntryId).toBeNull();
+    });
+
+    describe('retryAccountingReversal()', () => {
+      function reversedShipmentRow(overrides: Record<string, unknown> = {}) {
+        return postedShipmentForReversal({
+          status: ShipmentStatus.REVERSED,
+          reversedAt: new Date(),
+          ...overrides,
+        });
+      }
+
+      it('rejects retry for a shipment that is not REVERSED', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(reversedShipmentRow({ status: ShipmentStatus.POSTED })),
+          },
+        };
+        const service = buildService({ prisma });
+
+        await expect(
+          service.retryAccountingReversal(actor, reverseShipmentId),
+        ).rejects.toBeInstanceOf(ConflictException);
+      });
+
+      it('rejects retry when there is no posted journal to reverse', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(
+              reversedShipmentRow({ accountingPostingStatus: 'NOT_POSTED', journalEntryId: null }),
+            ),
+          },
+        };
+        const service = buildService({ prisma });
+
+        await expect(
+          service.retryAccountingReversal(actor, reverseShipmentId),
+        ).rejects.toBeInstanceOf(ConflictException);
+      });
+
+      it('no-ops when accountingPostingStatus is already REVERSED (duplicate retry never creates a duplicate journal)', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(
+              reversedShipmentRow({
+                accountingPostingStatus: 'REVERSED',
+                reversalJournalEntryId: 'je-1-reversal',
+              }),
+            ),
+          },
+        };
+        const accountingJournal = defaultAccountingJournal();
+        const service = buildService({ prisma, accountingJournal });
+
+        const result = await service.retryAccountingReversal(actor, reverseShipmentId);
+
+        expect(accountingJournal.reverse).not.toHaveBeenCalled();
+        expect(result.reversalJournalEntryId).toBe('je-1-reversal');
+      });
+
+      it('retries and succeeds after accounting-service recovers, stamping exactly one reversalJournalEntryId', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(
+              reversedShipmentRow({ accountingPostingStatus: 'POSTED' }),
+            ),
+            update: jest.fn().mockResolvedValue(
+              reversedShipmentRow({
+                accountingPostingStatus: 'REVERSED',
+                reversalJournalEntryId: 'je-retry-reversal',
+              }),
+            ),
+          },
+        };
+        const accountingJournal = defaultAccountingJournal({
+          reverse: jest
+            .fn()
+            .mockResolvedValue({ id: 'je-retry-reversal', idempotentReplay: false }),
+        });
+        const audit = { record: jest.fn().mockResolvedValue(undefined) };
+        const service = buildService({ prisma, accountingJournal, audit });
+
+        const result = await service.retryAccountingReversal(actor, reverseShipmentId);
+
+        expect(accountingJournal.reverse).toHaveBeenCalledTimes(1);
+        expect(result.accountingPostingStatus).toBe('REVERSED');
+        expect(result.reversalJournalEntryId).toBe('je-retry-reversal');
+      });
+
+      it('surfaces the error when accounting-service is still unavailable on retry', async () => {
+        const prisma = {
+          shipment: {
+            findFirst: jest.fn().mockResolvedValue(
+              reversedShipmentRow({ accountingPostingStatus: 'POSTED' }),
+            ),
+          },
+        };
+        const accountingJournal = defaultAccountingJournal({
+          reverse: jest.fn().mockRejectedValue(new Error('still down')),
+        });
+        const service = buildService({ prisma, accountingJournal });
+
+        await expect(
+          service.retryAccountingReversal(actor, reverseShipmentId),
+        ).rejects.toThrow('still down');
+      });
+    });
+  });
 });

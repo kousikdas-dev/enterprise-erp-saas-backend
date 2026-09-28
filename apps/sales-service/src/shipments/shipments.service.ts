@@ -31,7 +31,11 @@ import {
 } from '../inventory/inventory-stock.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toShipmentResponse } from './dto/shipment-response';
-import { CreateShipmentDto, ResolveShipmentLineConversionDto } from './dto/shipment.dto';
+import {
+  CreateShipmentDto,
+  ResolveShipmentLineConversionDto,
+  ReverseShipmentDto,
+} from './dto/shipment.dto';
 
 const SHIPMENT_INCLUDE = {
   items: { orderBy: { createdAt: 'asc' as const } },
@@ -257,6 +261,283 @@ export class ShipmentsService {
       request,
     );
     return toShipmentResponse(finalRow);
+  }
+
+  /**
+   * Phase 3.16 (Shipment Cancellation / COGS Reversal) — undoes a POSTED
+   * shipment's effects on Inventory, COGS accounting, and
+   * SalesOrderItem.shippedQuantity / SalesOrder.status. Full-shipment-only
+   * (never partial), and only when zero downstream activity exists (no
+   * Sales Return recorded against any line — ShipmentItem.returnedQuantity
+   * === 0). Checked twice — a soft, pre-transaction read here (so the
+   * common "obviously blocked" case never calls Inventory at all) and
+   * again, authoritatively, under lock inside restoreAndReverseShipment()
+   * (closing the race window against a concurrent Sales Return
+   * confirmation). Inventory is a hard dependency (called first, must
+   * succeed — mirrors every other document's apply-before-finalize
+   * ordering, and GoodsReceiptsService.reverse()'s identical trade-off);
+   * the accounting reversal below is post-commit, best-effort, exactly like
+   * GoodsReceiptsService.reverse(). Idempotent: re-invoking on an
+   * already-REVERSED shipment is a no-op that never re-calls Inventory.
+   * Mirrors GoodsReceiptsService.reverse() exactly.
+   */
+  async reverse(
+    actor: ActorContext,
+    id: string,
+    dto: ReverseShipmentDto,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+    if (existing.status === ShipmentStatus.REVERSED) {
+      return toShipmentResponse(existing);
+    }
+    if (existing.status !== ShipmentStatus.POSTED) {
+      throw new ConflictException('Only a POSTED shipment can be reversed');
+    }
+
+    for (const item of existing.items) {
+      if (item.returnedQuantity.gt(0)) {
+        throw new ConflictException(
+          `Shipment line for product ${item.productSku} has a Sales Return recorded against it and cannot be reversed`,
+        );
+      }
+    }
+
+    const inventoryLines = existing.items.map((item) => {
+      const movementId = item.inventoryMovementId;
+      if (!movementId) {
+        throw new ConflictException(
+          `Shipment line for product ${item.productSku} has no captured inventory movement reference and cannot be reversed`,
+        );
+      }
+      if (!item.baseQuantity) {
+        throw new ConflictException(
+          `Shipment line ${item.id} has no persisted baseQuantity and cannot be reversed`,
+        );
+      }
+      return {
+        productId: item.productId,
+        quantity: quantityToString(item.baseQuantity),
+        originalMovementId: movementId,
+      };
+    });
+
+    await this.inventory.applyReturn(actor, {
+      referenceType: 'shipment_reversal',
+      referenceId: existing.id,
+      warehouseId: existing.warehouseId,
+      lines: inventoryLines,
+    });
+
+    const reversed = await this.prisma.$transaction((tx) =>
+      this.restoreAndReverseShipment(tx, actor, id, dto.reason),
+    );
+
+    await this.audit.record({
+      actor,
+      action: 'shipment.reversed',
+      resource: 'shipment',
+      resourceId: reversed.id,
+      metadata: {
+        salesOrderId: reversed.salesOrderId,
+        itemCount: reversed.items.length,
+        reason: dto.reason?.trim() || null,
+      },
+      request,
+    });
+
+    let finalRow = reversed;
+    if (
+      reversed.accountingPostingStatus === ShipmentPostingStatus.POSTED &&
+      reversed.journalEntryId
+    ) {
+      const { shipment: withReversal } = await this.attemptShipmentReversal(
+        actor,
+        reversed,
+        request,
+      );
+      finalRow = withReversal;
+    }
+
+    return toShipmentResponse(finalRow);
+  }
+
+  /**
+   * Phase 3.16 — the authoritative, lock-then-mutate half of reverse():
+   * restores SalesOrderItem.shippedQuantity/SalesOrder.status and flips the
+   * shipment to REVERSED. Re-verifies zero downstream activity under lock
+   * (closing the race window the outer reverse()'s own pre-check cannot).
+   * Idempotent: replays a concurrent double-reverse as a no-op. Mirrors
+   * GoodsReceiptsService.restoreAndReverseReceipt() exactly.
+   */
+  private async restoreAndReverseShipment(
+    tx: Prisma.TransactionClient,
+    actor: ActorContext,
+    shipmentId: string,
+    reason: string | undefined,
+  ) {
+    const shipmentRows = await tx.$queryRaw<
+      Array<{ id: string; status: string; salesOrderId: string }>
+    >(
+      Prisma.sql`
+        SELECT id, status::text AS status, "salesOrderId"
+        FROM shipments
+        WHERE id = ${shipmentId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+        FOR UPDATE
+      `,
+    );
+    const locked = shipmentRows[0];
+    if (!locked) throw new NotFoundException('Shipment not found');
+    if (locked.status === ShipmentStatus.REVERSED) {
+      return tx.shipment.findFirstOrThrow({
+        where: { id: shipmentId, tenantId: actor.tenantId },
+        include: SHIPMENT_INCLUDE,
+      });
+    }
+    if (locked.status !== ShipmentStatus.POSTED) {
+      throw new ConflictException('Shipment cannot be reversed');
+    }
+
+    await tx.$queryRaw`
+      SELECT id FROM sales_orders
+      WHERE id = ${locked.salesOrderId}::uuid AND "tenantId" = ${actor.tenantId}::uuid
+      FOR UPDATE
+    `;
+
+    const shipment = await tx.shipment.findFirstOrThrow({
+      where: { id: shipmentId, tenantId: actor.tenantId },
+      include: SHIPMENT_INCLUDE,
+    });
+
+    const itemIds = shipment.items.map((item) => item.id).sort();
+    const shipmentItemRows = await tx.$queryRaw<
+      Array<{ id: string; returnedQuantity: Prisma.Decimal }>
+    >(
+      Prisma.sql`
+        SELECT id, "returnedQuantity"
+        FROM shipment_items
+        WHERE id = ANY(${itemIds}::uuid[]) AND "tenantId" = ${actor.tenantId}::uuid
+        ORDER BY id
+        FOR UPDATE
+      `,
+    );
+    const shipmentItemLockById = new Map(
+      shipmentItemRows.map((row) => [row.id, row]),
+    );
+    for (const item of shipment.items) {
+      const lockedItem = shipmentItemLockById.get(item.id);
+      if (!lockedItem) throw new NotFoundException('Shipment item not found');
+      if (lockedItem.returnedQuantity.gt(0)) {
+        throw new ConflictException(
+          `Shipment line for product ${item.productSku} has a Sales Return recorded against it and cannot be reversed`,
+        );
+      }
+    }
+
+    await tx.$queryRaw`
+      SELECT id FROM sales_order_items
+      WHERE "salesOrderId" = ${shipment.salesOrderId}::uuid
+        AND "tenantId" = ${actor.tenantId}::uuid
+      FOR UPDATE
+    `;
+    const soItems = await tx.salesOrderItem.findMany({
+      where: { salesOrderId: shipment.salesOrderId, tenantId: actor.tenantId },
+    });
+    const soItemsById = new Map(soItems.map((item) => [item.id, item]));
+
+    for (const item of shipment.items) {
+      const soItem = soItemsById.get(item.salesOrderItemId);
+      if (!soItem) {
+        throw new ConflictException('Sales order item missing');
+      }
+      const nextShipped = soItem.shippedQuantity.minus(item.quantity);
+      if (nextShipped.lt(0)) {
+        throw new ConflictException(
+          'Reversal would drive shippedQuantity negative for a sales order line',
+        );
+      }
+      await tx.salesOrderItem.update({
+        where: { id: soItem.id },
+        data: { shippedQuantity: nextShipped },
+      });
+    }
+
+    const refreshedItems = await tx.salesOrderItem.findMany({
+      where: { salesOrderId: shipment.salesOrderId, tenantId: actor.tenantId },
+    });
+    const noneShipped = refreshedItems.every((item) =>
+      item.shippedQuantity.eq(0),
+    );
+    await tx.salesOrder.update({
+      where: { id: shipment.salesOrderId },
+      data: {
+        status: noneShipped
+          ? SalesOrderStatus.CONFIRMED
+          : SalesOrderStatus.PARTIALLY_FULFILLED,
+      },
+    });
+
+    return tx.shipment.update({
+      where: { id: shipmentId },
+      data: {
+        status: ShipmentStatus.REVERSED,
+        reversedAt: new Date(),
+        reversalReason: reason?.trim() || null,
+      },
+      include: SHIPMENT_INCLUDE,
+    });
+  }
+
+  /**
+   * Manual retry for a REVERSED shipment whose accounting reversal
+   * (attempted post-commit inside reverse()) failed. Distinguishes
+   * accountingPostingStatus POSTED (a journal really was posted and never
+   * got reversed — the only case with anything to retry) from FAILED/
+   * NOT_POSTED (there was never a posted journal to reverse — a 409, not a
+   * silent no-op). Already-REVERSED (accounting-wise) is a harmless no-op.
+   * Mirrors GoodsReceiptsService.retryAccountingReversal() exactly.
+   */
+  async retryAccountingReversal(
+    actor: ActorContext,
+    id: string,
+    request?: RequestAuditMeta,
+  ) {
+    const existing = await this.require(actor, id);
+
+    if (existing.status !== ShipmentStatus.REVERSED) {
+      throw new ConflictException(
+        'Only a REVERSED shipment can have its accounting reversal retried',
+      );
+    }
+    if (existing.accountingPostingStatus === ShipmentPostingStatus.REVERSED) {
+      return toShipmentResponse(existing);
+    }
+    if (
+      existing.accountingPostingStatus !== ShipmentPostingStatus.POSTED ||
+      !existing.journalEntryId
+    ) {
+      throw new ConflictException(
+        'This shipment has no posted accounting journal to reverse',
+      );
+    }
+
+    const { shipment, error } = await this.attemptShipmentReversal(
+      actor,
+      existing,
+      request,
+    );
+    if (error) throw error;
+
+    await this.audit.record({
+      actor,
+      action: 'shipment.accounting-reversal-retried',
+      resource: 'shipment',
+      resourceId: shipment.id,
+      metadata: { reversalJournalEntryId: shipment.reversalJournalEntryId },
+      request,
+    });
+
+    return toShipmentResponse(shipment);
   }
 
   /**
@@ -903,6 +1184,62 @@ export class ShipmentsService {
           updateError instanceof Error ? updateError.stack : undefined,
         );
       }
+      const refreshed = await this.require(actor, shipment.id);
+      return { shipment: refreshed, error };
+    }
+  }
+
+  /**
+   * Phase 3.16 — attempts to reverse (or idempotently replay the reversal
+   * of) this shipment's already-POSTED COGS accounting journal. The
+   * original journal entry is never touched — looked up read-only inside
+   * accounting-service and stays POSTED permanently (same "no VOID" design
+   * as every other document in this codebase). On failure,
+   * accountingPostingStatus is deliberately left at POSTED (nothing to
+   * update) rather than introducing a new failure state —
+   * retryAccountingReversal() is the dedicated retry path. Never throws:
+   * the caller decides whether a failure should be surfaced
+   * (retryAccountingReversal does; reverse()'s post-commit call does not).
+   * Mirrors GoodsReceiptsService.attemptGrReversal() exactly.
+   */
+  private async attemptShipmentReversal(
+    actor: ActorContext,
+    shipment: Awaited<ReturnType<typeof this.require>>,
+    request?: RequestAuditMeta,
+  ) {
+    try {
+      const result = await this.accountingJournal.reverse(actor, {
+        sourceService: ACCOUNTING_SOURCE_SERVICE,
+        sourceType: 'SHIPMENT',
+        sourceId: shipment.id,
+        reversalSourceType: 'SHIPMENT_REVERSAL',
+        description: `Reversal of Shipment ${shipment.id}`,
+      });
+      const updated = await this.prisma.shipment.update({
+        where: { id: shipment.id },
+        data: {
+          accountingPostingStatus: ShipmentPostingStatus.REVERSED,
+          reversalJournalEntryId: result.id,
+        },
+        include: SHIPMENT_INCLUDE,
+      });
+      await this.audit.record({
+        actor,
+        action: 'shipment.accounting-reversed',
+        resource: 'shipment',
+        resourceId: shipment.id,
+        metadata: {
+          reversalJournalEntryId: result.id,
+          idempotentReplay: result.idempotentReplay,
+        },
+        request,
+      });
+      return { shipment: updated, error: undefined as unknown };
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse COGS accounting journal for reversed shipment ${shipment.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       const refreshed = await this.require(actor, shipment.id);
       return { shipment: refreshed, error };
     }

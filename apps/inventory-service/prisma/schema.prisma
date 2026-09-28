@@ -58,6 +58,16 @@ enum StockMovementType {
   // verbatim. Sets StockMovement.reversesMovementId — see
   // StockReturnsService's RETURN_CONFIG.
   SALE_RETURN_REVERSAL
+  // Phase 3.16 (Shipment Cancellation / COGS Reversal) — undoes a specific,
+  // identified SALE movement DIRECTLY (the root shipment-issue movement,
+  // never a derivative): stock comes back in (additive, mirrors
+  // PURCHASE_REVERSAL's exact structure but with SALE's own direction
+  // inverted, since SALE is subtractive where PURCHASE is additive), costed
+  // at that SALE movement's own unitCost verbatim. Always full-quantity
+  // (never partial) — Shipment reversal is all-or-nothing by design
+  // (ShipmentsService.reverse()). Sets StockMovement.reversesMovementId —
+  // see StockReturnsService's RETURN_CONFIG.
+  SALE_REVERSAL
 }
 
 // Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is
