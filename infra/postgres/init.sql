@@ -4,3 +4,4 @@ CREATE DATABASE inventory_db;
 CREATE DATABASE accounting_db;
 CREATE DATABASE purchase_db;
 CREATE DATABASE master_data_db;
+CREATE DATABASE production_db;

@@ -1,0 +1,193 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Work Centres</div>
+    <div class="d-flex flex-wrap gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        + Add Work Centre
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-4">
+        <label class="form-label" for="workCentreSearch">Search</label>
+        <input
+          id="workCentreSearch"
+          type="search"
+          class="form-control form-control-sm"
+          placeholder="Search by Code / Name"
+          [(ngModel)]="search" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="workCentreFilterStatus">Status</label>
+        <select id="workCentreFilterStatus" class="form-select form-select-sm" [(ngModel)]="filterStatus">
+          <option value="">All</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+      <div class="col-md-5 d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+          Refresh
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="clearFilters()">
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No work centres found."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Description</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td><code>{{ item.code }}</code></td>
+              <td>{{ item.name }}</td>
+              <td>{{ item.description || '—' }}</td>
+              <td class="text-center">
+                <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
+                  {{ item.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button
+                  *ngIf="canEdit(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canActivateWorkCentre(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  (click)="askActivate(item)">
+                  Activate
+                </button>
+                <button
+                  *ngIf="canDeactivateWorkCentre(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  (click)="askDeactivate(item)">
+                  Deactivate
+                </button>
+                <button
+                  *ngIf="canRemove(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  (click)="askDelete(item)">
+                  Delete
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Work Centre' : 'Create Work Centre' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <div class="mb-3">
+        <label class="form-label" for="workCentreCode">Work Centre Code <span class="text-danger">*</span></label>
+        <input id="workCentreCode" class="form-control" formControlName="code" maxlength="32" placeholder="CNC-01" />
+        <div class="text-danger small" *ngIf="form.controls.code.touched && form.controls.code.invalid">
+          Work centre code is required (max 32 characters).
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="workCentreName">Work Centre Name <span class="text-danger">*</span></label>
+        <input id="workCentreName" class="form-control" formControlName="name" maxlength="120" placeholder="CNC Machine 01" />
+        <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
+          Work centre name is required (max 120 characters).
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="workCentreDescription">Description</label>
+        <textarea
+          id="workCentreDescription"
+          class="form-control"
+          rows="2"
+          formControlName="description"
+          maxlength="500"></textarea>
+        <div class="text-danger small" *ngIf="form.controls.description.touched && form.controls.description.invalid">
+          Max 500 characters.
+        </div>
+      </div>
+      <div class="mb-0">
+        <label class="form-label d-block">Status</label>
+        <span class="badge" [class.bg-success]="!editing || editing.isActive" [class.bg-secondary]="editing && !editing.isActive">
+          {{ !editing || editing.isActive ? 'Active' : 'Inactive' }}
+        </span>
+        <div class="form-text">
+          {{ editing ? 'Use Activate / Deactivate from the list to change status.' : 'New work centres start Active.' }}
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #confirmModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      {{
+        pendingAction?.type === 'activate' ? 'Activate work centre?' :
+        pendingAction?.type === 'deactivate' ? 'Deactivate work centre?' :
+        'Delete work centre?'
+      }}
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="pendingAction as action">
+    <p class="mb-0" *ngIf="action.type === 'activate'">
+      Are you sure you want to activate {{ action.workCentre.code }} — {{ action.workCentre.name }}?
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'deactivate'">
+      Are you sure you want to deactivate {{ action.workCentre.code }} — {{ action.workCentre.name }}?
+      It will no longer be selectable in new routings; existing references are unaffected.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'delete'">
+      Are you sure you want to delete {{ action.workCentre.code }} — {{ action.workCentre.name }}? This cannot be undone.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+    <button
+      type="button"
+      class="btn"
+      [class.btn-success]="pendingAction?.type === 'activate'"
+      [class.btn-warning]="pendingAction?.type === 'deactivate'"
+      [class.btn-danger]="pendingAction?.type === 'delete'"
+      [disabled]="actionBusy"
+      (click)="runPendingAction(modal)">
+      {{ actionBusy ? 'Working…' : confirmActionLabel(pendingAction?.type) }}
+    </button>
+  </div>
+</ng-template>

@@ -18,6 +18,7 @@ import { InventoryAdminModule } from './inventory/inventory-admin.module';
 import { PurchaseAdminModule } from './purchase/purchase-admin.module';
 import { SalesAdminModule } from './sales/sales-admin.module';
 import { MasterDataAdminModule } from './master-data/master-data-admin.module';
+import { ProductionAdminModule } from './production/production-admin.module';
 import { RbacModule } from './rbac/rbac.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { RbacModule } from './rbac/rbac.module';
     SalesAdminModule,
     MasterDataAdminModule,
     AccountingAdminModule,
+    ProductionAdminModule,
     HttpModule.register({
       timeout: 10_000,
       maxRedirects: 0,

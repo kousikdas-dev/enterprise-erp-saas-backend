@@ -1,0 +1,121 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">
+      Balance Sheet
+      <span *ngIf="result" class="text-muted">— as of {{ result.asOfDate }}</span>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label small">As of date</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="asOfDate" />
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="applyFilters()" [disabled]="loading">
+          Apply
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!!result && result.assets.items.length === 0 && result.liabilities.items.length === 0 && result.equity.items.length === 0"
+      emptyMessage="No accounts found."
+      (retry)="load()">
+      <div *ngIf="result" class="mb-3">
+        <span class="badge" [ngClass]="result.balanced ? 'bg-success' : 'bg-danger'">
+          {{ result.balanced ? 'Balanced' : 'Out of balance' }}
+        </span>
+      </div>
+
+      <h6>Assets</h6>
+      <div class="table-responsive mb-3">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.assets?.items">
+              <td>{{ line.account.code }}</td>
+              <td>{{ line.account.name }}</td>
+              <td class="text-end">{{ line.amount }}</td>
+            </tr>
+          </tbody>
+          <tfoot *ngIf="result">
+            <tr class="fw-bold">
+              <td colspan="2">Total Assets</td>
+              <td class="text-end">{{ result.assets.total }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <h6>Liabilities</h6>
+      <div class="table-responsive mb-3">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.liabilities?.items">
+              <td>{{ line.account.code }}</td>
+              <td>{{ line.account.name }}</td>
+              <td class="text-end">{{ line.amount }}</td>
+            </tr>
+          </tbody>
+          <tfoot *ngIf="result">
+            <tr class="fw-bold">
+              <td colspan="2">Total Liabilities</td>
+              <td class="text-end">{{ result.liabilities.total }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <h6>Equity</h6>
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.equity?.items">
+              <td>{{ line.account.code }}</td>
+              <td>{{ line.account.name }}</td>
+              <td class="text-end">{{ line.amount }}</td>
+            </tr>
+            <tr *ngIf="result">
+              <td colspan="2" class="fst-italic text-muted">Retained Earnings (current period)</td>
+              <td class="text-end fst-italic text-muted">{{ result.equity.retainedEarnings }}</td>
+            </tr>
+          </tbody>
+          <tfoot *ngIf="result">
+            <tr class="fw-bold">
+              <td colspan="2">Total Equity</td>
+              <td class="text-end">{{ result.equity.total }}</td>
+            </tr>
+            <tr class="fw-bold">
+              <td colspan="2">Total Liabilities &amp; Equity</td>
+              <td class="text-end">{{ result.totalLiabilitiesAndEquity }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>

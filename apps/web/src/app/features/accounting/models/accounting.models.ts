@@ -247,3 +247,86 @@ export interface CreateAccountMappingRequest {
 export interface UpdateAccountMappingRequest {
   accountId: string;
 }
+
+export interface ReportAccount {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+}
+
+export interface TrialBalanceLine {
+  account: ReportAccount;
+  debit: string;
+  credit: string;
+}
+
+export interface TrialBalanceResponse {
+  /** UTC calendar date, YYYY-MM-DD. */
+  asOfDate: string;
+  items: TrialBalanceLine[];
+  totalDebit: string;
+  totalCredit: string;
+  balanced: boolean;
+}
+
+export interface TrialBalanceQuery {
+  /** UTC calendar date, YYYY-MM-DD. Defaults to today when omitted. */
+  asOfDate?: string;
+}
+
+export interface ProfitLossLine {
+  account: ReportAccount;
+  amount: string;
+}
+
+export interface ProfitLossSection {
+  items: ProfitLossLine[];
+  total: string;
+}
+
+export interface ProfitLossResponse {
+  /** UTC calendar date, YYYY-MM-DD. */
+  fromDate: string;
+  /** UTC calendar date, YYYY-MM-DD. */
+  toDate: string;
+  revenue: ProfitLossSection;
+  expenses: ProfitLossSection;
+  netIncome: string;
+}
+
+export interface ProfitLossQuery {
+  /** UTC calendar date, YYYY-MM-DD. */
+  fromDate: string;
+  /** UTC calendar date, YYYY-MM-DD. */
+  toDate: string;
+}
+
+export interface BalanceSheetLine {
+  account: ReportAccount;
+  amount: string;
+}
+
+export interface BalanceSheetSection {
+  items: BalanceSheetLine[];
+  total: string;
+}
+
+export interface BalanceSheetEquitySection extends BalanceSheetSection {
+  retainedEarnings: string;
+}
+
+export interface BalanceSheetResponse {
+  /** UTC calendar date, YYYY-MM-DD. */
+  asOfDate: string;
+  assets: BalanceSheetSection;
+  liabilities: BalanceSheetSection;
+  equity: BalanceSheetEquitySection;
+  totalLiabilitiesAndEquity: string;
+  balanced: boolean;
+}
+
+export interface BalanceSheetQuery {
+  /** UTC calendar date, YYYY-MM-DD. Defaults to today when omitted. */
+  asOfDate?: string;
+}

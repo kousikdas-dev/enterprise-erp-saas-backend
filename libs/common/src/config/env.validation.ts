@@ -38,6 +38,9 @@ export class GatewayEnvironmentVariables extends BaseEnvironmentVariables {
   MASTER_DATA_SERVICE_URL!: string;
 
   @IsString()
+  PRODUCTION_SERVICE_URL!: string;
+
+  @IsString()
   JWT_ACCESS_SECRET!: string;
 
   @IsString()

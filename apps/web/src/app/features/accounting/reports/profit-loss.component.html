@@ -1,0 +1,92 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">
+      Profit &amp; Loss
+      <span *ngIf="result" class="text-muted">— {{ result.fromDate }} to {{ result.toDate }}</span>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label small">From date</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="fromDate" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">To date</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="toDate" />
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="applyFilters()" [disabled]="loading">
+          Apply
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!!result && result.revenue.items.length === 0 && result.expenses.items.length === 0"
+      emptyMessage="No revenue or expense activity in the selected period."
+      (retry)="load()">
+      <div *ngIf="result" class="mb-3">
+        <div class="text-muted small">Net Income</div>
+        <div class="fs-4" [ngClass]="{ 'text-danger': result.netIncome.startsWith('-') }">
+          {{ result.netIncome }}
+        </div>
+      </div>
+
+      <h6>Revenue</h6>
+      <div class="table-responsive mb-3">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.revenue?.items">
+              <td>{{ line.account.code }}</td>
+              <td>{{ line.account.name }}</td>
+              <td class="text-end">{{ line.amount }}</td>
+            </tr>
+          </tbody>
+          <tfoot *ngIf="result">
+            <tr class="fw-bold">
+              <td colspan="2">Total Revenue</td>
+              <td class="text-end">{{ result.revenue.total }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <h6>Expenses</h6>
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.expenses?.items">
+              <td>{{ line.account.code }}</td>
+              <td>{{ line.account.name }}</td>
+              <td class="text-end">{{ line.amount }}</td>
+            </tr>
+          </tbody>
+          <tfoot *ngIf="result">
+            <tr class="fw-bold">
+              <td colspan="2">Total Expenses</td>
+              <td class="text-end">{{ result.expenses.total }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>

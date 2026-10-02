@@ -1,0 +1,230 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Infrastructure-only marker. Not a business entity. Do not expose via API.
+model SchemaMeta {
+  id        String   @id @default("foundation")
+  appliedAt DateTime @default(now())
+
+  @@map("_schema_meta")
+}
+
+enum BomStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+// Bill of Materials header. parentProductId is a logical reference to a
+// Product owned by inventory-service — there is no cross-service FK; it is
+// validated at write time via InventoryProductClient and snapshotted here
+// (parentProductSku/parentProductName) so BOM history survives independent
+// of later Product edits, mirroring PurchaseOrder's supplier-snapshot
+// convention.
+// bomQuantity + outputUnitOfMeasureId/outputUomCode/outputUomName define the
+// manufacturing basis of the BOM (e.g. "100 KG of Cotton Yarn"), using the
+// same snapshot pattern as BomItem's unitOfMeasureId/uomCode/uomName. All
+// component quantities on this BOM are the material requirement for
+// exactly bomQuantity of output — they are not re-scaled to any other basis.
+model Bom {
+  id                    String    @id @default(uuid()) @db.Uuid
+  tenantId              String    @db.Uuid
+  parentProductId       String    @db.Uuid
+  parentProductSku      String
+  parentProductName     String
+  bomQuantity           Decimal   @db.Decimal(19, 6)
+  outputUnitOfMeasureId String    @db.Uuid
+  outputUomCode         String
+  outputUomName         String
+  version               Int
+  status                BomStatus @default(DRAFT)
+  effectiveFrom         DateTime?
+  effectiveTo           DateTime?
+  notes                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  items BomItem[]
+
+  @@unique([tenantId, parentProductId, version])
+  @@index([tenantId])
+  @@index([tenantId, parentProductId])
+  @@index([tenantId, parentProductId, status])
+  @@map("boms")
+}
+
+// componentProductId is likewise a logical reference to an inventory-service
+// Product — validated + snapshotted the same way as the Bom parent.
+model BomItem {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid
+  bomId                String   @db.Uuid
+  componentProductId   String   @db.Uuid
+  componentProductSku  String
+  componentProductName String
+  quantity             Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId      String   @db.Uuid
+  uomCode              String
+  uomName              String
+  scrapPercentage      Decimal? @db.Decimal(5, 2)
+  sequence             Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  bom Bom @relation(fields: [bomId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, bomId, componentProductId])
+  @@index([tenantId])
+  @@index([bomId])
+  @@index([componentProductId])
+  @@map("bom_items")
+}
+
+// Operation Master: defines WHAT manufacturing work is performed (e.g. CUT,
+// WELD, MILL), independent of any industry or routing. Industry-neutral and
+// user-defined — no operations are hard-coded. Will later be referenced by
+// Manufacturing Routing step records via operationId (no FK yet, since
+// Routing doesn't exist); isActive is deactivation-only (no cascading
+// delete) so historical routing references keep resolving once Routing is
+// built, mirroring the tenant-scoped code+name master pattern already used
+// by inventory-service's UnitOfMeasure/Category.
+model Operation {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  code        String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("operations")
+}
+
+// Work Centre Master: defines WHERE manufacturing work is performed (e.g.
+// CNC-01, SPIN-01), independent of any industry. Industry-neutral and
+// user-defined — no work centres are hard-coded. Deliberately has no FK to
+// Operation: the same work centre may perform different operations across
+// different routings, so the relationship is many-to-many and only
+// expressed later, per routing step, once Manufacturing Routing exists.
+// Will later be referenced by Manufacturing Routing step records via
+// workCentreId (no FK yet, since Routing doesn't exist); isActive is
+// deactivation-only (no cascading delete) so historical routing references
+// keep resolving once Routing is built, mirroring Operation's pattern.
+model WorkCentre {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  code        String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("work_centres")
+}
+
+// Production Order lifecycle. Transitions are one-directional and enforced
+// only through the dedicated plan/release/start/complete/cancel/close
+// service methods — never via a generic status PATCH:
+//
+//   DRAFT -> PLANNED -> RELEASED -> IN_PROGRESS -> COMPLETED -> CLOSED
+//     |         |           |
+//     +---------+-----------+--> CANCELLED -> CLOSED
+//
+// COMPLETED is reachable only once Production Receipt exists (not this
+// phase) — see ProductionOrdersService.complete(), which deliberately
+// refuses the transition today rather than fabricate a completed quantity.
+enum ProductionOrderStatus {
+  DRAFT
+  PLANNED
+  RELEASED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  CLOSED
+}
+
+enum ProductionOrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// Production Order: the central manufacturing transaction. productId is a
+// logical reference to an inventory-service Product (validated via
+// InventoryProductClient, snapshotted as productSku/productName so history
+// survives later Product edits — the same convention as Bom.parentProductId
+// above). bomId/bomVersion reference this service's own Bom table directly
+// (no cross-service call needed) and are re-validated, never blindly
+// trusted, at create/plan/release time; once RELEASED they become immutable
+// (see ProductionOrdersService.update()) so the authorized manufacturing
+// plan cannot silently drift.
+//
+// routingId/routingVersion are reserved for the future Manufacturing
+// Routing feature, which does not exist yet in this codebase. They are
+// intentionally NOT accepted from the API today (there is nothing valid to
+// validate them against) and are always persisted as null — the columns
+// exist now purely so a later Routing integration can populate them without
+// a breaking schema change.
+//
+// warehouseId is a logical, optional reference to an inventory-service
+// Warehouse (validated via InventoryWarehouseClient when provided) — no
+// warehouse data is duplicated here.
+//
+// No BomItem/RoutingStep snapshot table is created in this phase: per-order
+// material/operation detail is derived on demand from bomId/bomVersion (and
+// later routingId/routingVersion) rather than copied, avoiding a redundant
+// table before Material Planning/Execution actually need one.
+model ProductionOrder {
+  id          String @id @default(uuid()) @db.Uuid
+  tenantId    String @db.Uuid
+  orderNumber String
+
+  productId   String @db.Uuid
+  productSku  String
+  productName String
+
+  bomId      String @db.Uuid
+  bomVersion Int
+
+  routingId      String? @db.Uuid
+  routingVersion Int?
+
+  plannedQuantity Decimal @db.Decimal(19, 6)
+
+  outputUnitOfMeasureId String @db.Uuid
+  outputUomCode         String
+  outputUomName         String
+
+  orderDate        DateTime
+  plannedStartDate DateTime?
+  plannedEndDate   DateTime?
+
+  warehouseId String? @db.Uuid
+
+  priority ProductionOrderPriority @default(NORMAL)
+  status   ProductionOrderStatus   @default(DRAFT)
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, productId])
+  @@map("production_orders")
+}

@@ -219,6 +219,36 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  production-service:
+    build:
+      context: .
+      dockerfile: apps/production-service/Dockerfile
+    container_name: erp-production
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: production-service
+      NODE_ENV: production
+      PORT: 3007
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp}:${POSTGRES_PASSWORD:-erp_local_only}@postgres:5432/production_db?schema=public
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
+      RABBITMQ_QUEUE: production.events
+      INVENTORY_SERVICE_URL: http://inventory-service:3003
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+      LOG_LEVEL: info
+    # Internal only. Gateway reaches this at http://production-service:3007.
+    # Do not publish 3007 on the host.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity-service:
+        condition: service_started
+      inventory-service:
+        condition: service_started
+
   api-gateway:
     build:
       context: .
@@ -237,6 +267,7 @@ services:
       ACCOUNTING_SERVICE_URL: http://accounting-service:3004
       PURCHASE_SERVICE_URL: http://purchase-service:3005
       MASTER_DATA_SERVICE_URL: http://master-data-service:3006
+      PRODUCTION_SERVICE_URL: http://production-service:3007
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_local_only}@rabbitmq:5672
       LOG_LEVEL: info
     ports:
@@ -248,6 +279,7 @@ services:
       - accounting-service
       - purchase-service
       - master-data-service
+      - production-service
 
 volumes:
   postgres_data:

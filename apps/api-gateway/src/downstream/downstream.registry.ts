@@ -7,7 +7,8 @@ export type DownstreamServiceName =
   | 'inventory'
   | 'accounting'
   | 'purchase'
-  | 'master-data';
+  | 'master-data'
+  | 'production';
 
 @Injectable()
 export class DownstreamRegistry {
@@ -21,6 +22,7 @@ export class DownstreamRegistry {
       accounting: 'ACCOUNTING_SERVICE_URL',
       purchase: 'PURCHASE_SERVICE_URL',
       'master-data': 'MASTER_DATA_SERVICE_URL',
+      production: 'PRODUCTION_SERVICE_URL',
     };
 
     const key = keys[service];
@@ -41,6 +43,7 @@ export class DownstreamRegistry {
       accounting: this.getUrl('accounting'),
       purchase: this.getUrl('purchase'),
       'master-data': this.getUrl('master-data'),
+      production: this.getUrl('production'),
     };
   }
 }

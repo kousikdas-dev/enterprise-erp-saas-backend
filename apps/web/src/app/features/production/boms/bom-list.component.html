@@ -1,0 +1,369 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">BOM</div>
+    <div class="d-flex flex-wrap gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        Create BOM
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label" for="bomSearch">Search</label>
+        <input
+          id="bomSearch"
+          type="search"
+          class="form-control form-control-sm"
+          placeholder="SKU, product, status, version…"
+          [(ngModel)]="search" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="bomFilterProduct">Parent Product</label>
+        <select id="bomFilterProduct" class="form-select form-select-sm" [(ngModel)]="filterParentProductId">
+          <option value="">All products</option>
+          <option *ngFor="let p of filterParentProductOptions" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="bomFilterStatus">Status</label>
+        <select id="bomFilterStatus" class="form-select form-select-sm" [(ngModel)]="filterStatus">
+          <option value="">All statuses</option>
+          <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+        </select>
+      </div>
+      <div class="col-md-4 d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="load()" [disabled]="loading">
+          Search
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+          Refresh
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="clearFilters()">
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No BOMs found."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Parent Product</th>
+              <th>SKU</th>
+              <th class="text-end">BOM Qty</th>
+              <th class="text-center">Version</th>
+              <th class="text-center">Status</th>
+              <th>Effective From</th>
+              <th>Effective To</th>
+              <th class="text-center">Components</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ item.parentProductName }}</td>
+              <td><code>{{ item.parentProductSku }}</code></td>
+              <td class="text-end"><code>{{ item.bomQuantity }}</code> {{ item.outputUomCode }}</td>
+              <td class="text-center">{{ item.version }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td>{{ item.effectiveFrom ? (item.effectiveFrom | slice:0:10) : '—' }}</td>
+              <td>{{ item.effectiveTo ? (item.effectiveTo | slice:0:10) : '—' }}</td>
+              <td class="text-center">{{ item.items?.length || 0 }}</td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button
+                  *ngIf="canEdit(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary me-1"
+                  (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button
+                  *ngIf="canActivateBom(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  (click)="askActivate(item)">
+                  Activate
+                </button>
+                <button
+                  *ngIf="canDeactivateBom(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  (click)="askDeactivate(item)">
+                  Deactivate
+                </button>
+                <button
+                  *ngIf="canNewVersion(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary me-1"
+                  (click)="askNewVersion(item)">
+                  New Version
+                </button>
+                <button
+                  *ngIf="canRemove(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  (click)="askDelete(item)">
+                  Delete
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit BOM' : 'Create BOM' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <h6 class="mb-2" *ngIf="editing">
+        {{ editing.parentProductSku }} — {{ editing.parentProductName }}
+        &middot; Version {{ editing.version }}
+        &middot; <span class="badge" [ngClass]="statusBadgeClass(editing.status)">{{ editing.status }}</span>
+      </h6>
+      <div class="row">
+        <div class="col-md-6 mb-3" *ngIf="!editing">
+          <label class="form-label" for="bomParentProduct">Parent Product <span class="text-danger">*</span></label>
+          <select id="bomParentProduct" class="form-select" formControlName="parentProductId">
+            <option value="">Select parent product…</option>
+            <option *ngFor="let p of eligibleProducts" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+          </select>
+          <div class="text-danger small" *ngIf="form.get('parentProductId')?.touched && form.get('parentProductId')?.invalid">
+            Parent product is required.
+          </div>
+          <div class="form-text">Only active, inventory-tracked products can be a BOM parent or component. Version is assigned automatically by the server.</div>
+        </div>
+      </div>
+
+      <h6 class="mb-2">BOM Output</h6>
+      <div class="row">
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="bomQuantity">BOM Quantity <span class="text-danger">*</span></label>
+          <input id="bomQuantity" class="form-control" formControlName="bomQuantity" placeholder="100.000000" />
+          <div class="text-danger small" *ngIf="form.get('bomQuantity')?.touched && form.get('bomQuantity')?.errors?.['required']">
+            BOM quantity is required.
+          </div>
+          <div class="text-danger small" *ngIf="form.get('bomQuantity')?.touched && (form.get('bomQuantity')?.errors?.['pattern'] || form.get('bomQuantity')?.errors?.['positive'])">
+            BOM quantity must be greater than zero.
+          </div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="bomOutputUom">Output UOM <span class="text-danger">*</span></label>
+          <select id="bomOutputUom" class="form-select" formControlName="outputUnitOfMeasureId">
+            <option value="">Select UOM…</option>
+            <option *ngFor="let u of outputUomOptionsFor(form.value.parentProductId)" [value]="u.id">{{ u.label }}</option>
+          </select>
+          <div class="text-danger small" *ngIf="form.get('outputUnitOfMeasureId')?.touched && form.get('outputUnitOfMeasureId')?.invalid">
+            Output UOM is required.
+          </div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="bomEffectiveFrom">Effective From</label>
+          <input id="bomEffectiveFrom" type="date" class="form-control" formControlName="effectiveFrom" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="bomEffectiveTo">Effective To</label>
+          <input id="bomEffectiveTo" type="date" class="form-control" formControlName="effectiveTo" />
+        </div>
+        <div class="form-text mb-3">BOM Quantity is the amount of the parent product this BOM produces — the manufacturing basis for the component quantities below.</div>
+        <div class="col-md-12 mb-3">
+          <label class="form-label" for="bomNotes">Notes</label>
+          <input id="bomNotes" class="form-control" formControlName="notes" maxlength="500" />
+          <div class="text-danger small" *ngIf="form.get('notes')?.touched && form.get('notes')?.invalid">
+            Max 500 characters.
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">BOM Components</h6>
+        <button type="button" class="btn btn-sm btn-outline-primary" (click)="addLine()">+ Add Component</button>
+      </div>
+
+      <div class="table-responsive" formArrayName="items">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="min-width: 70px;">Seq</th>
+              <th style="min-width: 220px;">Component Product</th>
+              <th style="min-width: 130px;">Quantity</th>
+              <th style="min-width: 150px;">UOM</th>
+              <th style="min-width: 100px;">Scrap %</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of lines.controls; let i = index" [formGroupName]="i">
+              <td>
+                <input class="form-control form-control-sm" type="number" min="1" formControlName="sequence" />
+                <div class="text-danger small" *ngIf="line.get('sequence')?.touched && line.get('sequence')?.invalid">
+                  Required, min 1.
+                </div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="componentProductId">
+                  <option value="">Select component…</option>
+                  <option *ngFor="let p of eligibleProducts" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+                </select>
+                <div class="text-danger small" *ngIf="line.get('componentProductId')?.touched && line.get('componentProductId')?.invalid">
+                  Required.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="quantity" placeholder="1.050000" />
+                <div class="text-danger small" *ngIf="line.get('quantity')?.touched && line.get('quantity')?.errors?.['required']">
+                  Required.
+                </div>
+                <div class="text-danger small" *ngIf="line.get('quantity')?.touched && (line.get('quantity')?.errors?.['pattern'] || line.get('quantity')?.errors?.['positive'])">
+                  Must be greater than zero, max 6 decimal places.
+                </div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                  <option value="">Select UOM…</option>
+                  <option *ngFor="let u of uomOptionsFor(line.value.componentProductId)" [value]="u.id">{{ u.label }}</option>
+                </select>
+                <div class="text-danger small" *ngIf="line.get('unitOfMeasureId')?.touched && line.get('unitOfMeasureId')?.invalid">
+                  Required.
+                </div>
+              </td>
+              <td>
+                <input class="form-control form-control-sm" formControlName="scrapPercentage" placeholder="0.00" />
+                <div class="text-danger small" *ngIf="line.get('scrapPercentage')?.touched && line.get('scrapPercentage')?.invalid">
+                  0–100, max 2 decimal places.
+                </div>
+              </td>
+              <td class="text-end">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  (click)="removeLine(i)"
+                  [disabled]="lines.length <= 1">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text">A component product cannot be the same as the parent product, and cannot appear twice in the same BOM. Circular BOM chains (e.g. A needs B, B needs A) are rejected by the server.</div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">BOM details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as b">
+    <dl class="row">
+      <dt class="col-sm-4">Parent Product</dt><dd class="col-sm-8">{{ b.parentProductName }}</dd>
+      <dt class="col-sm-4">SKU</dt><dd class="col-sm-8"><code>{{ b.parentProductSku }}</code></dd>
+      <dt class="col-sm-4">BOM Quantity</dt><dd class="col-sm-8">{{ b.bomQuantity }} {{ b.outputUomCode }}</dd>
+      <dt class="col-sm-4">Version</dt><dd class="col-sm-8">{{ b.version }}</dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8">
+        <span class="badge" [ngClass]="statusBadgeClass(b.status)">{{ b.status }}</span>
+      </dd>
+      <dt class="col-sm-4">Effective From</dt><dd class="col-sm-8">{{ b.effectiveFrom ? (b.effectiveFrom | slice:0:10) : '—' }}</dd>
+      <dt class="col-sm-4">Effective To</dt><dd class="col-sm-8">{{ b.effectiveTo ? (b.effectiveTo | slice:0:10) : '—' }}</dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ b.notes || '—' }}</dd>
+    </dl>
+    <h6 class="mb-2">Components</h6>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Seq</th>
+            <th>Product</th>
+            <th>SKU</th>
+            <th class="text-end">Quantity</th>
+            <th>UOM</th>
+            <th class="text-end">Scrap %</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let line of b.items">
+            <td>{{ line.sequence }}</td>
+            <td>{{ line.componentProductName }}</td>
+            <td><code>{{ line.componentProductSku }}</code></td>
+            <td class="text-end"><code>{{ line.quantity }}</code></td>
+            <td>{{ line.uomCode }}</td>
+            <td class="text-end"><code>{{ line.scrapPercentage || '0.00' }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
+
+<ng-template #confirmModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      {{
+        pendingAction?.type === 'activate' ? 'Activate BOM?' :
+        pendingAction?.type === 'deactivate' ? 'Deactivate BOM?' :
+        pendingAction?.type === 'new-version' ? 'Create new BOM version?' :
+        'Delete BOM?'
+      }}
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="pendingAction as action">
+    <p class="mb-0" *ngIf="action.type === 'activate'">
+      Are you sure you want to activate version {{ action.bom.version }} of {{ action.bom.parentProductSku }}?
+      Any other ACTIVE version of this product will be deactivated automatically.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'deactivate'">
+      Are you sure you want to deactivate version {{ action.bom.version }} of {{ action.bom.parentProductSku }}?
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'new-version'">
+      Create a new DRAFT version of {{ action.bom.parentProductSku }}, cloned from version {{ action.bom.version }}?
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'delete'">
+      Are you sure you want to delete DRAFT version {{ action.bom.version }} of {{ action.bom.parentProductSku }}? This cannot be undone.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+    <button
+      type="button"
+      class="btn"
+      [class.btn-success]="pendingAction?.type === 'activate'"
+      [class.btn-warning]="pendingAction?.type === 'deactivate'"
+      [class.btn-secondary]="pendingAction?.type === 'new-version'"
+      [class.btn-danger]="pendingAction?.type === 'delete'"
+      [disabled]="actionBusy"
+      (click)="runPendingAction(modal)">
+      {{ actionBusy ? 'Working…' : confirmActionLabel(pendingAction?.type) }}
+    </button>
+  </div>
+</ng-template>

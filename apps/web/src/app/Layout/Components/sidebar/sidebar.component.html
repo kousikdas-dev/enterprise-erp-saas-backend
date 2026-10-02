@@ -168,6 +168,39 @@
               </div>
             </div>
 
+            <!-- Production -->
+            <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('productionMenu')" [class.vsm-active]="extraParameter === 'productionMenu'">
+              <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('productionMenu')">
+                <i class="vsm-icon pe-7s-tools"></i>
+                <span class="vsm-title">Production</span>
+                <i class="vsm-arrow"></i>
+              </a>
+              <div class="vsm-dropdown" [class.vsm-dropdown-show]="openMenus.includes('productionMenu')">
+                <div class="vsm-list">
+                  <div class="vsm-item">
+                    <a routerLink="/production/boms" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">BOM</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/production/operations" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Operations</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/production/work-centres" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Work Centres</span>
+                    </a>
+                  </div>
+                  <div class="vsm-item">
+                    <a routerLink="/production/production-orders" routerLinkActive="active-item" class="vsm-link" (click)="onNavigate()">
+                      <span class="vsm-title">Production Orders</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Administration -->
             <div class="vsm-item has-sub" [class.vsm-open]="openMenus.includes('adminMenu')" [class.vsm-active]="extraParameter === 'adminMenu'">
               <a href="javascript:void(0);" class="vsm-link" (click)="toggleSubmenu('adminMenu')">

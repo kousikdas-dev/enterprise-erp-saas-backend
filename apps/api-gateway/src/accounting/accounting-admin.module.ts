@@ -6,6 +6,7 @@ import { AccountingForwardService } from './accounting-forward.service';
 import { AccountMappingsController } from './account-mappings.controller';
 import { AccountsController } from './accounts.controller';
 import { JournalEntriesController } from './journal-entries.controller';
+import { ReportsController } from './reports.controller';
 import { TaxCodesController } from './tax-codes.controller';
 
 @Module({
@@ -22,6 +23,7 @@ import { TaxCodesController } from './tax-codes.controller';
     JournalEntriesController,
     TaxCodesController,
     AccountMappingsController,
+    ReportsController,
   ],
   providers: [AccountingForwardService],
 })

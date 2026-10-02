@@ -62,11 +62,22 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
       ]
     },
     {
+      id: 'productionMenu', label: 'Production', children: [
+        { label: 'BOM', route: '/production/boms' },
+        { label: 'Operations', route: '/production/operations' },
+        { label: 'Work Centres', route: '/production/work-centres' },
+        { label: 'Production Orders', route: '/production/production-orders' },
+      ]
+    },
+    {
       id: 'accountingMenu', label: 'Accounting', children: [
         { label: 'Chart of Accounts', route: '/accounting/accounts' },
         { label: 'Journal Entries', route: '/accounting/journal-entries' },
         { label: 'Tax Master', route: '/accounting/tax-codes' },
         { label: 'Account Mappings', route: '/accounting/account-mappings' },
+        { label: 'Trial Balance', route: '/accounting/reports/trial-balance' },
+        { label: 'Profit & Loss', route: '/accounting/reports/profit-loss' },
+        { label: 'Balance Sheet', route: '/accounting/reports/balance-sheet' },
       ]
     },
     {

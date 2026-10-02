@@ -50,6 +50,30 @@ class AccountsProbeController {
   }
 }
 
+@Controller('reports-probe')
+class ReportsProbeController {
+  @Get('trial-balance')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.TRIAL_BALANCE_READ)
+  trialBalance(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Get('profit-loss')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PROFIT_LOSS_READ)
+  profitLoss(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Get('balance-sheet')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.BALANCE_SHEET_READ)
+  balanceSheet(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 describe('accounting JWT and RBAC', () => {
   const secret = 'test-access-secret-change-me';
   let app: INestApplication;
@@ -65,7 +89,7 @@ describe('accounting JWT and RBAC', () => {
         PassportModule.register({ defaultStrategy: 'jwt' }),
         JwtModule.register({ secret }),
       ],
-      controllers: [AccountsProbeController],
+      controllers: [AccountsProbeController, ReportsProbeController],
       providers: [
         JwtStrategy,
         JwtAuthGuard,
@@ -156,5 +180,63 @@ describe('accounting JWT and RBAC', () => {
       .get('/accounts-probe/ledger')
       .set('Authorization', `Bearer ${signAccess()}`)
       .expect(200);
+  });
+
+  describe('Financial Reports — each report is gated by its own dedicated permission', () => {
+    it('trial-balance requires trial-balance.read, not accounts.read or the other two report permissions', async () => {
+      getPermissionKeys.mockResolvedValue([
+        PERMISSIONS.ACCOUNTS_READ,
+        PERMISSIONS.PROFIT_LOSS_READ,
+        PERMISSIONS.BALANCE_SHEET_READ,
+      ]);
+      await request(server)
+        .get('/reports-probe/trial-balance')
+        .set('Authorization', `Bearer ${signAccess()}`)
+        .expect(403);
+
+      getPermissionKeys.mockResolvedValue([PERMISSIONS.TRIAL_BALANCE_READ]);
+      await request(server)
+        .get('/reports-probe/trial-balance')
+        .set('Authorization', `Bearer ${signAccess()}`)
+        .expect(200);
+    });
+
+    it('profit-loss requires profit-loss.read, not the other two report permissions', async () => {
+      getPermissionKeys.mockResolvedValue([
+        PERMISSIONS.TRIAL_BALANCE_READ,
+        PERMISSIONS.BALANCE_SHEET_READ,
+      ]);
+      await request(server)
+        .get('/reports-probe/profit-loss')
+        .set('Authorization', `Bearer ${signAccess()}`)
+        .expect(403);
+
+      getPermissionKeys.mockResolvedValue([PERMISSIONS.PROFIT_LOSS_READ]);
+      await request(server)
+        .get('/reports-probe/profit-loss')
+        .set('Authorization', `Bearer ${signAccess()}`)
+        .expect(200);
+    });
+
+    it('balance-sheet requires balance-sheet.read, not the other two report permissions', async () => {
+      getPermissionKeys.mockResolvedValue([
+        PERMISSIONS.TRIAL_BALANCE_READ,
+        PERMISSIONS.PROFIT_LOSS_READ,
+      ]);
+      await request(server)
+        .get('/reports-probe/balance-sheet')
+        .set('Authorization', `Bearer ${signAccess()}`)
+        .expect(403);
+
+      getPermissionKeys.mockResolvedValue([PERMISSIONS.BALANCE_SHEET_READ]);
+      await request(server)
+        .get('/reports-probe/balance-sheet')
+        .set('Authorization', `Bearer ${signAccess()}`)
+        .expect(200);
+    });
+
+    it('returns 401 without a JWT on any report route', async () => {
+      await request(server).get('/reports-probe/trial-balance').expect(401);
+    });
   });
 });

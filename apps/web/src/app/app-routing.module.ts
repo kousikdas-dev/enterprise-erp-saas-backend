@@ -87,6 +87,13 @@ const routes: Routes = [
           ),
       },
       {
+        path: 'production',
+        loadChildren: () =>
+          import('./features/production/production.module').then(
+            (m) => m.ProductionFeatureModule,
+          ),
+      },
+      {
         path: 'admin',
         loadChildren: () =>
           import('./features/administration/administration.module').then(

@@ -6,6 +6,9 @@ import { AccountMappingSettingsComponent } from './account-mappings/account-mapp
 import { AccountLedgerComponent } from './accounts/account-ledger.component';
 import { AccountListComponent } from './accounts/account-list.component';
 import { JournalEntryListComponent } from './journal-entries/journal-entry-list.component';
+import { BalanceSheetComponent } from './reports/balance-sheet.component';
+import { ProfitLossComponent } from './reports/profit-loss.component';
+import { TrialBalanceComponent } from './reports/trial-balance.component';
 import { TaxCodeListComponent } from './tax-codes/tax-code-list.component';
 
 const routes: Routes = [
@@ -35,6 +38,21 @@ const routes: Routes = [
     component: AccountMappingSettingsComponent,
     data: { extraParameter: 'accountingMenu' },
   },
+  {
+    path: 'reports/trial-balance',
+    component: TrialBalanceComponent,
+    data: { extraParameter: 'accountingMenu' },
+  },
+  {
+    path: 'reports/profit-loss',
+    component: ProfitLossComponent,
+    data: { extraParameter: 'accountingMenu' },
+  },
+  {
+    path: 'reports/balance-sheet',
+    component: BalanceSheetComponent,
+    data: { extraParameter: 'accountingMenu' },
+  },
 ];
 
 @NgModule({
@@ -44,6 +62,9 @@ const routes: Routes = [
     JournalEntryListComponent,
     TaxCodeListComponent,
     AccountMappingSettingsComponent,
+    TrialBalanceComponent,
+    ProfitLossComponent,
+    BalanceSheetComponent,
   ],
   imports: [SharedModule, ListStateComponent, RouterModule.forChild(routes)],
 })

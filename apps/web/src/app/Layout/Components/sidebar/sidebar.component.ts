@@ -41,7 +41,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   public extraParameter: string | undefined;
   public openMenus: string[] = [];
 
-  // ERP: dashboardMenu, salesMenu, purchaseMenu, inventoryMenu, adminMenu, auditMenu
+  // ERP: dashboardMenu, salesMenu, purchaseMenu, inventoryMenu, productionMenu, adminMenu, auditMenu
   // Theme demo: dashboardsMenu, pagesMenu, elementsMenu, componentsMenu,
   // tablesMenu, formsMenu, chartsMenu, widgetsMenu
 

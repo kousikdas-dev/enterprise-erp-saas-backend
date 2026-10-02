@@ -73,6 +73,15 @@
         "tsConfigPath": "apps/master-data-service/tsconfig.app.json"
       }
     },
+    "production-service": {
+      "type": "application",
+      "root": "apps/production-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/production-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/production-service/tsconfig.app.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",

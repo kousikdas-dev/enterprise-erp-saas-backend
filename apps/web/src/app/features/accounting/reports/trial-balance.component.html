@@ -1,0 +1,65 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">
+      Trial Balance
+      <span *ngIf="result" class="text-muted">— as of {{ result.asOfDate }}</span>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label small">As of date</label>
+        <input type="date" class="form-control form-control-sm" [(ngModel)]="asOfDate" />
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="applyFilters()" [disabled]="loading">
+          Apply
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!!result && result.items.length === 0"
+      emptyMessage="No accounts found."
+      (retry)="load()">
+      <div *ngIf="result" class="mb-3">
+        <span class="badge" [ngClass]="result.balanced ? 'bg-success' : 'bg-danger'">
+          {{ result.balanced ? 'Balanced' : 'Out of balance' }}
+        </span>
+      </div>
+
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th>Type</th>
+              <th class="text-end">Debit</th>
+              <th class="text-end">Credit</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let line of result?.items">
+              <td>{{ line.account.code }}</td>
+              <td>{{ line.account.name }}</td>
+              <td>{{ line.account.type }}</td>
+              <td class="text-end">{{ line.debit }}</td>
+              <td class="text-end">{{ line.credit }}</td>
+            </tr>
+          </tbody>
+          <tfoot *ngIf="result">
+            <tr class="fw-bold">
+              <td colspan="3">Total</td>
+              <td class="text-end">{{ result.totalDebit }}</td>
+              <td class="text-end">{{ result.totalCredit }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>

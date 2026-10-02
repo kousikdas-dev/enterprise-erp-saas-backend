@@ -550,6 +550,161 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'delete',
     description: 'Delete account mappings',
   },
+  {
+    resource: 'trial-balance',
+    action: 'read',
+    description: 'Read the Trial Balance report',
+  },
+  {
+    resource: 'profit-loss',
+    action: 'read',
+    description: 'Read the Profit & Loss report',
+  },
+  {
+    resource: 'balance-sheet',
+    action: 'read',
+    description: 'Read the Balance Sheet report',
+  },
+  {
+    resource: 'production-boms',
+    action: 'create',
+    description: 'Create production Bills of Materials',
+  },
+  {
+    resource: 'production-boms',
+    action: 'read',
+    description: 'Read production Bills of Materials',
+  },
+  {
+    resource: 'production-boms',
+    action: 'update',
+    description: 'Update DRAFT production Bills of Materials',
+  },
+  {
+    resource: 'production-boms',
+    action: 'delete',
+    description: 'Delete DRAFT production Bills of Materials',
+  },
+  {
+    resource: 'production-boms',
+    action: 'activate',
+    description: 'Activate production Bills of Materials',
+  },
+  {
+    resource: 'production-boms',
+    action: 'deactivate',
+    description: 'Deactivate production Bills of Materials',
+  },
+  {
+    resource: 'production-operations',
+    action: 'create',
+    description: 'Create production operations',
+  },
+  {
+    resource: 'production-operations',
+    action: 'read',
+    description: 'Read production operations',
+  },
+  {
+    resource: 'production-operations',
+    action: 'update',
+    description: 'Update production operations',
+  },
+  {
+    resource: 'production-operations',
+    action: 'delete',
+    description: 'Delete production operations',
+  },
+  {
+    resource: 'production-operations',
+    action: 'activate',
+    description: 'Activate production operations',
+  },
+  {
+    resource: 'production-operations',
+    action: 'deactivate',
+    description: 'Deactivate production operations',
+  },
+  {
+    resource: 'production-work-centres',
+    action: 'create',
+    description: 'Create production work centres',
+  },
+  {
+    resource: 'production-work-centres',
+    action: 'read',
+    description: 'Read production work centres',
+  },
+  {
+    resource: 'production-work-centres',
+    action: 'update',
+    description: 'Update production work centres',
+  },
+  {
+    resource: 'production-work-centres',
+    action: 'delete',
+    description: 'Delete production work centres',
+  },
+  {
+    resource: 'production-work-centres',
+    action: 'activate',
+    description: 'Activate production work centres',
+  },
+  {
+    resource: 'production-work-centres',
+    action: 'deactivate',
+    description: 'Deactivate production work centres',
+  },
+  {
+    resource: 'production-orders',
+    action: 'create',
+    description: 'Create production orders',
+  },
+  {
+    resource: 'production-orders',
+    action: 'read',
+    description: 'Read production orders',
+  },
+  {
+    resource: 'production-orders',
+    action: 'update',
+    description: 'Update production orders',
+  },
+  {
+    resource: 'production-orders',
+    action: 'delete',
+    description: 'Delete DRAFT production orders',
+  },
+  {
+    resource: 'production-orders',
+    action: 'plan',
+    description: 'Plan production orders (DRAFT -> PLANNED)',
+  },
+  {
+    resource: 'production-orders',
+    action: 'release',
+    description: 'Release production orders (PLANNED -> RELEASED)',
+  },
+  {
+    resource: 'production-orders',
+    action: 'start',
+    description: 'Start production orders (RELEASED -> IN_PROGRESS)',
+  },
+  {
+    resource: 'production-orders',
+    action: 'complete',
+    description: 'Complete production orders (IN_PROGRESS -> COMPLETED)',
+  },
+  {
+    resource: 'production-orders',
+    action: 'cancel',
+    description: 'Cancel production orders',
+  },
+  {
+    resource: 'production-orders',
+    action: 'close',
+    description: 'Close production orders (COMPLETED/CANCELLED -> CLOSED)',
+  },
 ];
 
 async function seedSuperAdminPermissions(
@@ -740,7 +895,7 @@ async function main(): Promise<void> {
       `Identity development seed complete: tenant=${tenant.code} user=${user.email} status=${user.status}`,
     );
     console.log(
-      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, Inventory V1, Purchase V1, Sales V1, and Accounting (Chart of Accounts + Journal Entries + Tax Master + Account Mappings) permissions; viewer and OTHER remain unprivileged',
+      'Identity RBAC seed: SUPER_ADMIN has rbac.test, tenant/user/role management, permissions.read, Inventory V1, Purchase V1, Sales V1, Accounting (Chart of Accounts + Journal Entries + Tax Master + Account Mappings), and Production BOM permissions; viewer and OTHER remain unprivileged',
     );
     console.log(
       `Identity RBAC seed: '${SALESPERSON_ROLE_NAME}' role ensured (no permissions attached; assign to users via User Roles)`,

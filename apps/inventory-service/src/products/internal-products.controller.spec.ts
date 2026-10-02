@@ -219,4 +219,59 @@ describe('InternalProductsController', () => {
     expect(productUnits.list).toHaveBeenCalledWith(actor, productId);
     expect(units.list).toHaveBeenCalledWith(actor);
   });
+
+  describe('getInternalDetail', () => {
+    it('returns id/sku/name/isActive/trackInventory alongside UOM options', async () => {
+      const { controller, products, productUnits, units } = createController();
+      products.getById.mockResolvedValue(
+        product({ isActive: false, trackInventory: false }),
+      );
+      productUnits.list.mockResolvedValue({ items: [] });
+      units.list.mockResolvedValue({ items: [unit(baseUnitId, 'EA', 'Each')] });
+
+      const result = await controller.getInternalDetail(actor, productId);
+
+      expect(result).toMatchObject({
+        id: productId,
+        sku: 'SKU-001',
+        name: 'Widget',
+        isActive: false,
+        trackInventory: false,
+        productType: 'GOODS',
+        unitOfMeasureId: baseUnitId,
+        base: { unitOfMeasureId: baseUnitId, code: 'EA', name: 'Each' },
+      });
+    });
+
+    it('includes active alternative units, same as uom-options', async () => {
+      const { controller, products, productUnits, units } = createController();
+      products.getById.mockResolvedValue(product());
+      productUnits.list.mockResolvedValue({
+        items: [productUnit({ unitOfMeasureId: altUnitId })],
+      });
+      units.list.mockResolvedValue({
+        items: [unit(baseUnitId, 'EA', 'Each'), unit(altUnitId, 'BOX', 'Box of 12')],
+      });
+
+      const result = await controller.getInternalDetail(actor, productId);
+
+      expect(result.alternatives).toHaveLength(1);
+      expect(result.alternatives[0]).toMatchObject({
+        unitOfMeasureId: altUnitId,
+        code: 'BOX',
+        name: 'Box of 12',
+      });
+    });
+
+    it('propagates a 404 when the product does not exist for the calling tenant', async () => {
+      const { controller, products } = createController();
+      products.getById.mockRejectedValue(
+        new NotFoundException('Product not found'),
+      );
+
+      await expect(
+        controller.getInternalDetail(actor, productId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });

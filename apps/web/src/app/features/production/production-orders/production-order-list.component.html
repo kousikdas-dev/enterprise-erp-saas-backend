@@ -1,0 +1,335 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title">Production Orders</div>
+    <div class="d-flex flex-wrap gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        + New Production Order
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label" for="poSearch">Search</label>
+        <input
+          id="poSearch"
+          type="search"
+          class="form-control form-control-sm"
+          placeholder="Order No / Product"
+          [(ngModel)]="search"
+          (keyup.enter)="search$()" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="poFilterStatus">Status</label>
+        <select id="poFilterStatus" class="form-select form-select-sm" [(ngModel)]="filterStatus">
+          <option value="">All</option>
+          <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="poDateFrom">Date From</label>
+        <input id="poDateFrom" type="date" class="form-control form-control-sm" [(ngModel)]="filterDateFrom" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="poDateTo">Date To</label>
+        <input id="poDateTo" type="date" class="form-control form-control-sm" [(ngModel)]="filterDateTo" />
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="search$()" [disabled]="loading">
+          Search
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+          Refresh
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="clearFilters()">
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!items.length"
+      emptyMessage="No production orders found."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Order No</th>
+              <th>Product</th>
+              <th class="text-end">Qty</th>
+              <th>UOM</th>
+              <th>Start Date</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of items">
+              <td>
+                <a href="javascript:void(0)" (click)="openDetail(item)"><code>{{ item.orderNumber }}</code></a>
+              </td>
+              <td>{{ item.productName }}</td>
+              <td class="text-end"><code>{{ item.plannedQuantity }}</code></td>
+              <td>{{ item.outputUomCode }}</td>
+              <td>{{ item.plannedStartDate ? (item.plannedStartDate | slice:0:10) : '—' }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                  View
+                </button>
+                <button *ngIf="canEdit(item)" type="button" class="btn btn-sm btn-outline-primary me-1" (click)="openEdit(item)">
+                  Edit
+                </button>
+                <button *ngIf="canPlanOrder(item)" type="button" class="btn btn-sm btn-outline-info me-1" (click)="askPlan(item)">
+                  Plan
+                </button>
+                <button *ngIf="canReleaseOrder(item)" type="button" class="btn btn-sm btn-outline-primary me-1" (click)="askRelease(item)">
+                  Release
+                </button>
+                <button *ngIf="canStartOrder(item)" type="button" class="btn btn-sm btn-outline-warning me-1" (click)="askStart(item)">
+                  Start
+                </button>
+                <button *ngIf="canCancelOrder(item)" type="button" class="btn btn-sm btn-outline-danger me-1" (click)="askCancel(item)">
+                  Cancel
+                </button>
+                <button *ngIf="canCloseOrder(item)" type="button" class="btn btn-sm btn-outline-dark me-1" (click)="askClose(item)">
+                  Close
+                </button>
+                <button *ngIf="canRemove(item)" type="button" class="btn btn-sm btn-outline-danger" (click)="askDelete(item)">
+                  Delete
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mt-3" *ngIf="items.length">
+        <div class="text-muted small">{{ total }} production order(s) — page {{ page }} of {{ totalPages }}</div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="page <= 1" (click)="goToPage(page - 1)">
+            Previous
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="page >= totalPages" (click)="goToPage(page + 1)">
+            Next
+          </button>
+        </div>
+      </div>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #formModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">{{ editing ? 'Edit Production Order' : 'New Production Order' }}</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <div class="modal-body">
+      <h6 class="mb-2" *ngIf="editing">
+        {{ editing.orderNumber }}
+        &middot; <span class="badge" [ngClass]="statusBadgeClass(editing.status)">{{ editing.status }}</span>
+      </h6>
+      <div class="row">
+        <div class="col-md-6 mb-3" *ngIf="!editing">
+          <label class="form-label" for="poProduct">Product <span class="text-danger">*</span></label>
+          <select id="poProduct" class="form-select" formControlName="productId">
+            <option value="">Select product…</option>
+            <option *ngFor="let p of eligibleProducts" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+          </select>
+          <div class="text-danger small" *ngIf="form.get('productId')?.touched && form.get('productId')?.invalid">
+            Product is required.
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="poBom">BOM <span class="text-danger">*</span></label>
+          <select id="poBom" class="form-select" formControlName="bomId">
+            <option value="">Select BOM…</option>
+            <option *ngFor="let b of bomsForSelectedProduct" [value]="b.id">
+              v{{ b.version }} — {{ b.bomQuantity }} {{ b.outputUomCode }} ({{ b.status }})
+            </option>
+          </select>
+          <div class="text-danger small" *ngIf="form.get('bomId')?.touched && form.get('bomId')?.invalid">
+            An ACTIVE BOM for this product is required.
+          </div>
+          <div class="form-text" *ngIf="form.value.productId && !bomsForSelectedProduct.length">
+            This product has no ACTIVE BOM yet.
+          </div>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="poQuantity">Planned Quantity <span class="text-danger">*</span></label>
+          <input id="poQuantity" class="form-control" formControlName="plannedQuantity" placeholder="1000.000000" />
+          <div class="text-danger small" *ngIf="form.get('plannedQuantity')?.touched && form.get('plannedQuantity')?.errors?.['required']">
+            Planned quantity is required.
+          </div>
+          <div class="text-danger small" *ngIf="form.get('plannedQuantity')?.touched && (form.get('plannedQuantity')?.errors?.['pattern'] || form.get('plannedQuantity')?.errors?.['positive'])">
+            Must be greater than zero, max 6 decimal places.
+          </div>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="poOutputUom">Output UOM <span class="text-danger">*</span></label>
+          <select id="poOutputUom" class="form-select" formControlName="outputUnitOfMeasureId">
+            <option value="">Select UOM…</option>
+            <option *ngFor="let u of outputUomOptionsFor(form.value.productId)" [value]="u.id">{{ u.label }}</option>
+          </select>
+          <div class="text-danger small" *ngIf="form.get('outputUnitOfMeasureId')?.touched && form.get('outputUnitOfMeasureId')?.invalid">
+            Output UOM is required.
+          </div>
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="poWarehouse">Warehouse</label>
+          <select id="poWarehouse" class="form-select" formControlName="warehouseId">
+            <option value="">Not specified</option>
+            <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="poPriority">Priority</label>
+          <select id="poPriority" class="form-select" formControlName="priority">
+            <option *ngFor="let p of priorities" [value]="p">{{ p }}</option>
+          </select>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="poOrderDate">Order Date <span class="text-danger">*</span></label>
+          <input id="poOrderDate" type="date" class="form-control" formControlName="orderDate" />
+          <div class="text-danger small" *ngIf="form.get('orderDate')?.touched && form.get('orderDate')?.invalid">
+            Order date is required.
+          </div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="poStart">Planned Start</label>
+          <input id="poStart" type="date" class="form-control" formControlName="plannedStartDate" />
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label" for="poEnd">Planned End</label>
+          <input id="poEnd" type="date" class="form-control" formControlName="plannedEndDate" />
+        </div>
+        <div class="col-md-12 mb-3">
+          <label class="form-label" for="poNotes">Notes</label>
+          <textarea id="poNotes" class="form-control" rows="2" formControlName="notes" maxlength="500"></textarea>
+          <div class="text-danger small" *ngIf="form.get('notes')?.touched && form.get('notes')?.invalid">
+            Max 500 characters.
+          </div>
+        </div>
+      </div>
+      <div class="form-text">Routing is not yet available in this system; production orders proceed with BOM only for now.</div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+      <button type="submit" class="btn btn-primary" [disabled]="saving">
+        {{ saving ? 'Saving…' : (editing ? 'Save' : 'Save Draft') }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+<ng-template #detailModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">Production Order details</h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="viewing as o">
+    <dl class="row">
+      <dt class="col-sm-4">Order Number</dt><dd class="col-sm-8"><code>{{ o.orderNumber }}</code></dd>
+      <dt class="col-sm-4">Status</dt>
+      <dd class="col-sm-8"><span class="badge" [ngClass]="statusBadgeClass(o.status)">{{ o.status }}</span></dd>
+      <dt class="col-sm-4">Product</dt><dd class="col-sm-8">{{ o.productName }} (<code>{{ o.productSku }}</code>)</dd>
+      <dt class="col-sm-4">Planned Quantity</dt><dd class="col-sm-8"><code>{{ o.plannedQuantity }}</code> {{ o.outputUomCode }}</dd>
+      <dt class="col-sm-4">BOM Version</dt><dd class="col-sm-8">v{{ o.bomVersion }}</dd>
+      <dt class="col-sm-4">Routing Version</dt><dd class="col-sm-8">{{ o.routingVersion ?? 'Not available yet' }}</dd>
+      <dt class="col-sm-4">Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(o.warehouseId) }}</dd>
+      <dt class="col-sm-4">Priority</dt><dd class="col-sm-8">{{ o.priority }}</dd>
+      <dt class="col-sm-4">Order Date</dt><dd class="col-sm-8">{{ o.orderDate | slice:0:10 }}</dd>
+      <dt class="col-sm-4">Planned Start</dt><dd class="col-sm-8">{{ o.plannedStartDate ? (o.plannedStartDate | slice:0:10) : '—' }}</dd>
+      <dt class="col-sm-4">Planned End</dt><dd class="col-sm-8">{{ o.plannedEndDate ? (o.plannedEndDate | slice:0:10) : '—' }}</dd>
+      <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ o.notes || '—' }}</dd>
+    </dl>
+
+    <h6 class="mb-2">Status Timeline</h6>
+    <div class="d-flex flex-wrap align-items-center gap-1 mb-3">
+      <ng-container *ngFor="let s of ['DRAFT','PLANNED','RELEASED','IN_PROGRESS','COMPLETED','CLOSED']; let last = last">
+        <span class="badge" [ngClass]="o.status === s ? statusBadgeClass(s) : 'bg-light text-muted border'">{{ s }}</span>
+        <span *ngIf="!last">→</span>
+      </ng-container>
+      <span class="ms-3 text-muted small" *ngIf="o.status === 'CANCELLED'">
+        (alternate path: <span class="badge bg-danger">CANCELLED</span> → <span class="badge bg-light text-muted border">CLOSED</span>)
+      </span>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <button *ngIf="canPlanOrder(o)" type="button" class="btn btn-sm btn-outline-info" (click)="askPlan(o)">Plan</button>
+      <button *ngIf="canReleaseOrder(o)" type="button" class="btn btn-sm btn-outline-primary" (click)="askRelease(o)">Release</button>
+      <button *ngIf="canStartOrder(o)" type="button" class="btn btn-sm btn-outline-warning" (click)="askStart(o)">Start</button>
+      <button
+        *ngIf="canComplete && o.status === 'IN_PROGRESS'"
+        type="button"
+        class="btn btn-sm btn-outline-success"
+        disabled
+        title="Completing a production order requires Production Receipt, which is not implemented yet.">
+        Complete
+      </button>
+      <button *ngIf="canCancelOrder(o)" type="button" class="btn btn-sm btn-outline-danger" (click)="askCancel(o)">Cancel</button>
+      <button *ngIf="canCloseOrder(o)" type="button" class="btn btn-sm btn-outline-dark" (click)="askClose(o)">Close</button>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" (click)="modal.close()">Close</button>
+  </div>
+</ng-template>
+
+<ng-template #confirmModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      {{
+        pendingAction?.type === 'plan' ? 'Plan production order?' :
+        pendingAction?.type === 'release' ? 'Release production order?' :
+        pendingAction?.type === 'start' ? 'Start production order?' :
+        pendingAction?.type === 'close' ? 'Close production order?' :
+        pendingAction?.type === 'delete' ? 'Delete production order?' :
+        'Cancel production order?'
+      }}
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="pendingAction as action">
+    <p class="mb-0" *ngIf="action.type === 'plan'">
+      Plan {{ action.order.orderNumber }}? This re-validates the product and BOM and moves the order to PLANNED.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'release'">
+      Release {{ action.order.orderNumber }}? This authorizes production to begin. No material will be issued yet.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'start'">
+      Start {{ action.order.orderNumber }}? This marks production as in progress.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'cancel'">
+      Cancel {{ action.order.orderNumber }}? This cannot be undone.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'close'">
+      Close {{ action.order.orderNumber }}? No further editing will be possible.
+    </p>
+    <p class="mb-0" *ngIf="action.type === 'delete'">
+      Delete DRAFT production order {{ action.order.orderNumber }}? This cannot be undone.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Cancel</button>
+    <button
+      type="button"
+      class="btn"
+      [class.btn-info]="pendingAction?.type === 'plan'"
+      [class.btn-primary]="pendingAction?.type === 'release'"
+      [class.btn-warning]="pendingAction?.type === 'start'"
+      [class.btn-dark]="pendingAction?.type === 'close'"
+      [class.btn-danger]="pendingAction?.type === 'cancel' || pendingAction?.type === 'delete'"
+      [disabled]="actionBusy"
+      (click)="runPendingAction(modal)">
+      {{ actionBusy ? 'Working…' : confirmActionLabel(pendingAction?.type) }}
+    </button>
+  </div>
+</ng-template>

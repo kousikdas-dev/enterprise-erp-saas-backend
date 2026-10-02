@@ -14,6 +14,11 @@ import { ProductUnitsService } from '../product-units/product-units.service';
 import { UnitsService } from '../units/units.service';
 import { ProductsService } from './products.service';
 
+interface ProductLike {
+  id: string;
+  unitOfMeasureId: string;
+}
+
 @Controller({ path: 'internal/products', version: '1' })
 @UseGuards(InternalServiceGuard, ActorGuard)
 export class InternalProductsController {
@@ -23,13 +28,47 @@ export class InternalProductsController {
     private readonly units: UnitsService,
   ) {}
 
+  @Get(':id')
+  async getInternalDetail(
+    @CurrentActor() actor: ActorContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const product = await this.products.getById(actor, id);
+    const uom = await this.buildUomOptions(actor, product);
+    return {
+      id: product.id,
+      sku: product.sku,
+      name: product.name,
+      isActive: product.isActive,
+      trackInventory: product.trackInventory,
+      productType: product.productType,
+      categoryId: product.categoryId,
+      unitOfMeasureId: product.unitOfMeasureId,
+      base: uom.base,
+      alternatives: uom.alternatives,
+    };
+  }
+
   @Get(':id/uom-options')
   async uomOptions(
     @CurrentActor() actor: ActorContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     const product = await this.products.getById(actor, id);
-    const { items: productUnits } = await this.productUnits.list(actor, id);
+    const uom = await this.buildUomOptions(actor, product);
+    return {
+      productId: product.id,
+      trackInventory: product.trackInventory,
+      base: uom.base,
+      alternatives: uom.alternatives,
+    };
+  }
+
+  private async buildUomOptions(actor: ActorContext, product: ProductLike) {
+    const { items: productUnits } = await this.productUnits.list(
+      actor,
+      product.id,
+    );
     const { items: units } = await this.units.list(actor);
     const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
@@ -39,8 +78,6 @@ export class InternalProductsController {
     }
 
     return {
-      productId: product.id,
-      trackInventory: product.trackInventory,
       base: {
         unitOfMeasureId: baseUnit.id,
         code: baseUnit.code,

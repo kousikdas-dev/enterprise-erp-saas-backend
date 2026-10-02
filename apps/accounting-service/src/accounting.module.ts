@@ -9,6 +9,7 @@ import { AccountingEnvironmentVariables } from './config/accounting-env';
 import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { JournalPostingsModule } from './journal-postings/journal-postings.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ReportsModule } from './reports/reports.module';
 import { TaxCodesModule } from './tax-codes/tax-codes.module';
 
 @Module({
@@ -26,6 +27,7 @@ import { TaxCodesModule } from './tax-codes/tax-codes.module';
     AccountMappingsModule,
     JournalEntriesModule,
     JournalPostingsModule,
+    ReportsModule,
     TaxCodesModule,
     MessagingModule.register(),
   ],
