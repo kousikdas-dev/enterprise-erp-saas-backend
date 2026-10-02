@@ -149,6 +149,7 @@ describe('SalesOrdersService', () => {
     return {
       id: 'so1',
       tenantId,
+      orderNumber: 'SO-2026-000001',
       customerId: 'c1',
       quotationId: null,
       proformaInvoiceId: null,
@@ -217,7 +218,10 @@ describe('SalesOrdersService', () => {
     const customer = mockCustomer();
     const created = orderRow();
     const prisma = {
-      salesOrder: { create: jest.fn().mockResolvedValue(created) },
+      salesOrder: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue(created),
+      },
     };
     const customers = {
       require: jest.fn().mockResolvedValue(customer),
@@ -246,10 +250,85 @@ describe('SalesOrdersService', () => {
     expect(data.items.create[0].uomCode).toBe('EA');
   });
 
+  it('generates a tenant + year scoped orderNumber from the current count', async () => {
+    const customer = mockCustomer();
+    const year = new Date().getFullYear();
+    const prisma = {
+      salesOrder: {
+        count: jest.fn().mockResolvedValue(6),
+        create: jest.fn().mockResolvedValue(orderRow()),
+      },
+    };
+    const customers = {
+      require: jest.fn().mockResolvedValue(customer),
+    } as unknown as CustomersService;
+    const service = createService({ prisma, customers });
+
+    await service.create(actor, { customerId: 'c1', items: [baseItemInput()] });
+
+    expect(prisma.salesOrder.count).toHaveBeenCalledWith({
+      where: { tenantId, orderNumber: { startsWith: `SO-${year}-` } },
+    });
+    const data = (prisma.salesOrder.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.orderNumber).toBe(`SO-${year}-000007`);
+  });
+
+  it('retries order number allocation on a unique-constraint collision and eventually succeeds', async () => {
+    const customer = mockCustomer();
+    const conflict = Object.assign(new Error('duplicate'), {
+      code: 'P2002',
+      meta: { target: ['tenantId', 'orderNumber'] },
+    });
+    const create = jest
+      .fn()
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce(orderRow({ orderNumber: 'SO-2026-000002' }));
+    const count = jest.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    const prisma = { salesOrder: { count, create } };
+    const customers = {
+      require: jest.fn().mockResolvedValue(customer),
+    } as unknown as CustomersService;
+    const service = createService({ prisma, customers });
+
+    const result = await service.create(actor, {
+      customerId: 'c1',
+      items: [baseItemInput()],
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(result.orderNumber).toBe('SO-2026-000002');
+  });
+
+  it('gives up after 5 unique-constraint collisions on manual create', async () => {
+    const customer = mockCustomer();
+    const conflict = Object.assign(new Error('duplicate'), {
+      code: 'P2002',
+      meta: { target: ['tenantId', 'orderNumber'] },
+    });
+    const prisma = {
+      salesOrder: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockRejectedValue(conflict),
+      },
+    };
+    const customers = {
+      require: jest.fn().mockResolvedValue(customer),
+    } as unknown as CustomersService;
+    const service = createService({ prisma, customers });
+
+    await expect(
+      service.create(actor, { customerId: 'c1', items: [baseItemInput()] }),
+    ).rejects.toBe(conflict);
+    expect(prisma.salesOrder.create).toHaveBeenCalledTimes(5);
+  });
+
   it('defaults paymentTermId/salespersonId from the customer and stores deliveryDate', async () => {
     const customer = mockCustomer();
     const prisma = {
-      salesOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+      salesOrder: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue(orderRow()),
+      },
     };
     const customers = { require: jest.fn().mockResolvedValue(customer) };
     const service = createService({ prisma, customers });
@@ -271,7 +350,10 @@ describe('SalesOrdersService', () => {
     const overridePaymentTermId = '77777777-7777-4777-8777-777777777777';
     const overrideSalespersonId = '88888888-8888-4888-8888-888888888888';
     const prisma = {
-      salesOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+      salesOrder: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue(orderRow()),
+      },
     };
     const customers = { require: jest.fn().mockResolvedValue(customer) };
     const service = createService({ prisma, customers });
@@ -467,6 +549,7 @@ describe('SalesOrdersService', () => {
         quotation: { findFirst: jest.fn().mockResolvedValue(quotation) },
         salesOrder: {
           findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
           create: createMock,
         },
       };
@@ -504,6 +587,68 @@ describe('SalesOrdersService', () => {
       expect(createdItem.taxComponents.create[0].rate).toBe(
         item.taxComponents[0].rate,
       );
+    });
+
+    it('treats a race on the (tenantId, quotationId) constraint as "already converted" and never retries', async () => {
+      const quotation = {
+        id: 'q1',
+        tenantId,
+        status: QuotationStatus.ACCEPTED,
+        customerId: 'c1',
+        customerName: 'Acme',
+        items: [snapshotSourceItem()],
+      };
+      const conflict = Object.assign(new Error('duplicate'), {
+        code: 'P2002',
+        meta: { target: ['tenantId', 'quotationId'] },
+      });
+      const create = jest.fn().mockRejectedValue(conflict);
+      const prisma = {
+        quotation: { findFirst: jest.fn().mockResolvedValue(quotation) },
+        salesOrder: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
+          create,
+        },
+      };
+      const service = createService({ prisma });
+
+      await expect(
+        service.convertFromQuotation(actor, 'q1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries with a fresh orderNumber when create() races on the number instead of quotationId', async () => {
+      const quotation = {
+        id: 'q1',
+        tenantId,
+        status: QuotationStatus.ACCEPTED,
+        customerId: 'c1',
+        customerName: 'Acme',
+        items: [snapshotSourceItem()],
+      };
+      const conflict = Object.assign(new Error('duplicate'), {
+        code: 'P2002',
+        meta: { target: ['tenantId', 'orderNumber'] },
+      });
+      const create = jest
+        .fn()
+        .mockRejectedValueOnce(conflict)
+        .mockResolvedValueOnce(orderRow({ quotationId: 'q1' }));
+      const prisma = {
+        quotation: { findFirst: jest.fn().mockResolvedValue(quotation) },
+        salesOrder: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
+          create,
+        },
+      };
+      const service = createService({ prisma });
+
+      const result = await service.convertFromQuotation(actor, 'q1');
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(result.quotationId).toBe('q1');
     });
 
     it('rejects conversion when quotation is not ACCEPTED', async () => {
@@ -568,6 +713,7 @@ describe('SalesOrdersService', () => {
         proformaInvoice: { findFirst: jest.fn().mockResolvedValue(proforma) },
         salesOrder: {
           findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
           create: createMock,
         },
       };
@@ -595,6 +741,68 @@ describe('SalesOrdersService', () => {
       expect(createdItem.discountAmount).toBe(item.discountAmount);
       expect(createdItem.taxCodeId).toBe(item.taxCodeId);
       expect(createdItem.taxComponents.create).toHaveLength(2);
+    });
+
+    it('treats a race on the (tenantId, proformaInvoiceId) constraint as "already converted" and never retries', async () => {
+      const proforma = {
+        id: 'pf1',
+        tenantId,
+        status: ProformaInvoiceStatus.ISSUED,
+        customerId: 'c1',
+        customerName: 'Acme',
+        items: [snapshotSourceItem()],
+      };
+      const conflict = Object.assign(new Error('duplicate'), {
+        code: 'P2002',
+        meta: { target: ['tenantId', 'proformaInvoiceId'] },
+      });
+      const create = jest.fn().mockRejectedValue(conflict);
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(proforma) },
+        salesOrder: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
+          create,
+        },
+      };
+      const service = createService({ prisma });
+
+      await expect(
+        service.convertFromProforma(actor, 'pf1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries with a fresh orderNumber when create() races on the number instead of proformaInvoiceId', async () => {
+      const proforma = {
+        id: 'pf1',
+        tenantId,
+        status: ProformaInvoiceStatus.ISSUED,
+        customerId: 'c1',
+        customerName: 'Acme',
+        items: [snapshotSourceItem()],
+      };
+      const conflict = Object.assign(new Error('duplicate'), {
+        code: 'P2002',
+        meta: { target: ['tenantId', 'orderNumber'] },
+      });
+      const create = jest
+        .fn()
+        .mockRejectedValueOnce(conflict)
+        .mockResolvedValueOnce(orderRow({ proformaInvoiceId: 'pf1' }));
+      const prisma = {
+        proformaInvoice: { findFirst: jest.fn().mockResolvedValue(proforma) },
+        salesOrder: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
+          create,
+        },
+      };
+      const service = createService({ prisma });
+
+      const result = await service.convertFromProforma(actor, 'pf1');
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(result.proformaInvoiceId).toBe('pf1');
     });
 
     it('rejects conversion when proforma invoice is not ISSUED', async () => {
@@ -668,7 +876,10 @@ describe('SalesOrdersService', () => {
     function customerAndPrisma() {
       const customer = mockCustomer();
       const prisma = {
-        salesOrder: { create: jest.fn().mockResolvedValue(orderRow()) },
+        salesOrder: {
+          count: jest.fn().mockResolvedValue(0),
+          create: jest.fn().mockResolvedValue(orderRow()),
+        },
       };
       const customers = { require: jest.fn().mockResolvedValue(customer) };
       return { customer, prisma, customers };

@@ -213,6 +213,7 @@ export class QuotationListComponent implements OnInit {
     }
     return this.items.filter(
       (item) =>
+        item.quotationNumber.toLowerCase().includes(q) ||
         item.id.toLowerCase().includes(q) ||
         item.status.toLowerCase().includes(q) ||
         item.customerName.toLowerCase().includes(q) ||
@@ -811,10 +812,12 @@ export class QuotationListComponent implements OnInit {
         });
 
     request$.subscribe({
-      next: () => {
+      next: (saved) => {
         this.saving = false;
         this.modalRef?.close();
-        this.toast.success(this.editing ? 'Quotation updated' : 'Quotation created');
+        this.toast.success(
+          this.editing ? 'Quotation updated' : `Quotation ${saved.quotationNumber} created`,
+        );
         this.load();
         this.cdr.detectChanges();
       },

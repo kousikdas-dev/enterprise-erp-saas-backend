@@ -182,11 +182,17 @@ export class SalesOrderDto {
   @ApiProperty()
   tenantId!: string;
 
+  @ApiProperty({ example: 'SO-2026-000001' })
+  orderNumber!: string;
+
   @ApiProperty()
   customerId!: string;
 
   @ApiPropertyOptional({ nullable: true })
   quotationId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'QT-2026-000001' })
+  quotationNumber!: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   proformaInvoiceId!: string | null;

@@ -217,6 +217,7 @@ model CustomerAddress {
 model Quotation {
   id              String          @id @default(uuid()) @db.Uuid
   tenantId        String          @db.Uuid
+  quotationNumber String
   customerId      String          @db.Uuid
   status          QuotationStatus @default(DRAFT)
   customerName    String
@@ -241,6 +242,7 @@ model Quotation {
   items      QuotationItem[]
   salesOrder SalesOrder?
 
+  @@unique([tenantId, quotationNumber])
   @@index([tenantId])
   @@index([customerId])
   @@index([tenantId, status])
@@ -399,6 +401,7 @@ model ProformaInvoiceItemTaxComponent {
 model SalesOrder {
   id                String           @id @default(uuid()) @db.Uuid
   tenantId          String           @db.Uuid
+  orderNumber       String
   customerId        String           @db.Uuid
   quotationId       String?          @unique @db.Uuid
   proformaInvoiceId String?          @unique @db.Uuid
@@ -427,6 +430,7 @@ model SalesOrder {
   items           SalesOrderItem[]
   shipments       Shipment[]
 
+  @@unique([tenantId, orderNumber])
   @@index([tenantId])
   @@index([customerId])
   @@index([tenantId, status])
@@ -498,14 +502,15 @@ model SalesOrderItemTaxComponent {
 }
 
 model Shipment {
-  id           String         @id @default(uuid()) @db.Uuid
-  tenantId     String         @db.Uuid
-  salesOrderId String         @db.Uuid
-  warehouseId  String         @db.Uuid
-  status       ShipmentStatus @default(PENDING_STOCK)
-  shippedAt    DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @db.Uuid
+  shipmentNumber String
+  salesOrderId   String         @db.Uuid
+  warehouseId    String         @db.Uuid
+  status         ShipmentStatus @default(PENDING_STOCK)
+  shippedAt      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   // Phase 3.3 (Sales Shipment COGS) — Sales-side cache of accounting-
   // service's own posting state, mirroring GoodsReceipt's identical Phase
@@ -529,6 +534,7 @@ model Shipment {
   salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
   items      ShipmentItem[]
 
+  @@unique([tenantId, shipmentNumber])
   @@index([tenantId])
   @@index([salesOrderId])
   @@index([tenantId, status])

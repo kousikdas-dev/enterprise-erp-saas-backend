@@ -230,6 +230,7 @@ export interface GoodsReceiptItem {
 export interface GoodsReceipt {
   id: string;
   tenantId: string;
+  receiptNumber: string;
   purchaseOrderId: string;
   warehouseId: string;
   status: GoodsReceiptStatus | string;

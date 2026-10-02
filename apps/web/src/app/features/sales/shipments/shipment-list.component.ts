@@ -89,6 +89,7 @@ export class ShipmentListComponent implements OnInit {
     }
     return this.items.filter((s) => {
       return (
+        s.shipmentNumber.toLowerCase().includes(q) ||
         s.id.toLowerCase().includes(q) ||
         s.status.toLowerCase().includes(q) ||
         s.salesOrderId.toLowerCase().includes(q) ||
@@ -102,7 +103,7 @@ export class ShipmentListComponent implements OnInit {
     if (!o) {
       return id.slice(0, 8) + '…';
     }
-    return `${id.slice(0, 8)}… (${o.status}) — ${o.customerName}`;
+    return `${o.orderNumber} (${o.status}) — ${o.customerName}`;
   }
 
   warehouseLabel(id: string): string {
@@ -286,13 +287,13 @@ export class ShipmentListComponent implements OnInit {
           this.saving = false;
           this.modalRef?.close();
           if (created.status === 'POSTED') {
-            this.toast.success('Shipment created and posted to inventory');
+            this.toast.success(`Shipment ${created.shipmentNumber} created and posted to inventory`);
           } else if (created.status === 'PENDING_STOCK') {
             this.toast.warning(
-              'Inventory posting is pending. You can retry posting this shipment.',
+              `Shipment ${created.shipmentNumber} created. Inventory posting is pending — you can retry posting this shipment.`,
             );
           } else {
-            this.toast.success(`Shipment created (${created.status})`);
+            this.toast.success(`Shipment ${created.shipmentNumber} created (${created.status})`);
           }
           this.load();
           this.loadLookups();

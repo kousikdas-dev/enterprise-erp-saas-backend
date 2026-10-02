@@ -207,6 +207,7 @@ export class SalesOrderListComponent implements OnInit {
     }
     return this.items.filter(
       (o) =>
+        o.orderNumber.toLowerCase().includes(q) ||
         o.id.toLowerCase().includes(q) ||
         o.status.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
@@ -809,10 +810,12 @@ export class SalesOrderListComponent implements OnInit {
         });
 
     request$.subscribe({
-      next: () => {
+      next: (saved) => {
         this.saving = false;
         this.modalRef?.close();
-        this.toast.success(this.editing ? 'Sales order updated' : 'Sales order created');
+        this.toast.success(
+          this.editing ? 'Sales order updated' : `Sales order ${saved.orderNumber} created`,
+        );
         this.load();
         this.cdr.detectChanges();
       },

@@ -114,6 +114,7 @@ describe('QuotationsService', () => {
     return {
       id: 'q1',
       tenantId: tenantA,
+      quotationNumber: 'QT-2026-000001',
       customerId: '44444444-4444-4444-8444-444444444444',
       status: QuotationStatus.DRAFT,
       customerName: 'Acme',
@@ -223,6 +224,7 @@ describe('QuotationsService', () => {
     const customer = mockCustomer();
     const prisma = {
       quotation: {
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockResolvedValue(
           quotationRow({ customerId: customer.id, customerName: customer.name }),
         ),
@@ -246,10 +248,74 @@ describe('QuotationsService', () => {
     );
   });
 
+  it('generates a tenant + year scoped quotationNumber from the current count', async () => {
+    const customer = mockCustomer();
+    const year = new Date().getFullYear();
+    const prisma = {
+      quotation: {
+        count: jest.fn().mockResolvedValue(41),
+        create: jest.fn().mockResolvedValue(quotationRow()),
+      },
+    };
+    const customers = { require: jest.fn().mockResolvedValue(customer) };
+    const service = createService({ prisma, customers });
+
+    await service.create(actorA, {
+      customerId: customer.id,
+      items: [baseItemInput()],
+    });
+
+    expect(prisma.quotation.count).toHaveBeenCalledWith({
+      where: { tenantId: tenantA, quotationNumber: { startsWith: `QT-${year}-` } },
+    });
+    const data = (prisma.quotation.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.quotationNumber).toBe(`QT-${year}-000042`);
+  });
+
+  it('retries quotation number allocation on a unique-constraint collision and eventually succeeds', async () => {
+    const customer = mockCustomer();
+    const conflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
+    const create = jest
+      .fn()
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce(quotationRow({ quotationNumber: 'QT-2026-000002' }));
+    const count = jest.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    const prisma = { quotation: { count, create } };
+    const customers = { require: jest.fn().mockResolvedValue(customer) };
+    const service = createService({ prisma, customers });
+
+    const result = await service.create(actorA, {
+      customerId: customer.id,
+      items: [baseItemInput()],
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(result.quotationNumber).toBe('QT-2026-000002');
+  });
+
+  it('gives up after 5 unique-constraint collisions', async () => {
+    const customer = mockCustomer();
+    const conflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
+    const prisma = {
+      quotation: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockRejectedValue(conflict),
+      },
+    };
+    const customers = { require: jest.fn().mockResolvedValue(customer) };
+    const service = createService({ prisma, customers });
+
+    await expect(
+      service.create(actorA, { customerId: customer.id, items: [baseItemInput()] }),
+    ).rejects.toBe(conflict);
+    expect(prisma.quotation.create).toHaveBeenCalledTimes(5);
+  });
+
   it('defaults paymentTermId/salespersonId from the customer and stores deliveryDate', async () => {
     const customer = mockCustomer();
     const prisma = {
       quotation: {
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockResolvedValue(
           quotationRow({
             customerId: customer.id,
@@ -282,6 +348,7 @@ describe('QuotationsService', () => {
     const overrideSalespersonId = '88888888-8888-4888-8888-888888888888';
     const prisma = {
       quotation: {
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockResolvedValue(
           quotationRow({
             customerId: customer.id,
@@ -330,6 +397,7 @@ describe('QuotationsService', () => {
       const customer = mockCustomer();
       const prisma = {
         quotation: {
+          count: jest.fn().mockResolvedValue(0),
           create: jest.fn().mockResolvedValue(quotationRow()),
         },
       };

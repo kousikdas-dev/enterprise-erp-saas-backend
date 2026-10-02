@@ -186,6 +186,9 @@ export class QuotationDto {
   @ApiProperty()
   tenantId!: string;
 
+  @ApiProperty({ example: 'QT-2026-000001' })
+  quotationNumber!: string;
+
   @ApiProperty()
   customerId!: string;
 

@@ -29,6 +29,7 @@ import {
   InventoryStockClient,
   InventoryStockIssueMovement,
 } from '../inventory/inventory-stock.client';
+import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toShipmentResponse } from './dto/shipment-response';
 import {
@@ -162,12 +163,25 @@ export class ShipmentsService {
     dto: CreateShipmentDto,
     request?: RequestAuditMeta,
   ) {
-    const shipmentId = randomUUID();
-    const prepared = await this.preparePendingShipment(
-      actor,
-      shipmentId,
-      dto,
-    );
+    // shipmentNumber is the only unique constraint preparePendingShipment's
+    // insert can hit, so any P2002 here is a collision on it — retry with a
+    // fresh id/number up to 5 times, exactly like every other document
+    // number in this codebase. Nothing external (Inventory, audit) has been
+    // told about shipmentId yet at this point, so re-rolling it is safe.
+    let shipmentId = '';
+    let prepared!: Awaited<ReturnType<ShipmentsService['preparePendingShipment']>>;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      shipmentId = randomUUID();
+      try {
+        prepared = await this.preparePendingShipment(actor, shipmentId, dto);
+        break;
+      } catch (error) {
+        if (isUniqueConstraintError(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
+      }
+    }
     await this.audit.record({
       actor,
       action: 'shipment.created',
@@ -858,10 +872,12 @@ export class ShipmentsService {
         pendingByItem.set(soItem.id, pending.plus(qty));
       }
 
+      const shipmentNumber = await this.nextShipmentNumber(tx, actor.tenantId);
       await tx.shipment.create({
         data: {
           id: shipmentId,
           tenantId: actor.tenantId,
+          shipmentNumber,
           salesOrderId: order.id,
           warehouseId: dto.warehouseId,
           status: ShipmentStatus.PENDING_STOCK,
@@ -896,6 +912,26 @@ export class ShipmentsService {
         })),
       };
     });
+  }
+
+  /**
+   * Tenant-scoped, human-readable business document number — separate from
+   * the database UUID and never supplied by the client as authoritative.
+   * Resets per calendar year (SH-{year}-000001), mirroring
+   * QuotationsService.nextQuotationNumber() exactly. Counted inside the same
+   * transaction as the insert it backs (mirrors OpeningStockService's
+   * identical tx-aware pattern) since preparePendingShipment runs its own
+   * $transaction rather than sharing the caller's.
+   */
+  private async nextShipmentNumber(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<string> {
+    const prefix = `SH-${new Date().getFullYear()}-`;
+    const count = await tx.shipment.count({
+      where: { tenantId, shipmentNumber: { startsWith: prefix } },
+    });
+    return `${prefix}${String(count + 1).padStart(6, '0')}`;
   }
 
   private async finalizePosted(

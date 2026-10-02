@@ -33,6 +33,7 @@ import {
 } from './dto/sales-order.dto';
 
 const ORDER_INCLUDE = {
+  quotation: { select: { quotationNumber: true } },
   items: {
     orderBy: { createdAt: 'asc' as const },
     include: { taxComponents: { orderBy: { sequence: 'asc' as const } } },
@@ -141,42 +142,84 @@ export class SalesOrdersService {
     const customer = await this.customers.require(actor, dto.customerId);
     const lines = await this.mapLines(actor, dto.items);
     const totals = this.sumTotals(lines);
-    const row = await this.prisma.salesOrder.create({
-      data: {
-        tenantId: actor.tenantId,
-        customerId: customer.id,
-        customerName: customer.name,
-        billingAddress:
-          dto.billingAddress?.trim() || this.formatCustomerAddress(customer),
-        shippingAddress:
-          dto.shippingAddress?.trim() || this.formatCustomerAddress(customer),
-        notes: dto.notes?.trim() || null,
-        paymentTermId: dto.paymentTermId ?? customer.paymentTermId,
-        salespersonId: dto.salespersonId ?? customer.salespersonId,
-        deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
-        subtotal: totals.subtotal,
-        discountTotal: totals.discountTotal,
-        taxTotal: totals.taxTotal,
-        total: totals.total,
-        items: {
-          create: lines.map((line) => this.toItemCreateInput(line)),
-        },
-      },
-      include: ORDER_INCLUDE,
+
+    // No quotationId/proformaInvoiceId is set on this path (both left
+    // undefined/NULL), so the only unique constraint a manual create() can
+    // ever hit is (tenantId, orderNumber) — unlike convertFromQuotation/
+    // convertFromProforma below, no meta.target check is needed here.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const orderNumber = await this.nextOrderNumber(actor.tenantId);
+      try {
+        const row = await this.prisma.salesOrder.create({
+          data: {
+            tenantId: actor.tenantId,
+            orderNumber,
+            customerId: customer.id,
+            customerName: customer.name,
+            billingAddress:
+              dto.billingAddress?.trim() ||
+              this.formatCustomerAddress(customer),
+            shippingAddress:
+              dto.shippingAddress?.trim() ||
+              this.formatCustomerAddress(customer),
+            notes: dto.notes?.trim() || null,
+            paymentTermId: dto.paymentTermId ?? customer.paymentTermId,
+            salespersonId: dto.salespersonId ?? customer.salespersonId,
+            deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
+            subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
+            total: totals.total,
+            items: {
+              create: lines.map((line) => this.toItemCreateInput(line)),
+            },
+          },
+          include: ORDER_INCLUDE,
+        });
+        await this.audit.record({
+          actor,
+          action: 'sales-order.created',
+          resource: 'sales-order',
+          resourceId: row.id,
+          metadata: {
+            orderNumber: row.orderNumber,
+            customerId: row.customerId,
+            itemCount: row.items.length,
+            source: 'manual',
+          },
+          request,
+        });
+        return toSalesOrderResponse(row);
+      } catch (error) {
+        if (isUniqueConstraintError(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('Could not allocate sales order number');
+  }
+
+  /**
+   * Tenant-scoped, human-readable business document number — separate from
+   * the database UUID and never supplied by the client as authoritative.
+   * Resets per calendar year (SO-{year}-000001), mirroring
+   * QuotationsService.nextQuotationNumber() exactly.
+   */
+  private async nextOrderNumber(tenantId: string): Promise<string> {
+    const prefix = `SO-${new Date().getFullYear()}-`;
+    const count = await this.prisma.salesOrder.count({
+      where: { tenantId, orderNumber: { startsWith: prefix } },
     });
-    await this.audit.record({
-      actor,
-      action: 'sales-order.created',
-      resource: 'sales-order',
-      resourceId: row.id,
-      metadata: {
-        customerId: row.customerId,
-        itemCount: row.items.length,
-        source: 'manual',
-      },
-      request,
-    });
-    return toSalesOrderResponse(row);
+    return `${prefix}${String(count + 1).padStart(6, '0')}`;
+  }
+
+  /** Does the P2002 error's target column list include `column`? */
+  private isUniqueConflictOn(error: unknown, column: string): boolean {
+    const target = (error as { meta?: { target?: string[] | string } }).meta
+      ?.target;
+    const columns = Array.isArray(target) ? target : [target ?? ''];
+    return columns.some((candidate) => String(candidate).includes(column));
   }
 
   async convertFromQuotation(
@@ -208,53 +251,69 @@ export class SalesOrdersService {
       );
     }
 
-    try {
-      const row = await this.prisma.salesOrder.create({
-        data: {
-          tenantId: actor.tenantId,
-          customerId: quotation.customerId,
-          quotationId: quotation.id,
-          customerName: quotation.customerName,
-          billingAddress: quotation.billingAddress,
-          shippingAddress: quotation.shippingAddress,
-          notes: quotation.notes,
-          paymentTermId: quotation.paymentTermId,
-          salespersonId: quotation.salespersonId,
-          deliveryDate: quotation.deliveryDate,
-          subtotal: quotation.subtotal,
-          discountTotal: quotation.discountTotal,
-          taxTotal: quotation.taxTotal,
-          total: quotation.total,
-          items: {
-            create: quotation.items.map((item) =>
-              this.toSnapshotItemInput(item, actor.tenantId),
-            ),
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const orderNumber = await this.nextOrderNumber(actor.tenantId);
+      try {
+        const row = await this.prisma.salesOrder.create({
+          data: {
+            tenantId: actor.tenantId,
+            orderNumber,
+            customerId: quotation.customerId,
+            quotationId: quotation.id,
+            customerName: quotation.customerName,
+            billingAddress: quotation.billingAddress,
+            shippingAddress: quotation.shippingAddress,
+            notes: quotation.notes,
+            paymentTermId: quotation.paymentTermId,
+            salespersonId: quotation.salespersonId,
+            deliveryDate: quotation.deliveryDate,
+            subtotal: quotation.subtotal,
+            discountTotal: quotation.discountTotal,
+            taxTotal: quotation.taxTotal,
+            total: quotation.total,
+            items: {
+              create: quotation.items.map((item) =>
+                this.toSnapshotItemInput(item, actor.tenantId),
+              ),
+            },
           },
-        },
-        include: ORDER_INCLUDE,
-      });
-      await this.audit.record({
-        actor,
-        action: 'sales-order.created',
-        resource: 'sales-order',
-        resourceId: row.id,
-        metadata: {
-          customerId: row.customerId,
-          itemCount: row.items.length,
-          source: 'quotation',
-          quotationId: quotation.id,
-        },
-        request,
-      });
-      return toSalesOrderResponse(row);
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new ConflictException(
-          'Quotation has already been converted to a sales order',
-        );
+          include: ORDER_INCLUDE,
+        });
+        await this.audit.record({
+          actor,
+          action: 'sales-order.created',
+          resource: 'sales-order',
+          resourceId: row.id,
+          metadata: {
+            orderNumber: row.orderNumber,
+            customerId: row.customerId,
+            itemCount: row.items.length,
+            source: 'quotation',
+            quotationId: quotation.id,
+          },
+          request,
+        });
+        return toSalesOrderResponse(row);
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          // The (tenantId, quotationId) unique constraint is a real business
+          // conflict (a concurrent request already converted this exact
+          // quotation) — never retryable. Anything else hitting P2002 here
+          // can only be the (tenantId, orderNumber) constraint, so retry
+          // with a freshly counted number.
+          if (this.isUniqueConflictOn(error, 'quotationId')) {
+            throw new ConflictException(
+              'Quotation has already been converted to a sales order',
+            );
+          }
+          if (attempt < 4) {
+            continue;
+          }
+        }
+        throw error;
       }
-      throw error;
     }
+    throw new ConflictException('Could not allocate sales order number');
   }
 
   async convertFromProforma(
@@ -286,52 +345,63 @@ export class SalesOrdersService {
       );
     }
 
-    try {
-      const row = await this.prisma.salesOrder.create({
-        data: {
-          tenantId: actor.tenantId,
-          customerId: proforma.customerId,
-          proformaInvoiceId: proforma.id,
-          customerName: proforma.customerName,
-          billingAddress: proforma.billingAddress,
-          shippingAddress: proforma.shippingAddress,
-          notes: proforma.notes,
-          // ProformaInvoice has no paymentTermId/salespersonId/deliveryDate
-          // columns (those exist only on Quotation) — nothing to copy here.
-          subtotal: proforma.subtotal,
-          discountTotal: proforma.discountTotal,
-          taxTotal: proforma.taxTotal,
-          total: proforma.total,
-          items: {
-            create: proforma.items.map((item) =>
-              this.toSnapshotItemInput(item, actor.tenantId),
-            ),
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const orderNumber = await this.nextOrderNumber(actor.tenantId);
+      try {
+        const row = await this.prisma.salesOrder.create({
+          data: {
+            tenantId: actor.tenantId,
+            orderNumber,
+            customerId: proforma.customerId,
+            proformaInvoiceId: proforma.id,
+            customerName: proforma.customerName,
+            billingAddress: proforma.billingAddress,
+            shippingAddress: proforma.shippingAddress,
+            notes: proforma.notes,
+            // ProformaInvoice has no paymentTermId/salespersonId/deliveryDate
+            // columns (those exist only on Quotation) — nothing to copy here.
+            subtotal: proforma.subtotal,
+            discountTotal: proforma.discountTotal,
+            taxTotal: proforma.taxTotal,
+            total: proforma.total,
+            items: {
+              create: proforma.items.map((item) =>
+                this.toSnapshotItemInput(item, actor.tenantId),
+              ),
+            },
           },
-        },
-        include: ORDER_INCLUDE,
-      });
-      await this.audit.record({
-        actor,
-        action: 'sales-order.created',
-        resource: 'sales-order',
-        resourceId: row.id,
-        metadata: {
-          customerId: row.customerId,
-          itemCount: row.items.length,
-          source: 'proforma-invoice',
-          proformaInvoiceId: proforma.id,
-        },
-        request,
-      });
-      return toSalesOrderResponse(row);
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new ConflictException(
-          'Proforma invoice has already been converted to a sales order',
-        );
+          include: ORDER_INCLUDE,
+        });
+        await this.audit.record({
+          actor,
+          action: 'sales-order.created',
+          resource: 'sales-order',
+          resourceId: row.id,
+          metadata: {
+            orderNumber: row.orderNumber,
+            customerId: row.customerId,
+            itemCount: row.items.length,
+            source: 'proforma-invoice',
+            proformaInvoiceId: proforma.id,
+          },
+          request,
+        });
+        return toSalesOrderResponse(row);
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          if (this.isUniqueConflictOn(error, 'proformaInvoiceId')) {
+            throw new ConflictException(
+              'Proforma invoice has already been converted to a sales order',
+            );
+          }
+          if (attempt < 4) {
+            continue;
+          }
+        }
+        throw error;
       }
-      throw error;
     }
+    throw new ConflictException('Could not allocate sales order number');
   }
 
   async list(actor: ActorContext) {

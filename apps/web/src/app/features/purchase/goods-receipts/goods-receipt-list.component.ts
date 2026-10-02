@@ -104,6 +104,7 @@ export class GoodsReceiptListComponent implements OnInit {
     }
     return this.items.filter((r) => {
       return (
+        r.receiptNumber.toLowerCase().includes(q) ||
         r.id.toLowerCase().includes(q) ||
         r.status.toLowerCase().includes(q) ||
         r.purchaseOrderId.toLowerCase().includes(q) ||
@@ -132,7 +133,7 @@ export class GoodsReceiptListComponent implements OnInit {
     if (!o) {
       return id.slice(0, 8) + '…';
     }
-    return `${id.slice(0, 8)}… (${o.status}) — ${this.supplierLabel(o.supplierId)}`;
+    return `${o.poNumber} (${o.status}) — ${this.supplierLabel(o.supplierId)}`;
   }
 
   poItemProduct(poItemId: string, order?: PurchaseOrder | null): string {
@@ -328,13 +329,13 @@ export class GoodsReceiptListComponent implements OnInit {
           this.saving = false;
           this.modalRef?.close();
           if (created.status === 'POSTED') {
-            this.toast.success('Goods receipt created and posted to inventory');
+            this.toast.success(`Goods receipt ${created.receiptNumber} created and posted to inventory`);
           } else if (created.status === 'PENDING_STOCK') {
             this.toast.warning(
-              'Inventory posting is pending. You can retry posting this receipt.',
+              `Goods receipt ${created.receiptNumber} created. Inventory posting is pending — you can retry posting this receipt.`,
             );
           } else {
-            this.toast.success(`Goods receipt created (${created.status})`);
+            this.toast.success(`Goods receipt ${created.receiptNumber} created (${created.status})`);
           }
           this.load();
           this.loadLookups();

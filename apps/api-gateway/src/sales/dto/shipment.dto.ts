@@ -119,6 +119,9 @@ export class ShipmentDto {
   @ApiProperty()
   tenantId!: string;
 
+  @ApiProperty({ example: 'SH-2026-000001' })
+  shipmentNumber!: string;
+
   @ApiProperty()
   salesOrderId!: string;
 

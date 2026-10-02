@@ -9,6 +9,7 @@ import { moneyToString, quantityToString } from '../../common/decimal';
 type ReceiptWithItems = {
   id: string;
   tenantId: string;
+  receiptNumber: string;
   purchaseOrderId: string;
   warehouseId: string;
   status: GoodsReceiptStatus;
@@ -44,6 +45,7 @@ export function toGoodsReceiptResponse(row: ReceiptWithItems) {
   return {
     id: row.id,
     tenantId: row.tenantId,
+    receiptNumber: row.receiptNumber,
     purchaseOrderId: row.purchaseOrderId,
     warehouseId: row.warehouseId,
     status: row.status,

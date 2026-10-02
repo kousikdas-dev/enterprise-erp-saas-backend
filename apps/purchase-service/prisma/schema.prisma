@@ -260,6 +260,7 @@ model PurchaseOrderItemTaxComponent {
 model GoodsReceipt {
   id              String             @id @default(uuid()) @db.Uuid
   tenantId        String             @db.Uuid
+  receiptNumber   String
   purchaseOrderId String             @db.Uuid
   warehouseId     String             @db.Uuid
   status          GoodsReceiptStatus @default(PENDING_STOCK)
@@ -291,6 +292,7 @@ model GoodsReceipt {
   // GoodsReceipt (see PurchaseReturn's own model comment for the rationale).
   purchaseReturns PurchaseReturn[]
 
+  @@unique([tenantId, receiptNumber])
   @@index([tenantId])
   @@index([purchaseOrderId])
   @@index([tenantId, status])

@@ -28,7 +28,7 @@
         <table class="align-middle mb-0 table table-borderless table-striped table-hover">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Order #</th>
               <th>Customer</th>
               <th class="text-center">Status</th>
               <th class="text-end">Total</th>
@@ -38,7 +38,7 @@
           </thead>
           <tbody>
             <tr *ngFor="let item of filtered">
-              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td><code>{{ item.orderNumber }}</code></td>
               <td>{{ item.customerName }}</td>
               <td class="text-center">
                 <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
@@ -285,14 +285,14 @@
   </div>
   <div class="modal-body" *ngIf="viewing as o">
     <dl class="row">
-      <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>{{ o.id }}</code></dd>
+      <dt class="col-sm-4">Order #</dt><dd class="col-sm-8"><code>{{ o.orderNumber }}</code></dd>
       <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ o.customerName }}</dd>
       <dt class="col-sm-4">Status</dt>
       <dd class="col-sm-8">
         <span class="badge" [ngClass]="statusBadgeClass(o.status)">{{ o.status }}</span>
       </dd>
       <dt class="col-sm-4" *ngIf="o.quotationId">From quotation</dt>
-      <dd class="col-sm-8" *ngIf="o.quotationId"><code>{{ o.quotationId | slice:0:8 }}…</code></dd>
+      <dd class="col-sm-8" *ngIf="o.quotationId"><code>{{ o.quotationNumber || o.quotationId }}</code></dd>
       <dt class="col-sm-4" *ngIf="o.proformaInvoiceId">From proforma invoice</dt>
       <dd class="col-sm-8" *ngIf="o.proformaInvoiceId"><code>{{ o.proformaInvoiceId | slice:0:8 }}…</code></dd>
       <dt class="col-sm-4">Notes</dt><dd class="col-sm-8">{{ o.notes || '—' }}</dd>
@@ -356,16 +356,16 @@
   </div>
   <div class="modal-body" *ngIf="pendingAction as action">
     <p class="mb-0" *ngIf="action.type === 'confirm'">
-      Confirm order <code>{{ action.order.id | slice:0:8 }}…</code>? It will move from DRAFT to CONFIRMED.
+      Confirm order <code>{{ action.order.orderNumber }}</code>? It will move from DRAFT to CONFIRMED.
     </p>
     <p class="mb-0" *ngIf="action.type === 'cancel'">
-      Cancel order <code>{{ action.order.id | slice:0:8 }}…</code>? Only allowed when the backend permits it.
+      Cancel order <code>{{ action.order.orderNumber }}</code>? Only allowed when the backend permits it.
     </p>
     <p class="mb-0" *ngIf="action.type === 'proforma'">
-      Create a proforma invoice from order <code>{{ action.order.id | slice:0:8 }}…</code>?
+      Create a proforma invoice from order <code>{{ action.order.orderNumber }}</code>?
     </p>
     <p class="mb-0" *ngIf="action.type === 'invoice'">
-      Create a sales invoice from order <code>{{ action.order.id | slice:0:8 }}…</code>?
+      Create a sales invoice from order <code>{{ action.order.orderNumber }}</code>?
     </p>
   </div>
   <div class="modal-footer">

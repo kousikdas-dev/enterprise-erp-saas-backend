@@ -8,6 +8,7 @@ import { moneyToString, quantityToString } from '../../common/decimal';
 type ShipmentWithItems = {
   id: string;
   tenantId: string;
+  shipmentNumber: string;
   salesOrderId: string;
   warehouseId: string;
   status: ShipmentStatus;
@@ -51,6 +52,7 @@ export function toShipmentResponse(row: ShipmentWithItems) {
   return {
     id: row.id,
     tenantId: row.tenantId,
+    shipmentNumber: row.shipmentNumber,
     salesOrderId: row.salesOrderId,
     warehouseId: row.warehouseId,
     status: row.status,

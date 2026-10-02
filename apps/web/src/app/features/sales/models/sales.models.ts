@@ -164,6 +164,7 @@ export interface QuotationItem {
 export interface Quotation {
   id: string;
   tenantId: string;
+  quotationNumber: string;
   customerId: string;
   status: QuotationStatus | string;
   customerName: string;
@@ -349,8 +350,10 @@ export interface SalesOrderItem {
 export interface SalesOrder {
   id: string;
   tenantId: string;
+  orderNumber: string;
   customerId: string;
   quotationId: string | null;
+  quotationNumber: string | null;
   proformaInvoiceId: string | null;
   status: SalesOrderStatus | string;
   customerName: string;
@@ -546,6 +549,7 @@ export interface ShipmentItem {
 export interface Shipment {
   id: string;
   tenantId: string;
+  shipmentNumber: string;
   salesOrderId: string;
   warehouseId: string;
   status: ShipmentStatus | string;

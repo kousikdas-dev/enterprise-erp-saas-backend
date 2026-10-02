@@ -28,6 +28,7 @@ import {
   InventoryStockClient,
   InventoryStockMovementSummary,
 } from '../inventory/inventory-stock.client';
+import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toGoodsReceiptResponse } from './dto/goods-receipt-response';
 import { CreateGoodsReceiptDto } from './dto/goods-receipt.dto';
@@ -74,12 +75,32 @@ export class GoodsReceiptsService {
     dto: CreateGoodsReceiptDto,
     request?: RequestAuditMeta,
   ) {
-    const goodsReceiptId = randomUUID();
-    const prepared = await this.preparePendingReceipt(
-      actor,
-      goodsReceiptId,
-      dto,
-    );
+    // receiptNumber is the only unique constraint preparePendingReceipt's
+    // insert can hit, so any P2002 here is a collision on it — retry with a
+    // fresh id/number up to 5 times, mirroring
+    // ShipmentsService.create()/preparePendingShipment() exactly. Nothing
+    // external (Inventory, audit) has been told about goodsReceiptId yet at
+    // this point, so re-rolling it is safe.
+    let goodsReceiptId = '';
+    let prepared!: Awaited<
+      ReturnType<GoodsReceiptsService['preparePendingReceipt']>
+    >;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      goodsReceiptId = randomUUID();
+      try {
+        prepared = await this.preparePendingReceipt(
+          actor,
+          goodsReceiptId,
+          dto,
+        );
+        break;
+      } catch (error) {
+        if (isUniqueConstraintError(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
+      }
+    }
     const applyResult = await this.inventory.applyReceipt(actor, {
       referenceType: 'goods_receipt',
       referenceId: goodsReceiptId,
@@ -330,10 +351,12 @@ export class GoodsReceiptsService {
         pendingByItem.set(poItem.id, pending.plus(qty));
       }
 
+      const receiptNumber = await this.nextReceiptNumber(tx, actor.tenantId);
       await tx.goodsReceipt.create({
         data: {
           id: goodsReceiptId,
           tenantId: actor.tenantId,
+          receiptNumber,
           purchaseOrderId: order.id,
           warehouseId: dto.warehouseId,
           status: GoodsReceiptStatus.PENDING_STOCK,
@@ -371,6 +394,25 @@ export class GoodsReceiptsService {
         itemIds: receiptItems.map((item) => item.id),
       };
     });
+  }
+
+  /**
+   * Tenant-scoped, human-readable business document number — separate from
+   * the database UUID and never supplied by the client as authoritative.
+   * Resets per calendar year (GRN-{year}-000001), mirroring
+   * ShipmentsService.nextShipmentNumber() exactly. Counted inside the same
+   * transaction as the insert it backs since preparePendingReceipt runs its
+   * own $transaction rather than sharing the caller's.
+   */
+  private async nextReceiptNumber(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<string> {
+    const prefix = `GRN-${new Date().getFullYear()}-`;
+    const count = await tx.goodsReceipt.count({
+      where: { tenantId, receiptNumber: { startsWith: prefix } },
+    });
+    return `${prefix}${String(count + 1).padStart(6, '0')}`;
   }
 
   private async pendingQuantitiesByPurchaseOrderItem(

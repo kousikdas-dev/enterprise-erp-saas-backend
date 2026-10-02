@@ -117,6 +117,7 @@ describe('GoodsReceiptsService', () => {
         findMany: jest.fn().mockResolvedValue(options.pendingItems ?? []),
       },
       goodsReceipt: {
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn((args: { data: unknown }) => {
           created.data = args.data;
           return Promise.resolve({ id: 'created' });
@@ -446,6 +447,149 @@ describe('GoodsReceiptsService', () => {
     );
     expect(result.items[0].baseQuantity).toBe('4.000000');
     expect(result.items[0].quantity).toBe('4.000000');
+  });
+
+  describe('receiptNumber generation / concurrency', () => {
+    const year = new Date().getFullYear();
+
+    function simpleReceiptScenario() {
+      const order = buildOrder([basePoItem()]);
+      const prepareTx = buildPrepareTx({ order });
+      const finalizeTx = buildFinalizeTx({
+        receiptId: 'created',
+        purchaseOrderId: poId,
+        initialStatus: GoodsReceiptStatus.PENDING_STOCK,
+        receiptItems: [
+          {
+            id: 'gri1',
+            purchaseOrderItemId: poItemId,
+            quantity: decimal('4'),
+            baseQuantity: decimal('4'),
+            productId,
+            productSku: 'SKU-1',
+            productName: 'Widget',
+            unitOfMeasureId: null,
+            uomCode: null,
+            uomName: null,
+            conversionFactor: decimal('1'),
+          },
+        ],
+        poItems: [{ id: poItemId, quantity: decimal('10'), receivedQuantity: decimal('0') }],
+        postedResult: postedResponse({
+          items: [
+            {
+              id: 'gri1',
+              tenantId: actor.tenantId,
+              goodsReceiptId: 'created',
+              purchaseOrderItemId: poItemId,
+              quantity: decimal('4'),
+              baseQuantity: decimal('4'),
+              productId,
+              productSku: 'SKU-1',
+              productName: 'Widget',
+              unitOfMeasureId: null,
+              uomCode: null,
+              uomName: null,
+              conversionFactor: decimal('1'),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+        }),
+      });
+      return { prepareTx, finalizeTx };
+    }
+
+    it('generates a tenant + year scoped receiptNumber from the current count', async () => {
+      const { prepareTx, finalizeTx } = simpleReceiptScenario();
+      prepareTx.goodsReceipt.count = jest.fn().mockResolvedValue(6);
+      const { service } = buildService(prepareTx, finalizeTx);
+
+      await service.create(actor, {
+        purchaseOrderId: poId,
+        warehouseId,
+        items: [{ purchaseOrderItemId: poItemId, quantity: '4' }],
+      });
+
+      expect(prepareTx.goodsReceipt.count).toHaveBeenCalledWith({
+        where: { tenantId: actor.tenantId, receiptNumber: { startsWith: `GRN-${year}-` } },
+      });
+      const created = prepareTx.__created.data as { receiptNumber: string };
+      expect(created.receiptNumber).toBe(`GRN-${year}-000007`);
+    });
+
+    it('retries with a fresh goodsReceiptId/receiptNumber on a unique-constraint collision and eventually succeeds', async () => {
+      const order = buildOrder([basePoItem()]);
+      const conflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
+      const failingPrepareTx = buildPrepareTx({ order });
+      failingPrepareTx.goodsReceipt.create = jest.fn().mockRejectedValue(conflict);
+      const succeedingPrepareTx = buildPrepareTx({ order });
+
+      let call = 0;
+      const prisma = {
+        $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+          call += 1;
+          return fn(call === 1 ? failingPrepareTx : succeedingPrepareTx);
+        }),
+        goodsReceipt: { findFirst: jest.fn(), update: jest.fn() },
+        goodsReceiptItem: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      const inventory = {
+        applyReceipt: jest.fn().mockRejectedValue(new Error('stop-after-prepare')),
+        applyReturn: jest.fn(),
+      };
+      const audit = { record: jest.fn() };
+      const accountingJournal = { post: jest.fn(), reverse: jest.fn() };
+      const service = new GoodsReceiptsService(
+        prisma as never,
+        inventory as unknown as InventoryStockClient,
+        audit as unknown as IdentityAuditClient,
+        accountingJournal as unknown as AccountingJournalClient,
+      );
+
+      await expect(
+        service.create(actor, {
+          purchaseOrderId: poId,
+          warehouseId,
+          items: [{ purchaseOrderItemId: poItemId, quantity: '4' }],
+        }),
+      ).rejects.toThrow('stop-after-prepare');
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(succeedingPrepareTx.goodsReceipt.create).toHaveBeenCalled();
+    });
+
+    it('gives up after 5 unique-constraint collisions', async () => {
+      const order = buildOrder([basePoItem()]);
+      const conflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
+      const prisma = {
+        $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+          const tx = buildPrepareTx({ order });
+          tx.goodsReceipt.create = jest.fn().mockRejectedValue(conflict);
+          return fn(tx);
+        }),
+        goodsReceipt: { findFirst: jest.fn(), update: jest.fn() },
+        goodsReceiptItem: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      const inventory = { applyReceipt: jest.fn(), applyReturn: jest.fn() };
+      const audit = { record: jest.fn() };
+      const accountingJournal = { post: jest.fn(), reverse: jest.fn() };
+      const service = new GoodsReceiptsService(
+        prisma as never,
+        inventory as unknown as InventoryStockClient,
+        audit as unknown as IdentityAuditClient,
+        accountingJournal as unknown as AccountingJournalClient,
+      );
+
+      await expect(
+        service.create(actor, {
+          purchaseOrderId: poId,
+          warehouseId,
+          items: [{ purchaseOrderItemId: poItemId, quantity: '4' }],
+        }),
+      ).rejects.toBe(conflict);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(5);
+    });
   });
 
   // --- 2. Alternate UOM: baseQuantity = quantity * conversionFactor --------

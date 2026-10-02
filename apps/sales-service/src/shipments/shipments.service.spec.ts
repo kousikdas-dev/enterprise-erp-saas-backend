@@ -63,7 +63,10 @@ describe('ShipmentsService', () => {
         .mockResolvedValueOnce([{ id: soItemId }]),
       salesOrder: { findFirst: jest.fn().mockResolvedValue(order) },
       shipmentItem: { findMany: jest.fn().mockResolvedValue([]) },
-      shipment: { create: jest.fn().mockResolvedValue({ id: 'sh1' }) },
+      shipment: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue({ id: 'sh1' }),
+      },
     };
   }
 
@@ -227,6 +230,69 @@ describe('ShipmentsService', () => {
       );
     });
 
+    it('retries with a fresh shipmentId/shipmentNumber on a unique-constraint collision and eventually succeeds', async () => {
+      const order = openOrder();
+      const conflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
+      let call = 0;
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: unknown) => Promise<unknown>) => {
+          call += 1;
+          if (call === 1) {
+            const failingTx = {
+              ...createTx(order),
+              shipment: {
+                count: jest.fn().mockResolvedValue(0),
+                create: jest.fn().mockRejectedValue(conflict),
+              },
+            };
+            return fn(failingTx);
+          }
+          return fn(createTx(order));
+        }),
+      };
+      const inventory = {
+        applyIssue: jest.fn().mockRejectedValue(new Error('stop-after-prepare')),
+      };
+      const service = buildService({ prisma, inventory });
+
+      await expect(
+        service.create(actor, {
+          salesOrderId: 'so1',
+          warehouseId,
+          items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+        }),
+      ).rejects.toThrow('stop-after-prepare');
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up after 5 unique-constraint collisions', async () => {
+      const order = openOrder();
+      const conflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
+      const prisma = {
+        $transaction: jest.fn(async (fn: (c: unknown) => Promise<unknown>) => {
+          const failingTx = {
+            ...createTx(order),
+            shipment: {
+              count: jest.fn().mockResolvedValue(0),
+              create: jest.fn().mockRejectedValue(conflict),
+            },
+          };
+          return fn(failingTx);
+        }),
+      };
+      const service = buildService({ prisma });
+
+      await expect(
+        service.create(actor, {
+          salesOrderId: 'so1',
+          warehouseId,
+          items: [{ salesOrderItemId: soItemId, quantity: '10' }],
+        }),
+      ).rejects.toBe(conflict);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(5);
+    });
+
     it('computes baseQuantity = quantity × conversionFactor for an alternate UOM (2 BOX × 24 PCS/BOX = 48)', async () => {
       const order = openOrder({
         unitOfMeasureId: boxUomId,
@@ -368,7 +434,10 @@ describe('ShipmentsService', () => {
           .mockResolvedValueOnce([{ id: soItemId }]),
         salesOrder: { findFirst: jest.fn().mockResolvedValue(order) },
         shipmentItem: { findMany: jest.fn().mockResolvedValue([]) },
-        shipment: { create: jest.fn().mockResolvedValue({ id: 'sh1' }) },
+        shipment: {
+          count: jest.fn().mockResolvedValue(0),
+          create: jest.fn().mockResolvedValue({ id: 'sh1' }),
+        },
       };
       const prisma = {
         $transaction: jest.fn(async (fn: (c: typeof tx) => Promise<unknown>) => fn(tx)),
@@ -938,7 +1007,10 @@ describe('ShipmentsService', () => {
           findFirst: jest.fn().mockResolvedValue({ id: 'so1', tenantId, items: orderItems }),
         },
         shipmentItem: { findMany: jest.fn().mockResolvedValue([]) },
-        shipment: { create: jest.fn().mockResolvedValue({ id: shipmentId }) },
+        shipment: {
+          count: jest.fn().mockResolvedValue(0),
+          create: jest.fn().mockResolvedValue({ id: shipmentId }),
+        },
       };
 
       const finalItems = lines.map((l, i) => ({
@@ -1291,7 +1363,10 @@ describe('ShipmentsService', () => {
           }),
         },
         shipmentItem: { findMany: jest.fn().mockResolvedValue([]) },
-        shipment: { create: jest.fn().mockResolvedValue({ id: shipmentId }) },
+        shipment: {
+          count: jest.fn().mockResolvedValue(0),
+          create: jest.fn().mockResolvedValue({ id: shipmentId }),
+        },
       };
       const prisma = {
         $transaction: jest.fn(async (fn: (c: unknown) => Promise<unknown>) => fn(tx)),

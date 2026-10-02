@@ -13,6 +13,7 @@ type QuotationItemTaxComponentRow = {
 type QuotationWithItems = {
   id: string;
   tenantId: string;
+  quotationNumber: string;
   customerId: string;
   status: QuotationStatus;
   customerName: string;
@@ -74,6 +75,7 @@ export function toQuotationResponse(row: QuotationWithItems) {
   return {
     id: row.id,
     tenantId: row.tenantId,
+    quotationNumber: row.quotationNumber,
     customerId: row.customerId,
     status: row.status,
     customerName: row.customerName,

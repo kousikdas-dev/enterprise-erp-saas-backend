@@ -34,7 +34,7 @@
         <table class="align-middle mb-0 table table-borderless table-striped table-hover">
           <thead>
             <tr>
-              <th>Receipt</th>
+              <th>Receipt #</th>
               <th>Purchase order</th>
               <th>Warehouse</th>
               <th class="text-center">Status</th>
@@ -44,7 +44,7 @@
           </thead>
           <tbody>
             <tr *ngFor="let item of filtered">
-              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td><code>{{ item.receiptNumber }}</code></td>
               <td>{{ orderLabel(item.purchaseOrderId) }}</td>
               <td>{{ warehouseLabel(item.warehouseId) }}</td>
               <td class="text-center">
@@ -89,7 +89,7 @@
             (change)="onPurchaseOrderChange(form.controls.purchaseOrderId.value || '')">
             <option value="">Select receivable PO…</option>
             <option *ngFor="let o of receivableOrders" [value]="o.id">
-              {{ o.id | slice:0:8 }}… — {{ o.status }} — {{ supplierLabel(o.supplierId) }}
+              {{ o.poNumber }} — {{ o.status }} — {{ supplierLabel(o.supplierId) }}
             </option>
           </select>
           <div class="form-text">Only CONFIRMED or PARTIALLY_RECEIVED orders are listed.</div>
@@ -172,7 +172,7 @@
       Inventory posting is pending. You can retry posting this receipt.
     </div>
     <dl class="row">
-      <dt class="col-sm-4">Receipt ID</dt><dd class="col-sm-8"><code>{{ r.id }}</code></dd>
+      <dt class="col-sm-4">Receipt #</dt><dd class="col-sm-8"><code>{{ r.receiptNumber }}</code></dd>
       <dt class="col-sm-4">Purchase order</dt><dd class="col-sm-8">{{ orderLabel(r.purchaseOrderId) }}</dd>
       <dt class="col-sm-4">Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(r.warehouseId) }}</dd>
       <dt class="col-sm-4">Status</dt>

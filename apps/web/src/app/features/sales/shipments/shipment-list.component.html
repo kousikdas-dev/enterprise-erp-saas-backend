@@ -44,7 +44,7 @@
           </thead>
           <tbody>
             <tr *ngFor="let item of filtered">
-              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td><code>{{ item.shipmentNumber }}</code></td>
               <td>{{ orderLabel(item.salesOrderId) }}</td>
               <td>{{ warehouseLabel(item.warehouseId) }}</td>
               <td class="text-center">
@@ -89,7 +89,7 @@
             (change)="onSalesOrderChange(form.controls.salesOrderId.value || '')">
             <option value="">Select shippable order…</option>
             <option *ngFor="let o of shippableOrders" [value]="o.id">
-              {{ o.id | slice:0:8 }}… — {{ o.status }} — {{ o.customerName }}
+              {{ o.orderNumber }} — {{ o.status }} — {{ o.customerName }}
             </option>
           </select>
           <div class="form-text">Only CONFIRMED or PARTIALLY_FULFILLED orders are listed.</div>
@@ -167,7 +167,7 @@
       Inventory posting is pending. You can retry posting this shipment.
     </div>
     <dl class="row">
-      <dt class="col-sm-4">Shipment ID</dt><dd class="col-sm-8"><code>{{ s.id }}</code></dd>
+      <dt class="col-sm-4">Shipment #</dt><dd class="col-sm-8"><code>{{ s.shipmentNumber }}</code></dd>
       <dt class="col-sm-4">Sales order</dt><dd class="col-sm-8">{{ orderLabel(s.salesOrderId) }}</dd>
       <dt class="col-sm-4">Warehouse</dt><dd class="col-sm-8">{{ warehouseLabel(s.warehouseId) }}</dd>
       <dt class="col-sm-4">Status</dt>

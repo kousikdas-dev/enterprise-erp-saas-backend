@@ -13,8 +13,10 @@ type SalesOrderItemTaxComponentRow = {
 type SalesOrderWithItems = {
   id: string;
   tenantId: string;
+  orderNumber: string;
   customerId: string;
   quotationId: string | null;
+  quotation: { quotationNumber: string } | null;
   proformaInvoiceId: string | null;
   status: SalesOrderStatus;
   customerName: string;
@@ -74,8 +76,10 @@ export function toSalesOrderResponse(row: SalesOrderWithItems) {
   return {
     id: row.id,
     tenantId: row.tenantId,
+    orderNumber: row.orderNumber,
     customerId: row.customerId,
     quotationId: row.quotationId,
+    quotationNumber: row.quotation?.quotationNumber ?? null,
     proformaInvoiceId: row.proformaInvoiceId,
     status: row.status,
     customerName: row.customerName,

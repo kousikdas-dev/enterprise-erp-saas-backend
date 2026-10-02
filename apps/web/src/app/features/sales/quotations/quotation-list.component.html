@@ -28,7 +28,7 @@
         <table class="align-middle mb-0 table table-borderless table-striped table-hover">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Quotation #</th>
               <th>Customer</th>
               <th class="text-center">Status</th>
               <th>Valid until</th>
@@ -39,7 +39,7 @@
           </thead>
           <tbody>
             <tr *ngFor="let item of filtered">
-              <td><code>{{ item.id | slice:0:8 }}…</code></td>
+              <td><code>{{ item.quotationNumber }}</code></td>
               <td>{{ item.customerName }}</td>
               <td class="text-center">
                 <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
@@ -305,7 +305,7 @@
   </div>
   <div class="modal-body" *ngIf="viewing as q">
     <dl class="row">
-      <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>{{ q.id }}</code></dd>
+      <dt class="col-sm-4">Quotation #</dt><dd class="col-sm-8"><code>{{ q.quotationNumber }}</code></dd>
       <dt class="col-sm-4">Customer</dt><dd class="col-sm-8">{{ q.customerName }}</dd>
       <dt class="col-sm-4">Status</dt>
       <dd class="col-sm-8">
@@ -377,7 +377,7 @@
   </div>
   <div class="modal-body" *ngIf="pendingAction as action">
     <p class="mb-0">
-      {{ actionLabel(action.type) }} for quotation <code>{{ action.quotation.id | slice:0:8 }}…</code>?
+      {{ actionLabel(action.type) }} for quotation <code>{{ action.quotation.quotationNumber }}</code>?
     </p>
   </div>
   <div class="modal-footer">

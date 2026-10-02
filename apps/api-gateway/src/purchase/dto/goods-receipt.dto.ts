@@ -133,6 +133,9 @@ export class GoodsReceiptDto {
   @ApiProperty()
   tenantId!: string;
 
+  @ApiProperty({ example: 'GRN-2026-000001' })
+  receiptNumber!: string;
+
   @ApiProperty()
   purchaseOrderId!: string;
 

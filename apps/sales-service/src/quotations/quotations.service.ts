@@ -17,6 +17,7 @@ import {
 } from '../common/decimal';
 import { CustomersService } from '../customers/customers.service';
 import { InventoryProductClient } from '../inventory/inventory-product.client';
+import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { toQuotationResponse } from './dto/quotation-response';
 import {
@@ -84,39 +85,72 @@ export class QuotationsService {
     const customer = await this.customers.require(actor, dto.customerId);
     const lines = await this.mapLines(actor, dto.items);
     const totals = this.sumTotals(lines);
-    const row = await this.prisma.quotation.create({
-      data: {
-        tenantId: actor.tenantId,
-        customerId: customer.id,
-        customerName: customer.name,
-        billingAddress:
-        dto.billingAddress?.trim() || this.formatCustomerAddress(customer),
-        shippingAddress:
-        dto.shippingAddress?.trim() || this.formatCustomerAddress(customer),
-        notes: dto.notes?.trim() || null,
-        paymentTermId: dto.paymentTermId ?? customer.paymentTermId,
-        salespersonId: dto.salespersonId ?? customer.salespersonId,
-        deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
-        validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
-        subtotal: totals.subtotal,
-        discountTotal: totals.discountTotal,
-        taxTotal: totals.taxTotal,
-        total: totals.total,
-        items: {
-          create: lines.map((line) => this.toItemCreateInput(line)),
-        },
-      },
-      include: QUOTATION_INCLUDE,
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const quotationNumber = await this.nextQuotationNumber(actor.tenantId);
+      try {
+        const row = await this.prisma.quotation.create({
+          data: {
+            tenantId: actor.tenantId,
+            quotationNumber,
+            customerId: customer.id,
+            customerName: customer.name,
+            billingAddress:
+            dto.billingAddress?.trim() || this.formatCustomerAddress(customer),
+            shippingAddress:
+            dto.shippingAddress?.trim() || this.formatCustomerAddress(customer),
+            notes: dto.notes?.trim() || null,
+            paymentTermId: dto.paymentTermId ?? customer.paymentTermId,
+            salespersonId: dto.salespersonId ?? customer.salespersonId,
+            deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
+            validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+            subtotal: totals.subtotal,
+            discountTotal: totals.discountTotal,
+            taxTotal: totals.taxTotal,
+            total: totals.total,
+            items: {
+              create: lines.map((line) => this.toItemCreateInput(line)),
+            },
+          },
+          include: QUOTATION_INCLUDE,
+        });
+        await this.audit.record({
+          actor,
+          action: 'quotation.created',
+          resource: 'quotation',
+          resourceId: row.id,
+          metadata: {
+            quotationNumber: row.quotationNumber,
+            customerId: row.customerId,
+            itemCount: row.items.length,
+          },
+          request,
+        });
+        return toQuotationResponse(row);
+      } catch (error) {
+        if (isUniqueConstraintError(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('Could not allocate quotation number');
+  }
+
+  /**
+   * Tenant-scoped, human-readable business document number — separate from
+   * the database UUID and never supplied by the client as authoritative.
+   * Resets per calendar year (QT-{year}-000001) by counting only numbers
+   * already stamped with the current year's prefix; create() retries on a
+   * unique-constraint collision so concurrent creation cannot produce a
+   * duplicate number.
+   */
+  private async nextQuotationNumber(tenantId: string): Promise<string> {
+    const prefix = `QT-${new Date().getFullYear()}-`;
+    const count = await this.prisma.quotation.count({
+      where: { tenantId, quotationNumber: { startsWith: prefix } },
     });
-    await this.audit.record({
-      actor,
-      action: 'quotation.created',
-      resource: 'quotation',
-      resourceId: row.id,
-      metadata: { customerId: row.customerId, itemCount: row.items.length },
-      request,
-    });
-    return toQuotationResponse(row);
+    return `${prefix}${String(count + 1).padStart(6, '0')}`;
   }
 
   async list(actor: ActorContext) {

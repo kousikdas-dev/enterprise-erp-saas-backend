@@ -109,7 +109,7 @@ export class PurchaseReturnListComponent implements OnInit {
     if (!r) {
       return id.slice(0, 8) + '…';
     }
-    return `${id.slice(0, 8)}… (${r.status}) — ${this.warehouseLabel(r.warehouseId)}`;
+    return `${r.receiptNumber} (${r.status}) — ${this.warehouseLabel(r.warehouseId)}`;
   }
 
   /** Client-side, non-authoritative hint only — see purchase-return-quantity.util.ts. */
