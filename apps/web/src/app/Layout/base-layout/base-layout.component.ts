@@ -30,8 +30,4 @@ export class BaseLayoutComponent {
       document.body.classList.add('animations-ready');
     });
   }
-
-  toggleSidebarMobile() {
-    this.globals.toggleSidebarMobile.set(!this.globals.toggleSidebarMobile());
-  }
 }

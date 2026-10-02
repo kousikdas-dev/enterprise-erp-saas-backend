@@ -15,25 +15,6 @@
     }
   }
 
-  .app-sidebar {
-    transform: translateX(-$app-sidebar-width-collapsed);
-    position: fixed;
-    z-index: 20;
-    box-shadow: 0 0 0 0 transparent;
-    padding-top: $app-header-height;
-
-    .app-header__logo {
-      display: none;
-    }
-  }
-
-  .closed-sidebar-md.closed-sidebar-open {
-    .app-sidebar {
-      transform: translateX(0);
-      box-shadow: $sidebar-box-shadow;
-    }
-  }
-
   .app-main__outer {
     padding-left: 0 !important;
   }

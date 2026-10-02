@@ -29,8 +29,6 @@ import { UserBoxComponent } from './Layout/Components/header/elements/user-box/u
 import { NotificationsBoxComponent } from './Layout/Components/header/elements/notifications-box/notifications-box';
 import { MessagesBoxComponent } from './Layout/Components/header/elements/messages-box/messages-box';
 
-import { SidebarComponent } from './Layout/Components/sidebar/sidebar.component';
-import { LogoComponent } from './Layout/Components/sidebar/elements/logo/logo.component';
 import { TopNavigationComponent } from './Layout/Components/top-navigation/top-navigation.component';
 
 import { FooterComponent } from './Layout/Components/footer/footer.component';
@@ -49,8 +47,6 @@ import { ToastContainerComponent } from './shared/toast/toast-container.componen
     UserBoxComponent,
     NotificationsBoxComponent,
     MessagesBoxComponent,
-    SidebarComponent,
-    LogoComponent,
     TopNavigationComponent,
     FooterComponent,
   ],
