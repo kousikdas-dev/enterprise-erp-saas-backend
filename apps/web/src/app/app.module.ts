@@ -15,17 +15,9 @@ import { CommonModule } from '@angular/common';
 import { AppComponent } from './app.component';
 
 import { NgbModule } from '@ng-bootstrap/ng-bootstrap';
-import { provideCharts, withDefaultRegisterables } from 'ng2-charts';
 import { FontAwesomeModule } from '@fortawesome/angular-fontawesome';
 
-import { FormPagesModule } from './forms.module';
-import { TablesModule } from './tables.module';
-import { WidgetsModule } from './widgets.module';
-import { ComponentsModule } from './components.module';
-import { DashboardsModule } from './dashboards.module';
-import { ElementsModule } from './elements.module';
 import { UserPagesModule } from './user-pages.module';
-import { ChartsModule } from './charts.module';
 import { SharedModule } from './shared.module';
 
 import { BaseLayoutComponent } from './Layout/base-layout/base-layout.component';
@@ -79,19 +71,11 @@ import { ToastContainerComponent } from './shared/toast/toast-container.componen
     ReactiveFormsModule,
     SharedModule,
     ToastContainerComponent,
-    DashboardsModule,
-    ElementsModule,
     UserPagesModule,
-    ChartsModule,
-    FormPagesModule,
-    TablesModule,
-    WidgetsModule,
-    ComponentsModule,
   ],
   providers: [
     ConfigService,
     ThemeOptions,
-    provideCharts(withDefaultRegisterables()),
     provideHttpClient(withInterceptors([authInterceptor])),
   ],
   bootstrap: [AppComponent],

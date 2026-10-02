@@ -41,9 +41,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   public extraParameter: string | undefined;
   public openMenus: string[] = [];
 
-  // ERP: dashboardMenu, salesMenu, purchaseMenu, inventoryMenu, productionMenu, adminMenu, auditMenu
-  // Theme demo: dashboardsMenu, pagesMenu, elementsMenu, componentsMenu,
-  // tablesMenu, formsMenu, chartsMenu, widgetsMenu
+  // dashboardMenu, salesMenu, purchaseMenu, inventoryMenu, productionMenu, adminMenu, auditMenu
 
   public config$: Observable<ConfigState>;
   private routeSub?: Subscription;
@@ -66,7 +64,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
   private newInnerWidth = 0;
   private innerWidth = 0;
-  activeId = 'dashboardsMenu';
 
   toggleSidebar() {
     this.globals.toggleSidebar.set(!this.globals.toggleSidebar());
