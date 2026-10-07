@@ -1,5 +1,99 @@
 @use "assets/base";
 
+/* Online-status dot in the user menu (placeholder — no presence system yet). */
+.user-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #1dc9b7;
+}
+
+/* Current module name in the header — click to return to the Dashboard
+   app grid (replaces the old hamburger + search controls there). */
+.app-module-label {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 1rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #495057;
+  text-decoration: none;
+  white-space: nowrap;
+
+  &__badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: .6rem;
+    flex-shrink: 0;
+
+    i {
+      font-size: 1rem;
+
+      &::before {
+        margin: 0;
+      }
+    }
+  }
+
+  &__badge--default i {
+    color: #fff;
+  }
+
+  &__badge--image {
+    width: 38px;
+    height: 38px;
+    border-radius: 0;
+    background: none;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  }
+
+  &__badge--hover {
+    display: none;
+    background: rgba(0, 0, 0, .08);
+
+    i {
+      color: currentColor;
+    }
+  }
+
+  &:hover {
+    color: var(--bs-primary, #1b55e2);
+    text-decoration: none;
+
+    .app-module-label__badge--default {
+      display: none;
+    }
+
+    .app-module-label__badge--hover {
+      display: flex;
+    }
+  }
+}
+
+/* Gear icon next to a list page's title (e.g. Quotations) opening an
+   actions menu — Import/Export/Knowledge/Dashboard/Spreadsheet are UI
+   placeholders only; wiring them up is a later phase. */
+.card-header-settings {
+  color: #adb5bd;
+  font-size: 1rem;
+  line-height: 1;
+
+  &:hover {
+    color: var(--bs-primary, #1b55e2);
+  }
+}
+
 /* Fix content jumping issue */
 .app-main__inner {
   position: relative !important;
@@ -56,3 +150,460 @@ router-outlet + * {
 }
 
 /* Remove this section - transitions are now defined in component styles */
+
+/* Pages opting into the dark gradient theme (route data `darkTheme: true`,
+   tracked by PageThemeService) recolor header, footer and page content in
+   sync. Starts with the Dashboard and Sales > Quotations as a trial. */
+.app-container--dark-theme {
+  .app-header,
+  .app-footer,
+  .app-footer .app-footer__inner {
+    background: linear-gradient(120deg, #1f0f26 0%, #2b1533 50%, #1e1034 100%) !important;
+    border-color: transparent;
+  }
+
+  .app-header {
+    box-shadow: 0 1px 10px rgba(0, 0, 0, 0.35);
+
+    .app-module-label {
+      color: #fff;
+
+      &:hover {
+        color: rgba(255, 255, 255, 0.8);
+      }
+
+      &__badge--hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+    }
+
+    .app-header-left .header-megamenu > li > .dropdown > .btn,
+    .app-header-left .header-megamenu > li > .btn {
+      color: rgba(255, 255, 255, 0.7);
+
+      &:hover {
+        color: #fff;
+      }
+    }
+
+    .app-header-right .icon-wrapper-alt {
+      .fa,
+      i,
+      .icon {
+        color: rgba(255, 255, 255, 0.75) !important;
+      }
+
+      .icon-wrapper-bg {
+        background: rgba(255, 255, 255, 0.12) !important;
+      }
+
+      &:hover {
+        .fa,
+        i,
+        .icon {
+          color: #fff !important;
+        }
+      }
+    }
+
+    .header-btn-lg {
+      > div > button > i.text-muted {
+        color: rgba(255, 255, 255, 0.75) !important;
+      }
+
+      &:hover > div > button > i.text-muted {
+        color: #fff !important;
+      }
+
+      &::before {
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      .widget-heading,
+      .widget-subheading {
+        color: rgba(255, 255, 255, 0.85);
+      }
+    }
+
+    .search-wrapper {
+      .input-holder {
+        .search-icon {
+          background: rgba(255, 255, 255, 0.12);
+        }
+
+        .search-input {
+          color: rgba(255, 255, 255, 0.9);
+        }
+
+        .search-input::placeholder {
+          color: rgba(255, 255, 255, 0.5) !important;
+        }
+      }
+
+      &.active .input-holder {
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .input-holder .search-icon span::after {
+        border-color: rgba(255, 255, 255, 0.85);
+      }
+
+      .btn-close::before,
+      .btn-close::after,
+      .input-holder .search-icon span::before {
+        background: rgba(255, 255, 255, 0.85);
+      }
+    }
+
+    .hamburger-inner,
+    .hamburger.is-active .hamburger-inner,
+    .hamburger-inner::before,
+    .hamburger-inner::after {
+      background-color: rgba(255, 255, 255, 0.85) !important;
+    }
+  }
+
+  .app-footer-left span {
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  // The module tabs render inline inside .app-header (see
+  // TopNavigationComponent), so they just need matching text colors.
+  .top-nav-sublink {
+    color: #fff !important;
+
+    &:hover {
+      color: #fff !important;
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    &.active {
+      color: #fff !important;
+      background-color: rgba(255, 255, 255, 0.16);
+    }
+  }
+
+  // Scoped to the content area (not the header) so header dropdown popups
+  // (notifications, messages, user menu) keep their normal light styling.
+  .app-main__outer {
+    background-color: #150c1c;
+    background-image:
+      radial-gradient(circle at 15% 15%, rgba(94, 58, 214, 0.22), transparent 45%),
+      radial-gradient(circle at 85% 85%, rgba(226, 42, 90, 0.18), transparent 50%),
+      linear-gradient(135deg, #150c1c 0%, #2b1127 30%, #30183d 55%, #1e1034 80%, #140b21 100%);
+    font-size: 1rem;
+
+    .text-muted {
+      color: rgba(255, 255, 255, 0.55) !important;
+    }
+
+    .main-card.card,
+    .card {
+      background-color: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .card-header {
+      background-color: rgba(255, 255, 255, 0.03);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    h1, h2, h3, h4, h5, h6,
+    .form-label,
+    dt,
+    .widget-heading {
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .widget-subheading {
+      color: rgba(255, 255, 255, 0.65);
+    }
+
+    .table {
+      --bs-table-color: rgba(255, 255, 255, 0.92);
+      --bs-table-bg: transparent;
+      --bs-table-border-color: rgba(255, 255, 255, 0.14);
+      --bs-table-striped-bg: rgba(255, 255, 255, 0.04);
+      --bs-table-striped-color: rgba(255, 255, 255, 0.92);
+      --bs-table-hover-bg: rgba(255, 255, 255, 0.09);
+      --bs-table-hover-color: #fff;
+    }
+
+    .form-control,
+    .form-select {
+      background-color: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.25);
+      color: rgba(255, 255, 255, 0.92);
+
+      &::placeholder {
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      &:focus {
+        background-color: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.45);
+        color: #fff;
+        box-shadow: none;
+      }
+
+      &:disabled,
+      &[readonly] {
+        background-color: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      // The native <option> popup keeps a browser-controlled white
+      // background that this theme can't restyle, but it still inherits
+      // the select's near-white `color` above — making every option
+      // invisible except the one under hover. Force readable text here,
+      // mirroring the same fix already applied to .modal-content below.
+      option {
+        color: #1a0f22;
+      }
+    }
+
+    .btn-outline-secondary {
+      color: rgba(255, 255, 255, 0.75);
+      border-color: rgba(255, 255, 255, 0.35);
+
+      &:hover {
+        color: #fff;
+        background-color: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+
+      &:disabled {
+        color: rgba(255, 255, 255, 0.35);
+        border-color: rgba(255, 255, 255, 0.18);
+      }
+    }
+
+    // $primary (the brand navy, #033C73) is dark enough that its text/border
+    // on an outline button nearly disappears against this theme's own dark
+    // gradient background — the same class of bug as .btn-outline-secondary
+    // above, just missed for blue. Brighten it here instead of touching
+    // $primary globally, so light-theme pages (where navy-on-white reads
+    // fine) are untouched.
+    .btn-outline-primary {
+      color: #6ea8fe;
+      border-color: #6ea8fe;
+
+      &:hover {
+        color: #fff;
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+      }
+
+      &:disabled {
+        color: rgba(110, 168, 254, 0.45);
+        border-color: rgba(110, 168, 254, 0.3);
+      }
+    }
+
+    // Solid .btn-primary keeps acceptable text contrast (white on navy) but
+    // the navy fill barely reads as a distinct shape against the page
+    // gradient — brighten the fill to match.
+    .btn-primary {
+      background-color: #0d6efd;
+      border-color: #0d6efd;
+
+      &:hover,
+      &:focus {
+        background-color: #3d8bfd;
+        border-color: #3d8bfd;
+      }
+
+      &:disabled {
+        background-color: rgba(13, 110, 253, 0.45);
+        border-color: rgba(13, 110, 253, 0.45);
+      }
+    }
+
+    .btn-outline-dark {
+      color: rgba(255, 255, 255, 0.75);
+      border-color: rgba(255, 255, 255, 0.35);
+
+      &:hover {
+        color: #1a0f22;
+        background-color: rgba(255, 255, 255, 0.85);
+      }
+    }
+
+    // Bootstrap's default .nav-link color is $link-color (derived from the
+    // same dark navy $primary), so inactive tabs suffer the identical
+    // invisible-on-dark-background bug as the outline buttons above. The
+    // active tab already gets Bootstrap's white pill background, which
+    // reads fine as-is.
+    .nav-tabs .nav-link {
+      color: #6ea8fe;
+      border-color: transparent;
+
+      &:hover,
+      &:focus {
+        color: #9ec5fe;
+        border-color: transparent;
+      }
+
+      &.active {
+        color: #1a0f22;
+      }
+
+      &.disabled {
+        color: rgba(110, 168, 254, 0.35);
+      }
+    }
+  }
+}
+
+/* Modals (ngb-modal-window) render appended to <body>, outside
+   .app-container, so they're themed off a body-level class instead
+   (toggled by PageThemeService). Kept a shade lighter than the page
+   background so dense forms stay easy to read. */
+body.app-dark-theme {
+  .modal-content {
+    background: #2c2140;
+    color: rgba(255, 255, 255, 0.92);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+
+  .modal-header,
+  .modal-footer {
+    background: #2c2140;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .modal-title,
+  .modal-content h1, .modal-content h2, .modal-content h3,
+  .modal-content h4, .modal-content h5, .modal-content h6,
+  .modal-content .form-label,
+  .modal-content dt,
+  .modal-content .card-header-title {
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .modal-content .text-muted,
+  .modal-content .form-text {
+    color: rgba(255, 255, 255, 0.55) !important;
+  }
+
+  .modal-content .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+  }
+
+  .modal-content {
+    .form-control,
+    .form-select {
+      background-color: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.25);
+      color: rgba(255, 255, 255, 0.92);
+
+      &::placeholder {
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      &:focus {
+        background-color: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.45);
+        color: #fff;
+        box-shadow: none;
+      }
+
+      &:disabled,
+      &[readonly] {
+        background-color: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      option {
+        color: #1a0f22;
+      }
+    }
+
+    .table {
+      --bs-table-color: rgba(255, 255, 255, 0.92);
+      --bs-table-bg: transparent;
+      --bs-table-border-color: rgba(255, 255, 255, 0.14);
+      --bs-table-striped-bg: rgba(255, 255, 255, 0.04);
+      --bs-table-striped-color: rgba(255, 255, 255, 0.92);
+      --bs-table-hover-bg: rgba(255, 255, 255, 0.09);
+      --bs-table-hover-color: #fff;
+    }
+
+    .btn-outline-secondary {
+      color: rgba(255, 255, 255, 0.75);
+      border-color: rgba(255, 255, 255, 0.35);
+
+      &:hover {
+        color: #fff;
+        background-color: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+
+      &:disabled {
+        color: rgba(255, 255, 255, 0.35);
+        border-color: rgba(255, 255, 255, 0.18);
+      }
+    }
+
+    // Same navy-on-dark-background fix as the main page variant above.
+    .btn-outline-primary {
+      color: #6ea8fe;
+      border-color: #6ea8fe;
+
+      &:hover {
+        color: #fff;
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+      }
+
+      &:disabled {
+        color: rgba(110, 168, 254, 0.45);
+        border-color: rgba(110, 168, 254, 0.3);
+      }
+    }
+
+    .btn-primary {
+      background-color: #0d6efd;
+      border-color: #0d6efd;
+
+      &:hover,
+      &:focus {
+        background-color: #3d8bfd;
+        border-color: #3d8bfd;
+      }
+
+      &:disabled {
+        background-color: rgba(13, 110, 253, 0.45);
+        border-color: rgba(13, 110, 253, 0.45);
+      }
+    }
+
+    .nav-tabs .nav-link {
+      color: #6ea8fe;
+      border-color: transparent;
+
+      &:hover,
+      &:focus {
+        color: #9ec5fe;
+        border-color: transparent;
+      }
+
+      &.active {
+        color: #1a0f22;
+      }
+
+      &.disabled {
+        color: rgba(110, 168, 254, 0.35);
+      }
+    }
+
+    .btn-link {
+      color: rgba(255, 255, 255, 0.75);
+
+      &:hover {
+        color: #fff;
+      }
+    }
+  }
+}

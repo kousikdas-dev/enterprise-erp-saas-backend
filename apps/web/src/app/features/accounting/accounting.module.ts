@@ -10,53 +10,66 @@ import { BalanceSheetComponent } from './reports/balance-sheet.component';
 import { ProfitLossComponent } from './reports/profit-loss.component';
 import { TrialBalanceComponent } from './reports/trial-balance.component';
 import { TaxCodeListComponent } from './tax-codes/tax-code-list.component';
+import { AccountingSettingsComponent } from './settings/accounting-settings.component';
+import { AccountingOverviewComponent } from './overview/accounting-overview.component';
 
 const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'accounts' },
+  { path: '', pathMatch: 'full', redirectTo: 'overview' },
+  {
+    path: 'overview',
+    component: AccountingOverviewComponent,
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
+  },
+  {
+    path: 'settings',
+    component: AccountingSettingsComponent,
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
+  },
   {
     path: 'accounts',
     component: AccountListComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'accounts/:id/ledger',
     component: AccountLedgerComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'journal-entries',
     component: JournalEntryListComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'tax-codes',
     component: TaxCodeListComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'account-mappings',
     component: AccountMappingSettingsComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'reports/trial-balance',
     component: TrialBalanceComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'reports/profit-loss',
     component: ProfitLossComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
   {
     path: 'reports/balance-sheet',
     component: BalanceSheetComponent,
-    data: { extraParameter: 'accountingMenu' },
+    data: { extraParameter: 'accountingMenu', darkTheme: true },
   },
 ];
 
 @NgModule({
   declarations: [
+    AccountingOverviewComponent,
     AccountListComponent,
     AccountLedgerComponent,
     JournalEntryListComponent,
@@ -65,6 +78,7 @@ const routes: Routes = [
     TrialBalanceComponent,
     ProfitLossComponent,
     BalanceSheetComponent,
+    AccountingSettingsComponent,
   ],
   imports: [SharedModule, ListStateComponent, RouterModule.forChild(routes)],
 })

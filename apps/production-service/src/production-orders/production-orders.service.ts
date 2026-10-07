@@ -7,8 +7,10 @@ import {
 } from '@nestjs/common';
 import {
   Bom,
+  BomItem,
   Prisma,
   ProductionOrder,
+  ProductionOrderItem,
   ProductionOrderStatus,
 } from '../../generated/prisma-client';
 import { ActorContext } from '../auth/actor-context';
@@ -23,10 +25,21 @@ import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { toProductionOrderResponse } from './dto/production-order-response';
 import {
   CreateProductionOrderDto,
+  CreateProductionOrderItemDto,
   UpdateProductionOrderDto,
 } from './dto/production-order.dto';
 
 const MAX_NUMBER_RETRIES = 5;
+
+type BomWithItems = Bom & { items: BomItem[] };
+type ProductionOrderWithItems = ProductionOrder & {
+  items: ProductionOrderItem[];
+};
+
+interface MappedOrderItem {
+  data: Prisma.ProductionOrderItemUncheckedCreateWithoutProductionOrderInput;
+  componentProductId: string;
+}
 
 export interface ListProductionOrdersQuery {
   search?: string;
@@ -66,6 +79,10 @@ export class ProductionOrdersService {
     if (dto.warehouseId) {
       await this.validateWarehouse(actor, dto.warehouseId);
     }
+    const items =
+      dto.items !== undefined
+        ? await this.mapOrderItems(actor, dto.productId, dto.items)
+        : this.defaultItemsFromBom(actor, bom, plannedQuantity);
 
     for (let attempt = 0; attempt < MAX_NUMBER_RETRIES; attempt += 1) {
       const orderNumber = await this.nextOrderNumber(actor.tenantId);
@@ -96,7 +113,9 @@ export class ProductionOrdersService {
             priority: dto.priority ?? 'NORMAL',
             status: 'DRAFT',
             notes: dto.notes?.trim() || null,
+            items: { create: items.map((item) => item.data) },
           },
+          include: { items: true },
         });
         return toProductionOrderResponse(row);
       } catch (error) {
@@ -144,6 +163,7 @@ export class ProductionOrdersService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: { items: true },
       }),
     ]);
 
@@ -175,10 +195,11 @@ export class ProductionOrdersService {
       dto.productId !== undefined ||
       dto.bomId !== undefined ||
       dto.plannedQuantity !== undefined ||
-      dto.outputUnitOfMeasureId !== undefined;
+      dto.outputUnitOfMeasureId !== undefined ||
+      dto.items !== undefined;
     if (structuralFieldProvided && order.status !== 'DRAFT') {
       throw new ConflictException(
-        'Product, BOM, planned quantity, and output UOM can only be changed while DRAFT',
+        'Product, BOM, planned quantity, output UOM, and components can only be changed while DRAFT',
       );
     }
     if (dto.productId !== undefined && dto.outputUnitOfMeasureId === undefined) {
@@ -187,10 +208,15 @@ export class ProductionOrdersService {
       );
     }
 
+    const effectiveProductId = dto.productId ?? order.productId;
+    const items =
+      dto.items !== undefined
+        ? await this.mapOrderItems(actor, effectiveProductId, dto.items)
+        : undefined;
+
     const data: Prisma.ProductionOrderUpdateInput = {};
 
     if (dto.productId !== undefined || dto.bomId !== undefined) {
-      const effectiveProductId = dto.productId ?? order.productId;
       const effectiveBomId = dto.bomId ?? order.bomId;
       const product = await this.requireManufacturableProduct(
         actor,
@@ -261,13 +287,26 @@ export class ProductionOrdersService {
     if (dto.priority !== undefined) data.priority = dto.priority;
     if (dto.notes !== undefined) data.notes = dto.notes.trim() || null;
 
-    if (Object.keys(data).length === 0) {
+    if (Object.keys(data).length === 0 && items === undefined) {
       throw new BadRequestException('No fields to update');
     }
 
-    const row = await this.prisma.productionOrder.update({
-      where: { id },
-      data,
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (items) {
+        await tx.productionOrderItem.deleteMany({
+          where: { productionOrderId: id },
+        });
+      }
+      return tx.productionOrder.update({
+        where: { id },
+        data: {
+          ...data,
+          ...(items
+            ? { items: { create: items.map((item) => item.data) } }
+            : {}),
+        },
+        include: { items: true },
+      });
     });
     return toProductionOrderResponse(row);
   }
@@ -374,9 +413,10 @@ export class ProductionOrdersService {
   private async requireOrder(
     actor: ActorContext,
     id: string,
-  ): Promise<ProductionOrder> {
+  ): Promise<ProductionOrderWithItems> {
     const row = await this.prisma.productionOrder.findFirst({
       where: { id, tenantId: actor.tenantId },
+      include: { items: true },
     });
     if (!row) throw new NotFoundException('Production order not found');
     return row;
@@ -396,7 +436,7 @@ export class ProductionOrdersService {
     id: string,
     from: ProductionOrderStatus[],
     to: ProductionOrderStatus,
-  ): Promise<ProductionOrder> {
+  ): Promise<ProductionOrderWithItems> {
     const result = await this.prisma.productionOrder.updateMany({
       where: { id, tenantId: actor.tenantId, status: { in: from } },
       data: { status: to },
@@ -452,9 +492,10 @@ export class ProductionOrdersService {
     actor: ActorContext,
     bomId: string,
     productId: string,
-  ): Promise<Bom> {
+  ): Promise<BomWithItems> {
     const bom = await this.prisma.bom.findFirst({
       where: { id: bomId, tenantId: actor.tenantId },
+      include: { items: true },
     });
     if (!bom) {
       throw new NotFoundException('BOM not found');
@@ -468,6 +509,90 @@ export class ProductionOrdersService {
       throw new ConflictException('Selected BOM must be ACTIVE');
     }
     return bom;
+  }
+
+  /**
+   * Explicit per-order component lines, independent of the BOM graph (no
+   * cross-BOM cycle check like BOM's own mapItems() — these are a flat
+   * consumption list, not a nested structure). Mirrors BillOfMaterialsService
+   * .mapItems(): validates each component product, resolves its UOM, and
+   * rejects duplicates and self-consumption (the order's own product cannot
+   * be one of its own components).
+   */
+  private async mapOrderItems(
+    actor: ActorContext,
+    productId: string,
+    items: CreateProductionOrderItemDto[],
+  ): Promise<MappedOrderItem[]> {
+    const seen = new Set<string>();
+    const mapped: MappedOrderItem[] = [];
+    for (const item of items) {
+      if (item.componentProductId === productId) {
+        throw new ConflictException(
+          'A production order cannot consume the product it is producing as a component',
+        );
+      }
+      if (seen.has(item.componentProductId)) {
+        throw new BadRequestException(
+          `Duplicate component product ${item.componentProductId} in production order items`,
+        );
+      }
+      seen.add(item.componentProductId);
+
+      const component = await this.requireManufacturableProduct(
+        actor,
+        item.componentProductId,
+        'Component product',
+      );
+      const quantity = parsePositiveDecimal(item.quantity);
+      const uom = this.resolveUom(component, item.unitOfMeasureId, 'component product');
+
+      mapped.push({
+        componentProductId: item.componentProductId,
+        data: {
+          tenantId: actor.tenantId,
+          componentProductId: item.componentProductId,
+          componentProductSku: component.sku,
+          componentProductName: component.name,
+          quantity,
+          unitOfMeasureId: uom.unitOfMeasureId,
+          uomCode: uom.code,
+          uomName: uom.name,
+          sequence: item.sequence,
+        },
+      });
+    }
+    return mapped;
+  }
+
+  /**
+   * Defaults a new order's components from its BOM's items, scaled by
+   * plannedQuantity / bom.bomQuantity — reusing the BOM item's already-
+   * validated componentProductId/UOM snapshot rather than re-resolving
+   * against inventory-service. Used only when the client omits `items` on
+   * create; from then on the client's own list (including this default,
+   * once saved) is what persists.
+   */
+  private defaultItemsFromBom(
+    actor: ActorContext,
+    bom: BomWithItems,
+    plannedQuantity: Prisma.Decimal,
+  ): MappedOrderItem[] {
+    const scale = plannedQuantity.div(bom.bomQuantity);
+    return bom.items.map((item) => ({
+      componentProductId: item.componentProductId,
+      data: {
+        tenantId: actor.tenantId,
+        componentProductId: item.componentProductId,
+        componentProductSku: item.componentProductSku,
+        componentProductName: item.componentProductName,
+        quantity: item.quantity.mul(scale),
+        unitOfMeasureId: item.unitOfMeasureId,
+        uomCode: item.uomCode,
+        uomName: item.uomName,
+        sequence: item.sequence,
+      },
+    }));
   }
 
   private async validateWarehouse(

@@ -17,6 +17,7 @@ import { ProductsService } from './products.service';
 interface ProductLike {
   id: string;
   unitOfMeasureId: string;
+  templateProductId?: string | null;
 }
 
 @Controller({ path: 'internal/products', version: '1' })
@@ -44,6 +45,7 @@ export class InternalProductsController {
       productType: product.productType,
       categoryId: product.categoryId,
       unitOfMeasureId: product.unitOfMeasureId,
+      templateProductId: product.templateProductId ?? null,
       base: uom.base,
       alternatives: uom.alternatives,
     };

@@ -21,6 +21,14 @@ export interface BomItem {
   sequence: number;
 }
 
+export interface BomOperation {
+  id: string;
+  operationId: string;
+  operationCode: string;
+  operationName: string;
+  sequence: number;
+}
+
 export interface Bom {
   id: string;
   tenantId: string;
@@ -36,7 +44,12 @@ export interface Bom {
   effectiveFrom: string | null;
   effectiveTo: string | null;
   notes: string | null;
+  /** Optionally scopes this BOM to one specific variant of parentProductId; null means it applies to all variants. */
+  productVariantId: string | null;
+  productVariantSku: string | null;
+  productVariantName: string | null;
   items: BomItem[];
+  operations: BomOperation[];
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +62,11 @@ export interface BomItemLineInput {
   sequence: number;
 }
 
+export interface BomOperationLineInput {
+  operationId: string;
+  sequence: number;
+}
+
 export interface CreateBomRequest {
   parentProductId: string;
   bomQuantity: string;
@@ -57,6 +75,8 @@ export interface CreateBomRequest {
   effectiveTo?: string;
   notes?: string;
   items: BomItemLineInput[];
+  operations?: BomOperationLineInput[];
+  productVariantId?: string;
 }
 
 export interface UpdateBomRequest {
@@ -66,6 +86,9 @@ export interface UpdateBomRequest {
   effectiveTo?: string;
   notes?: string;
   items?: BomItemLineInput[];
+  operations?: BomOperationLineInput[];
+  /** Pass a UUID to scope to one variant, or null to clear back to "all variants"; omit to leave unchanged. */
+  productVariantId?: string | null;
 }
 
 export interface Operation {
@@ -142,6 +165,18 @@ export const PRODUCTION_ORDER_PRIORITIES: readonly ProductionOrderPriority[] = [
   'URGENT',
 ] as const;
 
+export interface ProductionOrderItem {
+  id: string;
+  componentProductId: string;
+  componentProductSku: string;
+  componentProductName: string;
+  quantity: string;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  sequence: number;
+}
+
 export interface ProductionOrder {
   id: string;
   tenantId: string;
@@ -164,8 +199,16 @@ export interface ProductionOrder {
   priority: ProductionOrderPriority | string;
   status: ProductionOrderStatus | string;
   notes: string | null;
+  items: ProductionOrderItem[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProductionOrderItemLineInput {
+  componentProductId: string;
+  quantity: string;
+  unitOfMeasureId: string;
+  sequence: number;
 }
 
 export interface CreateProductionOrderRequest {
@@ -179,6 +222,7 @@ export interface CreateProductionOrderRequest {
   plannedStartDate?: string;
   plannedEndDate?: string;
   notes?: string;
+  items?: ProductionOrderItemLineInput[];
 }
 
 export interface UpdateProductionOrderRequest {
@@ -192,6 +236,7 @@ export interface UpdateProductionOrderRequest {
   plannedStartDate?: string;
   plannedEndDate?: string;
   notes?: string;
+  items?: ProductionOrderItemLineInput[];
 }
 
 export interface ProductionOrderListQuery {

@@ -27,6 +27,7 @@ export interface InventoryProductDetail {
   productType: string;
   categoryId: string;
   unitOfMeasureId: string;
+  templateProductId: string | null;
   base: { unitOfMeasureId: string; code: string; name: string };
   alternatives: Array<{
     unitOfMeasureId: string;

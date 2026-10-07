@@ -20,10 +20,24 @@ export class UserBoxComponent {
     private readonly currentUser: CurrentUserService,
   ) {
     this.displayName$ = this.currentUser.user$.pipe(
-      map((user) => (user ? `User ${user.userId.slice(0, 8)}…` : 'Signed in')),
+      map((user) => {
+        if (!user) {
+          return 'Signed in';
+        }
+        // Existing sessions signed in before userName was added to the
+        // access token won't have it until they log in again.
+        return user.userName ?? `User ${user.userId.slice(0, 8)}…`;
+      }),
     );
     this.displaySubheading$ = this.currentUser.user$.pipe(
-      map((user) => (user ? `Tenant ${user.tenantId.slice(0, 8)}…` : '')),
+      map((user) => {
+        if (!user) {
+          return '';
+        }
+        // Existing sessions signed in before tenantName was added to the
+        // access token won't have it until they log in again.
+        return user.tenantName ?? `Tenant ${user.tenantId.slice(0, 8)}…`;
+      }),
     );
   }
 

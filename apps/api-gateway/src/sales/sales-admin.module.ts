@@ -5,6 +5,8 @@ import { RbacModule } from '../rbac/rbac.module';
 import { AccountsReceivableController } from './accounts-receivable.controller';
 import { CustomerAddressesController } from './customer-addresses.controller';
 import { CustomersController } from './customers.controller';
+import { DeliveryMethodsController } from './delivery-methods.controller';
+import { PricelistsController } from './pricelists.controller';
 import { ProformaInvoicesController } from './proforma-invoices.controller';
 import { QuotationsController } from './quotations.controller';
 import { SalesForwardService } from './sales-forward.service';
@@ -26,6 +28,8 @@ import { ShipmentsController } from './shipments.controller';
   controllers: [
     CustomersController,
     CustomerAddressesController,
+    DeliveryMethodsController,
+    PricelistsController,
     QuotationsController,
     ProformaInvoicesController,
     SalesOrdersController,

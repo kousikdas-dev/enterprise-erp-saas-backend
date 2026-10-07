@@ -8,6 +8,13 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   'COMBO',
 ] as const;
 
+export interface ProductAttributeValueSummary {
+  id: string;
+  attributeId: string;
+  attributeName: string;
+  value: string;
+}
+
 export interface Product {
   id: string;
   tenantId: string;
@@ -23,6 +30,9 @@ export interface Product {
   trackInventory: boolean;
   barcode: string | null;
   note: string | null;
+  /** Marks this product as a variant of a top-level product (null for a template/standalone product). */
+  templateProductId: string | null;
+  attributeValues: ProductAttributeValueSummary[];
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +49,8 @@ export interface CreateProductRequest {
   trackInventory?: boolean;
   barcode?: string;
   note?: string;
+  templateProductId?: string;
+  attributeValueIds?: string[];
 }
 
 export interface UpdateProductRequest {
@@ -54,6 +66,8 @@ export interface UpdateProductRequest {
   trackInventory?: boolean;
   barcode?: string;
   note?: string;
+  templateProductId?: string;
+  attributeValueIds?: string[];
 }
 
 export interface ProductUnit {
@@ -120,14 +134,51 @@ export interface Unit {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Unit this one converts to — null for a base/reference unit. Must be set together with conversionFactor. */
+  referenceUnitId: string | null;
+  /** How many of referenceUnit this unit "contains" (decimal string). */
+  conversionFactor: string | null;
+  referenceUnitCode: string | null;
+  referenceUnitName: string | null;
+  /** Optional UNSPSC classification. */
+  unspscCategoryId: string | null;
+  unspscCategoryCode: string | null;
+  unspscCategoryName: string | null;
 }
 
 export interface CreateUnitRequest {
   code: string;
   name: string;
+  referenceUnitId?: string;
+  conversionFactor?: string;
+  unspscCategoryId?: string;
 }
 
 export interface UpdateUnitRequest {
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+  referenceUnitId?: string;
+  conversionFactor?: string;
+  unspscCategoryId?: string;
+}
+
+export interface UnspscCategory {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateUnspscCategoryRequest {
+  code: string;
+  name: string;
+}
+
+export interface UpdateUnspscCategoryRequest {
   code?: string;
   name?: string;
   isActive?: boolean;
@@ -239,4 +290,74 @@ export interface StockAdjustmentResult {
 
 export interface ItemList<T> {
   items: T[];
+}
+
+export type AttributeDisplayType = 'RADIO' | 'SELECT' | 'COLOR' | 'PILLS';
+
+export const ATTRIBUTE_DISPLAY_TYPES: readonly AttributeDisplayType[] = [
+  'RADIO',
+  'SELECT',
+  'COLOR',
+  'PILLS',
+] as const;
+
+export type AttributeVariantCreation = 'INSTANTLY' | 'DYNAMICALLY' | 'NEVER';
+
+export const ATTRIBUTE_VARIANT_CREATIONS: readonly AttributeVariantCreation[] = [
+  'INSTANTLY',
+  'DYNAMICALLY',
+  'NEVER',
+] as const;
+
+export interface AttributeValue {
+  id: string;
+  tenantId: string;
+  attributeId: string;
+  value: string;
+  /** Odoo's "Free text" — a customer-entered placeholder rather than a fixed option. */
+  isCustom: boolean;
+  extraPrice: string;
+  sequence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Attribute {
+  id: string;
+  tenantId: string;
+  name: string;
+  displayType: AttributeDisplayType;
+  variantCreation: AttributeVariantCreation;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  values?: AttributeValue[];
+}
+
+export interface CreateAttributeValueRequest {
+  value: string;
+  isCustom?: boolean;
+  extraPrice?: string;
+  sequence?: number;
+}
+
+export interface UpdateAttributeValueRequest {
+  value?: string;
+  isCustom?: boolean;
+  extraPrice?: string;
+  sequence?: number;
+}
+
+export interface CreateAttributeRequest {
+  name: string;
+  displayType?: AttributeDisplayType;
+  variantCreation?: AttributeVariantCreation;
+  values?: CreateAttributeValueRequest[];
+}
+
+export interface UpdateAttributeRequest {
+  name?: string;
+  displayType?: AttributeDisplayType;
+  variantCreation?: AttributeVariantCreation;
+  isActive?: boolean;
 }

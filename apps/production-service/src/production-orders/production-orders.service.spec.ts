@@ -20,6 +20,7 @@ describe('ProductionOrdersService', () => {
   const altUnitId = 'u4444444-aaaa-4aaa-8aaa-u44444444444';
   const warehouseId = 'w1111111-aaaa-4aaa-8aaa-w11111111111';
   const orderId = 'mo111111-aaaa-4aaa-8aaa-mo1111111111';
+  const componentProductId = 'c2222222-aaaa-4aaa-8aaa-c22222222222';
 
   function productDetail(overrides: Record<string, unknown> = {}) {
     return {
@@ -45,6 +46,35 @@ describe('ProductionOrdersService', () => {
     };
   }
 
+  function componentProductDetail(overrides: Record<string, unknown> = {}) {
+    return productDetail({
+      id: componentProductId,
+      sku: 'COTTON',
+      name: 'Raw Cotton',
+      ...overrides,
+    });
+  }
+
+  function bomItemRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'bomitem1-aaaa-4aaa-8aaa-bomitem11111',
+      tenantId: actor.tenantId,
+      bomId,
+      componentProductId,
+      componentProductSku: 'COTTON',
+      componentProductName: 'Raw Cotton',
+      quantity: new Prisma.Decimal('1.050000'),
+      unitOfMeasureId: baseUnitId,
+      uomCode: 'KG',
+      uomName: 'Kilogram',
+      scrapPercentage: null,
+      sequence: 1,
+      createdAt: new Date('2026-01-01'),
+      updatedAt: new Date('2026-01-01'),
+      ...overrides,
+    };
+  }
+
   function bomRow(overrides: Record<string, unknown> = {}) {
     return {
       id: bomId,
@@ -63,6 +93,7 @@ describe('ProductionOrdersService', () => {
       notes: null,
       createdAt: new Date('2026-01-01'),
       updatedAt: new Date('2026-01-01'),
+      items: [bomItemRow()],
       ...overrides,
     };
   }
@@ -92,6 +123,7 @@ describe('ProductionOrdersService', () => {
       notes: null,
       createdAt: new Date('2026-09-30'),
       updatedAt: new Date('2026-09-30'),
+      items: [],
       ...overrides,
     };
   }
@@ -121,6 +153,9 @@ describe('ProductionOrdersService', () => {
       bom: {
         findFirst: jest.fn().mockResolvedValue(bomRow()),
       },
+      productionOrderItem: {
+        deleteMany: jest.fn(),
+      },
       ...overrides,
     };
     (prisma as unknown as { $transaction: jest.Mock }).$transaction = jest.fn(
@@ -134,7 +169,9 @@ describe('ProductionOrdersService', () => {
 
   function defaultInventoryProducts(overrides: Record<string, unknown> = {}) {
     return {
-      getProductDetail: jest.fn().mockResolvedValue(productDetail()),
+      getProductDetail: jest.fn(async (_actor: unknown, id: string) =>
+        id === componentProductId ? componentProductDetail() : productDetail({ id }),
+      ),
       ...overrides,
     };
   }
@@ -403,6 +440,145 @@ describe('ProductionOrdersService', () => {
     });
   });
 
+  describe('create with items', () => {
+    it('defaults components from the BOM, scaled by plannedQuantity / bomQuantity, when items is omitted', async () => {
+      const prisma = basePrisma();
+      prisma.productionOrder.create.mockResolvedValue(orderRow());
+      const { svc } = service(prisma);
+
+      // bomQuantity is 100, the BOM item quantity is 1.05, plannedQuantity is 1000 -> scale x10.
+      await svc.create(actor, createDto());
+
+      expect(prisma.productionOrder.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            items: {
+              create: [
+                expect.objectContaining({
+                  componentProductId,
+                  componentProductSku: 'COTTON',
+                  quantity: expect.objectContaining({}),
+                }),
+              ],
+            },
+          }),
+        }),
+      );
+      const createCall = prisma.productionOrder.create.mock.calls[0][0] as {
+        data: { items: { create: Array<{ quantity: Prisma.Decimal }> } };
+      };
+      expect(createCall.data.items.create[0].quantity.toString()).toBe('10.5');
+    });
+
+    it('uses the client-supplied items list instead of defaulting from the BOM when items is provided', async () => {
+      const prisma = basePrisma();
+      prisma.productionOrder.create.mockResolvedValue(orderRow());
+      const { svc } = service(prisma);
+
+      await svc.create(
+        actor,
+        createDto({
+          items: [
+            {
+              componentProductId,
+              quantity: '5',
+              unitOfMeasureId: baseUnitId,
+              sequence: 1,
+            },
+          ],
+        }),
+      );
+
+      expect(prisma.productionOrder.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            items: {
+              create: [
+                expect.objectContaining({
+                  componentProductId,
+                  componentProductSku: 'COTTON',
+                  sequence: 1,
+                }),
+              ],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('creates with no components when items is explicitly an empty array', async () => {
+      const prisma = basePrisma();
+      prisma.productionOrder.create.mockResolvedValue(orderRow());
+      const { svc } = service(prisma);
+
+      await svc.create(actor, createDto({ items: [] }));
+
+      expect(prisma.productionOrder.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ items: { create: [] } }),
+        }),
+      );
+    });
+
+    it('rejects a component that is the same product as the order output (self-consumption)', async () => {
+      const { svc } = service();
+
+      await expect(
+        svc.create(
+          actor,
+          createDto({
+            items: [
+              {
+                componentProductId: productId,
+                quantity: '1',
+                unitOfMeasureId: baseUnitId,
+                sequence: 1,
+              },
+            ],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects duplicate component products within the same payload', async () => {
+      const { svc } = service();
+
+      await expect(
+        svc.create(
+          actor,
+          createDto({
+            items: [
+              { componentProductId, quantity: '1', unitOfMeasureId: baseUnitId, sequence: 1 },
+              { componentProductId, quantity: '2', unitOfMeasureId: baseUnitId, sequence: 2 },
+            ],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects an inactive component product', async () => {
+      const inventoryProducts = defaultInventoryProducts({
+        getProductDetail: jest.fn(async (_a: unknown, id: string) =>
+          id === componentProductId
+            ? componentProductDetail({ isActive: false })
+            : productDetail({ id }),
+        ),
+      });
+      const { svc } = service(basePrisma(), inventoryProducts);
+
+      await expect(
+        svc.create(
+          actor,
+          createDto({
+            items: [
+              { componentProductId, quantity: '1', unitOfMeasureId: baseUnitId, sequence: 1 },
+            ],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
   describe('list', () => {
     it('filters by tenant and paginates with defaults', async () => {
       const prisma = basePrisma();
@@ -478,6 +654,7 @@ describe('ProductionOrdersService', () => {
       );
       expect(prisma.productionOrder.findFirst).toHaveBeenCalledWith({
         where: { id: orderId, tenantId: actor.tenantId },
+        include: { items: true },
       });
     });
   });
@@ -543,6 +720,59 @@ describe('ProductionOrdersService', () => {
       await expect(
         svc.update(actor, orderId, { notes: 'x' }),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('replaces items on a DRAFT order', async () => {
+      const prisma = basePrisma();
+      prisma.productionOrder.findFirst.mockResolvedValue(orderRow());
+      prisma.productionOrder.update.mockResolvedValue(orderRow());
+      const { svc } = service(prisma);
+
+      await svc.update(actor, orderId, {
+        items: [
+          { componentProductId, quantity: '2', unitOfMeasureId: baseUnitId, sequence: 1 },
+        ],
+      });
+
+      expect(prisma.productionOrderItem.deleteMany).toHaveBeenCalledWith({
+        where: { productionOrderId: orderId },
+      });
+      expect(prisma.productionOrder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            items: {
+              create: [expect.objectContaining({ componentProductId, sequence: 1 })],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('rejects changing items once PLANNED', async () => {
+      const prisma = basePrisma();
+      prisma.productionOrder.findFirst.mockResolvedValue(
+        orderRow({ status: 'PLANNED' }),
+      );
+      const { svc } = service(prisma);
+
+      await expect(
+        svc.update(actor, orderId, {
+          items: [
+            { componentProductId, quantity: '2', unitOfMeasureId: baseUnitId, sequence: 1 },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('leaves items untouched when not supplied on update', async () => {
+      const prisma = basePrisma();
+      prisma.productionOrder.findFirst.mockResolvedValue(orderRow());
+      prisma.productionOrder.update.mockResolvedValue(orderRow());
+      const { svc } = service(prisma);
+
+      await svc.update(actor, orderId, { notes: 'updated' });
+
+      expect(prisma.productionOrderItem.deleteMany).not.toHaveBeenCalled();
     });
   });
 

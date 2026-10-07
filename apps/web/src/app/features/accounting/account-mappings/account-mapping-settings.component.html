@@ -1,6 +1,9 @@
 <div class="main-card mb-3 card">
   <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Account Mappings</div>
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Account Mappings
+      <app-list-actions-menu label="Account Mappings"></app-list-actions-menu>
+    </div>
     <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
       Refresh
     </button>

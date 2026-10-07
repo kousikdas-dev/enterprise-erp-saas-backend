@@ -1,22 +1,32 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Journal Entries</div>
-    <div class="d-flex flex-wrap gap-2">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        New
+      </button>
+      <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+        Journal Entries
+        <app-list-actions-menu label="Journal Entries"></app-list-actions-menu>
+      </div>
+    </div>
+
+    <div class="flex-grow-1 d-flex justify-content-center gap-2">
       <input
         type="search"
         class="form-control form-control-sm"
-        style="min-width: 200px;"
+        style="max-width: 320px; width: 100%;"
         placeholder="Filter by entry number, description…"
         [(ngModel)]="filter" />
-      <select class="form-select form-select-sm" style="min-width: 140px;" [(ngModel)]="statusFilter">
+      <select class="form-select form-select-sm" style="min-width: 140px; max-width: 140px;" [(ngModel)]="statusFilter">
         <option value="">All statuses</option>
         <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
       </select>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="filtered"></app-list-paginator>
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
-      </button>
-      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
-        Create Journal Entry
       </button>
     </div>
   </div>
@@ -42,7 +52,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filtered">
+            <tr *ngFor="let item of pager.pageItems">
               <td>{{ item.entryNumber }}</td>
               <td>{{ item.entryDate | slice:0:10 }}</td>
               <td class="text-muted">{{ item.description || '—' }}</td>

@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { UnitsService } from './units.service';
 
@@ -21,6 +25,11 @@ describe('UnitsService', () => {
     };
   }
 
+  const UNIT_INCLUDE = {
+    referenceUnit: { select: { code: true, name: true } },
+    unspscCategory: { select: { code: true, name: true } },
+  };
+
   function createService() {
     const prisma = {
       unitOfMeasure: {
@@ -28,6 +37,9 @@ describe('UnitsService', () => {
         findMany: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
+      },
+      unspscCategory: {
+        findFirst: jest.fn(),
       },
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -45,7 +57,15 @@ describe('UnitsService', () => {
     await service.create(actor, { code: 'pcs', name: 'Pieces' });
 
     expect(prisma.unitOfMeasure.create).toHaveBeenCalledWith({
-      data: { tenantId: actor.tenantId, code: 'PCS', name: 'Pieces' },
+      data: {
+        tenantId: actor.tenantId,
+        code: 'PCS',
+        name: 'Pieces',
+        referenceUnitId: null,
+        conversionFactor: null,
+        unspscCategoryId: null,
+      },
+      include: UNIT_INCLUDE,
     });
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'unit.created' }),
@@ -67,6 +87,7 @@ describe('UnitsService', () => {
     expect(prisma.unitOfMeasure.findMany).toHaveBeenCalledWith({
       where: { tenantId: actor.tenantId },
       orderBy: { code: 'asc' },
+      include: UNIT_INCLUDE,
     });
   });
 
@@ -94,5 +115,39 @@ describe('UnitsService', () => {
     await expect(service.getById(actor, row().id)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('rejects referenceUnitId without conversionFactor', async () => {
+    const { service } = createService();
+    await expect(
+      service.create(actor, {
+        code: 'KM',
+        name: 'Kilometre',
+        referenceUnitId: '22222222-2222-4222-8222-222222222222',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a unit referencing itself on update', async () => {
+    const { service, prisma } = createService();
+    prisma.unitOfMeasure.findFirst.mockResolvedValue(row());
+    await expect(
+      service.update(actor, row().id, {
+        referenceUnitId: row().id,
+        conversionFactor: '1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects an unknown unspscCategoryId', async () => {
+    const { service, prisma } = createService();
+    prisma.unspscCategory.findFirst.mockResolvedValue(null);
+    await expect(
+      service.create(actor, {
+        code: 'PCS',
+        name: 'Pieces',
+        unspscCategoryId: '33333333-3333-4333-8333-333333333333',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

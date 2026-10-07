@@ -278,5 +278,18 @@ describe('OperationsService', () => {
         NotFoundException,
       );
     });
+
+    it('rejects deleting an operation referenced by a BOM', async () => {
+      const prisma = basePrisma();
+      prisma.operation.findFirst.mockResolvedValue(operationRow());
+      prisma.operation.delete.mockRejectedValue(
+        Object.assign(new Error('FK violation'), { code: 'P2003' }),
+      );
+      const { svc } = service(prisma);
+
+      await expect(svc.remove(actor, id)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
   });
 });

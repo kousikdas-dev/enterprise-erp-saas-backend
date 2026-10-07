@@ -18,6 +18,18 @@ type BomItemRow = {
   updatedAt: Date;
 };
 
+type BomOperationRow = {
+  id: string;
+  tenantId: string;
+  bomId: string;
+  operationId: string;
+  operationCode: string;
+  operationName: string;
+  sequence: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type BomWithItems = {
   id: string;
   tenantId: string;
@@ -33,9 +45,13 @@ type BomWithItems = {
   effectiveFrom: Date | null;
   effectiveTo: Date | null;
   notes: string | null;
+  productVariantId: string | null;
+  productVariantSku: string | null;
+  productVariantName: string | null;
   createdAt: Date;
   updatedAt: Date;
   items: BomItemRow[];
+  operations: BomOperationRow[];
 };
 
 function toBomItemResponse(item: BomItemRow) {
@@ -59,6 +75,20 @@ function toBomItemResponse(item: BomItemRow) {
   };
 }
 
+function toBomOperationResponse(operation: BomOperationRow) {
+  return {
+    id: operation.id,
+    tenantId: operation.tenantId,
+    bomId: operation.bomId,
+    operationId: operation.operationId,
+    operationCode: operation.operationCode,
+    operationName: operation.operationName,
+    sequence: operation.sequence,
+    createdAt: operation.createdAt,
+    updatedAt: operation.updatedAt,
+  };
+}
+
 export function toBomResponse(row: BomWithItems) {
   return {
     id: row.id,
@@ -75,11 +105,18 @@ export function toBomResponse(row: BomWithItems) {
     effectiveFrom: row.effectiveFrom,
     effectiveTo: row.effectiveTo,
     notes: row.notes,
+    productVariantId: row.productVariantId,
+    productVariantSku: row.productVariantSku,
+    productVariantName: row.productVariantName,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     items: row.items
       .slice()
       .sort((a, b) => a.sequence - b.sequence)
       .map(toBomItemResponse),
+    operations: row.operations
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)
+      .map(toBomOperationResponse),
   };
 }

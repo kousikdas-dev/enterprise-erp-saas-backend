@@ -1,0 +1,9 @@
+// Pushes content below the fixed app-header (60px, see
+// $app-header-height in assets/layout/_layout-variables.scss) regardless
+// of whether the top navigation bar is shown for the current route.
+.app-below-header {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding-top: 60px;
+}

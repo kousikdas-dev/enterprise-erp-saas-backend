@@ -17,6 +17,7 @@ describe('BillOfMaterialsService', () => {
   const componentProductId = 'c2222222-aaaa-4aaa-8aaa-c22222222222';
   const baseUnitId = 'u3333333-aaaa-4aaa-8aaa-u33333333333';
   const altUnitId = 'u4444444-aaaa-4aaa-8aaa-u44444444444';
+  const operationId = 'o5555555-aaaa-4aaa-8aaa-o55555555555';
 
   function productDetail(
     overrides: Record<string, unknown> = {},
@@ -64,6 +65,35 @@ describe('BillOfMaterialsService', () => {
     };
   }
 
+  function bomOperationRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'bomop111-aaaa-4aaa-8aaa-bomop1111111',
+      tenantId: actor.tenantId,
+      bomId: 'bom11111-aaaa-4aaa-8aaa-bom111111111',
+      operationId,
+      operationCode: 'CUT',
+      operationName: 'Cutting',
+      sequence: 1,
+      createdAt: new Date('2026-01-01'),
+      updatedAt: new Date('2026-01-01'),
+      ...overrides,
+    };
+  }
+
+  function operationRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: operationId,
+      tenantId: actor.tenantId,
+      code: 'CUT',
+      name: 'Cutting',
+      description: null,
+      isActive: true,
+      createdAt: new Date('2026-01-01'),
+      updatedAt: new Date('2026-01-01'),
+      ...overrides,
+    };
+  }
+
   function bomRow(overrides: Record<string, unknown> = {}) {
     return {
       id: 'bom11111-aaaa-4aaa-8aaa-bom111111111',
@@ -83,6 +113,7 @@ describe('BillOfMaterialsService', () => {
       createdAt: new Date('2026-01-01'),
       updatedAt: new Date('2026-01-01'),
       items: [bomItemRow()],
+      operations: [],
       ...overrides,
     };
   }
@@ -116,6 +147,14 @@ describe('BillOfMaterialsService', () => {
       },
       bomItem: {
         deleteMany: jest.fn(),
+      },
+      bomOperation: {
+        deleteMany: jest.fn(),
+      },
+      operation: {
+        findFirst: jest.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === operationId ? operationRow() : null,
+        ),
       },
       ...overrides,
     };
@@ -518,6 +557,301 @@ describe('BillOfMaterialsService', () => {
     });
   });
 
+  describe('create with operations', () => {
+    it('creates a BOM with an ordered operations list, snapshotting code/name', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(null);
+      prisma.bom.create.mockResolvedValue(
+        bomRow({ operations: [bomOperationRow()] }),
+      );
+      const { svc } = service(prisma);
+
+      const result = await svc.create(
+        actor,
+        createDto({ operations: [{ operationId, sequence: 1 }] }),
+      );
+
+      expect(prisma.bom.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            operations: {
+              create: [
+                expect.objectContaining({
+                  operationId,
+                  operationCode: 'CUT',
+                  operationName: 'Cutting',
+                  sequence: 1,
+                }),
+              ],
+            },
+          }),
+        }),
+      );
+      expect(result.operations[0]).toMatchObject({
+        operationId,
+        operationCode: 'CUT',
+        sequence: 1,
+      });
+    });
+
+    it('creates a BOM with no operations when none are supplied', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(null);
+      prisma.bom.create.mockResolvedValue(bomRow());
+      const { svc } = service(prisma);
+
+      await svc.create(actor, createDto());
+
+      expect(prisma.bom.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ operations: { create: [] } }),
+        }),
+      );
+    });
+
+    it('rejects an unknown operationId', async () => {
+      const { svc } = service();
+
+      await expect(
+        svc.create(
+          actor,
+          createDto({
+            operations: [{ operationId: 'missing-op-id', sequence: 1 }],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects an inactive operation', async () => {
+      const prisma = basePrisma({
+        operation: {
+          findFirst: jest.fn().mockResolvedValue(operationRow({ isActive: false })),
+        },
+      });
+      const { svc } = service(prisma);
+
+      await expect(
+        svc.create(
+          actor,
+          createDto({ operations: [{ operationId, sequence: 1 }] }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects duplicate operations within the same payload', async () => {
+      const { svc } = service();
+
+      await expect(
+        svc.create(
+          actor,
+          createDto({
+            operations: [
+              { operationId, sequence: 1 },
+              { operationId, sequence: 2 },
+            ],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('product variant scoping', () => {
+    const variantProductId = 'v6666666-aaaa-4aaa-8aaa-v66666666666';
+
+    function inventoryWithVariant(overrides: Record<string, unknown> = {}) {
+      return defaultInventory({
+        getProductDetail: jest.fn(async (_actor: unknown, id: string) => {
+          if (id === parentProductId) {
+            return productDetail({
+              id: parentProductId,
+              sku: 'YARN-40S',
+              name: 'Cotton Yarn 40s',
+            });
+          }
+          if (id === variantProductId) {
+            return productDetail({
+              id: variantProductId,
+              sku: 'YARN-40S-RED',
+              name: 'Cotton Yarn 40s (Red)',
+              templateProductId: parentProductId,
+            });
+          }
+          return productDetail({ id });
+        }),
+        ...overrides,
+      });
+    }
+
+    it('creates a BOM scoped to a valid variant of the parent product, snapshotting its sku/name', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(null);
+      prisma.bom.create.mockResolvedValue(
+        bomRow({
+          productVariantId: variantProductId,
+          productVariantSku: 'YARN-40S-RED',
+          productVariantName: 'Cotton Yarn 40s (Red)',
+        }),
+      );
+      const { svc } = service(prisma, inventoryWithVariant());
+
+      const result = await svc.create(
+        actor,
+        createDto({ productVariantId: variantProductId }),
+      );
+
+      expect(prisma.bom.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productVariantId: variantProductId,
+            productVariantSku: 'YARN-40S-RED',
+            productVariantName: 'Cotton Yarn 40s (Red)',
+          }),
+        }),
+      );
+      expect(result.productVariantId).toBe(variantProductId);
+      expect(result.productVariantSku).toBe('YARN-40S-RED');
+    });
+
+    it('creates a BOM with no variant scoping when productVariantId is omitted', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(null);
+      prisma.bom.create.mockResolvedValue(bomRow());
+      const { svc } = service(prisma, inventoryWithVariant());
+
+      await svc.create(actor, createDto());
+
+      expect(prisma.bom.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productVariantId: null,
+            productVariantSku: null,
+            productVariantName: null,
+          }),
+        }),
+      );
+    });
+
+    it('rejects a productVariantId that is not a variant of this BOM’s parent product', async () => {
+      const { svc } = service(basePrisma(), inventoryWithVariant());
+
+      // componentProductId resolves to a real, active product via
+      // defaultInventory/productDetail, but its templateProductId is
+      // unset (not a variant of parentProductId).
+      await expect(
+        svc.create(
+          actor,
+          createDto({ productVariantId: componentProductId }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('replaces the variant scope on update', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(bomRow({ status: 'DRAFT' }));
+      prisma.bom.update.mockResolvedValue(
+        bomRow({
+          productVariantId: variantProductId,
+          productVariantSku: 'YARN-40S-RED',
+          productVariantName: 'Cotton Yarn 40s (Red)',
+        }),
+      );
+      const { svc } = service(prisma, inventoryWithVariant());
+
+      await svc.update(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111', {
+        productVariantId: variantProductId,
+      });
+
+      expect(prisma.bom.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productVariantId: variantProductId,
+            productVariantSku: 'YARN-40S-RED',
+            productVariantName: 'Cotton Yarn 40s (Red)',
+          }),
+        }),
+      );
+    });
+
+    it('clears the variant scope when productVariantId is explicitly null on update', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(
+        bomRow({
+          status: 'DRAFT',
+          productVariantId: variantProductId,
+          productVariantSku: 'YARN-40S-RED',
+          productVariantName: 'Cotton Yarn 40s (Red)',
+        }),
+      );
+      prisma.bom.update.mockResolvedValue(bomRow({ status: 'DRAFT' }));
+      const { svc } = service(prisma, inventoryWithVariant());
+
+      await svc.update(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111', {
+        productVariantId: null,
+      });
+
+      expect(prisma.bom.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productVariantId: null,
+            productVariantSku: null,
+            productVariantName: null,
+          }),
+        }),
+      );
+    });
+
+    it('leaves the variant scope untouched when productVariantId is omitted on update', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(
+        bomRow({
+          status: 'DRAFT',
+          productVariantId: variantProductId,
+          productVariantSku: 'YARN-40S-RED',
+          productVariantName: 'Cotton Yarn 40s (Red)',
+        }),
+      );
+      prisma.bom.update.mockResolvedValue(bomRow({ status: 'DRAFT' }));
+      const { svc } = service(prisma, inventoryWithVariant());
+
+      await svc.update(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111', {
+        notes: 'updated',
+      });
+
+      const updateCall = prisma.bom.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(updateCall.data).not.toHaveProperty('productVariantId');
+    });
+
+    it('clones the variant scope into a new version', async () => {
+      const prisma = basePrisma();
+      const source = bomRow({
+        status: 'ACTIVE',
+        version: 1,
+        productVariantId: variantProductId,
+        productVariantSku: 'YARN-40S-RED',
+        productVariantName: 'Cotton Yarn 40s (Red)',
+      });
+      prisma.bom.findFirst
+        .mockResolvedValueOnce(source)
+        .mockResolvedValueOnce(source);
+      prisma.bom.create.mockResolvedValue(bomRow({ version: 2, status: 'DRAFT' }));
+      const { svc } = service(prisma, inventoryWithVariant());
+
+      await svc.createNewVersion(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111');
+
+      expect(prisma.bom.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productVariantId: variantProductId,
+            productVariantSku: 'YARN-40S-RED',
+            productVariantName: 'Cotton Yarn 40s (Red)',
+          }),
+        }),
+      );
+    });
+  });
+
   describe('list', () => {
     it('filters by tenant, and optionally by parentProductId', async () => {
       const prisma = basePrisma();
@@ -676,6 +1010,45 @@ describe('BillOfMaterialsService', () => {
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
+
+    it('replaces operations for a DRAFT BOM', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(bomRow({ status: 'DRAFT' }));
+      prisma.bom.update.mockResolvedValue(
+        bomRow({ operations: [bomOperationRow()] }),
+      );
+      const { svc } = service(prisma);
+
+      await svc.update(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111', {
+        operations: [{ operationId, sequence: 1 }],
+      });
+
+      expect(prisma.bomOperation.deleteMany).toHaveBeenCalledWith({
+        where: { bomId: 'bom11111-aaaa-4aaa-8aaa-bom111111111' },
+      });
+      expect(prisma.bom.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            operations: {
+              create: [expect.objectContaining({ operationId, sequence: 1 })],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('leaves operations untouched when not supplied on update', async () => {
+      const prisma = basePrisma();
+      prisma.bom.findFirst.mockResolvedValue(bomRow({ status: 'DRAFT' }));
+      prisma.bom.update.mockResolvedValue(bomRow());
+      const { svc } = service(prisma);
+
+      await svc.update(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111', {
+        notes: 'updated',
+      });
+
+      expect(prisma.bomOperation.deleteMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('activate / deactivate', () => {
@@ -775,6 +1148,39 @@ describe('BillOfMaterialsService', () => {
             outputUnitOfMeasureId: baseUnitId,
             outputUomCode: 'KG',
             outputUomName: 'Kilogram',
+          }),
+        }),
+      );
+    });
+
+    it('clones the operations list from the source version', async () => {
+      const prisma = basePrisma();
+      const source = bomRow({
+        status: 'ACTIVE',
+        version: 1,
+        operations: [bomOperationRow()],
+      });
+      prisma.bom.findFirst
+        .mockResolvedValueOnce(source) // requireBom
+        .mockResolvedValueOnce(source); // nextVersion lookup
+      prisma.bom.create.mockResolvedValue(bomRow({ version: 2, status: 'DRAFT' }));
+      const { svc } = service(prisma);
+
+      await svc.createNewVersion(actor, 'bom11111-aaaa-4aaa-8aaa-bom111111111');
+
+      expect(prisma.bom.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            operations: {
+              create: [
+                expect.objectContaining({
+                  operationId,
+                  operationCode: 'CUT',
+                  operationName: 'Cutting',
+                  sequence: 1,
+                }),
+              ],
+            },
           }),
         }),
       );

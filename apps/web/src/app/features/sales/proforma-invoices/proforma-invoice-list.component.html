@@ -1,13 +1,21 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Proforma Invoices</div>
-    <div class="d-flex flex-wrap gap-2">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Proforma Invoices
+      <app-list-actions-menu label="Proforma Invoices"></app-list-actions-menu>
+    </div>
+
+    <div class="flex-grow-1 d-flex justify-content-center">
       <input
         type="search"
         class="form-control form-control-sm"
-        style="min-width: 200px;"
+        style="max-width: 460px; width: 100%;"
         placeholder="Filter by document #, customer, status…"
         [(ngModel)]="filter" />
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="filtered"></app-list-paginator>
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
       </button>
@@ -38,7 +46,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filtered">
+            <tr *ngFor="let item of pager.pageItems">
               <td><code>{{ item.documentNumber }}</code></td>
               <td>{{ item.customerName }}</td>
               <td class="text-muted">{{ sourceLabel(item) }} — <code>{{ item.sourceId | slice:0:8 }}…</code></td>

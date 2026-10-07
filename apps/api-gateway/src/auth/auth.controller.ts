@@ -53,7 +53,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Current authenticated user',
     description:
-      'Validates the access JWT locally at the gateway and returns userId and tenantId.',
+      'Validates the access JWT locally at the gateway and returns userId, tenantId, tenantName and userName (from the token claims).',
   })
   @ApiOkResponse({ type: AuthMeDto })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
@@ -61,6 +61,8 @@ export class AuthController {
     return {
       userId: user.userId,
       tenantId: user.tenantId,
+      tenantName: user.tenantName,
+      userName: user.userName,
     };
   }
 }

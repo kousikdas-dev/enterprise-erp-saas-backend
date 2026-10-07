@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsNotEmpty,
   IsOptional,
@@ -45,6 +47,21 @@ export class CreateProductDto {
   @Transform(({ value }: { value: unknown }) => String(value))
   @IsString()
   costPrice!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Marks this product as a variant of a top-level product.',
+  })
+  @IsOptional()
+  @IsUUID()
+  templateProductId?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'AttributeValue ids tagging this variant.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  attributeValueIds?: string[];
 }
 
 export class UpdateProductDto {
@@ -98,6 +115,35 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Marks this product as a variant of a top-level product.',
+  })
+  @IsOptional()
+  @IsUUID()
+  templateProductId?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'AttributeValue ids tagging this variant.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  attributeValueIds?: string[];
+}
+
+export class ProductAttributeValueDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  attributeId!: string;
+
+  @ApiProperty()
+  attributeName!: string;
+
+  @ApiProperty()
+  value!: string;
 }
 
 export class ProductDto {
@@ -130,6 +176,12 @@ export class ProductDto {
 
   @ApiProperty()
   isActive!: boolean;
+
+  @ApiPropertyOptional({ nullable: true })
+  templateProductId!: string | null;
+
+  @ApiProperty({ type: [ProductAttributeValueDto] })
+  attributeValues!: ProductAttributeValueDto[];
 
   @ApiProperty()
   createdAt!: string;

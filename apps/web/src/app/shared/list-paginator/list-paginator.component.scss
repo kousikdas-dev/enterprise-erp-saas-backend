@@ -1,0 +1,16 @@
+// Looks disabled but keeps native hover/focus events firing (unlike
+// Bootstrap's .disabled/[disabled], which set pointer-events: none and
+// would silently swallow the tooltip trigger) so the "coming later"
+// tooltip still shows on hover.
+.btn-view-placeholder {
+  opacity: .55;
+  cursor: default;
+
+  &:hover,
+  &:focus,
+  &:active {
+    opacity: .55;
+    background-color: transparent;
+    box-shadow: none;
+  }
+}

@@ -10,48 +10,61 @@ import { PurchaseInvoiceListComponent } from './purchase-invoices/purchase-invoi
 import { PurchaseReturnListComponent } from './purchase-returns/purchase-return-list.component';
 import { PurchaseDebitNoteListComponent } from './purchase-debit-notes/purchase-debit-note-list.component';
 import { SupplierListComponent } from './suppliers/supplier-list.component';
+import { PurchaseSettingsComponent } from './settings/purchase-settings.component';
+import { PurchaseOverviewComponent } from './overview/purchase-overview.component';
 
 const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'suppliers' },
+  { path: '', pathMatch: 'full', redirectTo: 'overview' },
+  {
+    path: 'overview',
+    component: PurchaseOverviewComponent,
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
+  },
+  {
+    path: 'settings',
+    component: PurchaseSettingsComponent,
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
+  },
   {
     path: 'suppliers',
     component: SupplierListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
   {
     path: 'purchase-orders',
     component: PurchaseOrderListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
   {
     path: 'goods-receipts',
     component: GoodsReceiptListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
   {
     path: 'purchase-invoices',
     component: PurchaseInvoiceListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
   {
     path: 'purchase-returns',
     component: PurchaseReturnListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
   {
     path: 'purchase-debit-notes',
     component: PurchaseDebitNoteListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
   {
     path: 'accounts-payable',
     component: AccountsPayableListComponent,
-    data: { extraParameter: 'purchaseMenu' },
+    data: { extraParameter: 'purchaseMenu', darkTheme: true },
   },
 ];
 
 @NgModule({
   declarations: [
+    PurchaseOverviewComponent,
     SupplierListComponent,
     PurchaseOrderListComponent,
     GoodsReceiptListComponent,
@@ -59,6 +72,7 @@ const routes: Routes = [
     PurchaseReturnListComponent,
     PurchaseDebitNoteListComponent,
     AccountsPayableListComponent,
+    PurchaseSettingsComponent,
   ],
   imports: [
     SharedModule,

@@ -13,6 +13,13 @@ import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { toProductResponse } from './dto/product-response';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 
+/** Always include the attribute-value tags, with their attribute name, for the response mapper. */
+const PRODUCT_INCLUDE = {
+  attributeValues: {
+    include: { attributeValue: { include: { attribute: true } } },
+  },
+} satisfies Prisma.ProductInclude;
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -27,6 +34,12 @@ export class ProductsService {
   ) {
     await this.requireCategory(actor, dto.categoryId);
     await this.requireUnit(actor, dto.unitOfMeasureId);
+    if (dto.templateProductId !== undefined) {
+      await this.requireTemplateProduct(actor, dto.templateProductId);
+    }
+    if (dto.attributeValueIds !== undefined) {
+      await this.requireAttributeValues(actor, dto.attributeValueIds);
+    }
     try {
       const row = await this.prisma.product.create({
         data: {
@@ -42,7 +55,17 @@ export class ProductsService {
           trackInventory: dto.trackInventory,
           barcode: dto.barcode?.trim() || null,
           note: dto.note?.trim() || null,
+          templateProductId: dto.templateProductId ?? null,
+          attributeValues: dto.attributeValueIds
+            ? {
+                create: dto.attributeValueIds.map((attributeValueId) => ({
+                  tenantId: actor.tenantId,
+                  attributeValueId,
+                })),
+              }
+            : undefined,
         },
+        include: PRODUCT_INCLUDE,
       });
       await this.audit.record({
         actor,
@@ -61,10 +84,14 @@ export class ProductsService {
     }
   }
 
-  async list(actor: ActorContext) {
+  async list(actor: ActorContext, templateProductId?: string) {
     const rows = await this.prisma.product.findMany({
-      where: { tenantId: actor.tenantId },
+      where: {
+        tenantId: actor.tenantId,
+        ...(templateProductId ? { templateProductId } : {}),
+      },
       orderBy: { sku: 'asc' },
+      include: PRODUCT_INCLUDE,
     });
     return { items: rows.map(toProductResponse) };
   }
@@ -82,6 +109,15 @@ export class ProductsService {
     await this.requireProduct(actor, id);
     if (dto.categoryId) await this.requireCategory(actor, dto.categoryId);
     if (dto.unitOfMeasureId) await this.requireUnit(actor, dto.unitOfMeasureId);
+    if (dto.templateProductId !== undefined) {
+      if (dto.templateProductId === id) {
+        throw new ConflictException('A product cannot be a variant of itself');
+      }
+      await this.requireTemplateProduct(actor, dto.templateProductId);
+    }
+    if (dto.attributeValueIds !== undefined) {
+      await this.requireAttributeValues(actor, dto.attributeValueIds);
+    }
     const data: Prisma.ProductUncheckedUpdateInput = {};
     if (dto.sku !== undefined) data.sku = dto.sku.trim().toUpperCase();
     if (dto.name !== undefined) data.name = dto.name.trim();
@@ -99,13 +135,35 @@ export class ProductsService {
       data.trackInventory = dto.trackInventory;
     if (dto.barcode !== undefined) data.barcode = dto.barcode.trim() || null;
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
-    if (Object.keys(data).length === 0) {
+    if (dto.templateProductId !== undefined)
+      data.templateProductId = dto.templateProductId;
+    if (Object.keys(data).length === 0 && dto.attributeValueIds === undefined) {
       throw new BadRequestException('No fields to update');
     }
     try {
-      const row = await this.prisma.product.update({
-        where: { id },
-        data,
+      const row = await this.prisma.$transaction(async (tx) => {
+        if (dto.attributeValueIds !== undefined) {
+          await tx.productAttributeValue.deleteMany({
+            where: { productId: id },
+          });
+        }
+        return tx.product.update({
+          where: { id },
+          data: {
+            ...data,
+            ...(dto.attributeValueIds !== undefined
+              ? {
+                  attributeValues: {
+                    create: dto.attributeValueIds.map((attributeValueId) => ({
+                      tenantId: actor.tenantId,
+                      attributeValueId,
+                    })),
+                  },
+                }
+              : {}),
+          },
+          include: PRODUCT_INCLUDE,
+        });
       });
       await this.audit.record({
         actor,
@@ -127,6 +185,7 @@ export class ProductsService {
   private async requireProduct(actor: ActorContext, id: string) {
     const row = await this.prisma.product.findFirst({
       where: { id, tenantId: actor.tenantId },
+      include: PRODUCT_INCLUDE,
     });
     if (!row) throw new NotFoundException('Product not found');
     return row;
@@ -146,5 +205,29 @@ export class ProductsService {
     });
     if (!row) throw new NotFoundException('Unit of measure not found');
     return row;
+  }
+
+  /** The template itself must not already be a variant — only one level of variant nesting is allowed. */
+  private async requireTemplateProduct(actor: ActorContext, id: string) {
+    const row = await this.prisma.product.findFirst({
+      where: { id, tenantId: actor.tenantId },
+    });
+    if (!row) throw new NotFoundException('Template product not found');
+    if (row.templateProductId) {
+      throw new ConflictException(
+        'Selected template is itself a variant; a product can only be a variant of a top-level product',
+      );
+    }
+    return row;
+  }
+
+  private async requireAttributeValues(actor: ActorContext, ids: string[]) {
+    if (ids.length === 0) return;
+    const rows = await this.prisma.attributeValue.findMany({
+      where: { id: { in: ids }, tenantId: actor.tenantId },
+    });
+    if (rows.length !== new Set(ids).size) {
+      throw new BadRequestException('One or more attribute values were not found');
+    }
   }
 }

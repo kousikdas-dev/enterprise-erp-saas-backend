@@ -1,0 +1,53 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Purchase Overview
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+      Refresh
+    </button>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="false"
+      (retry)="load()">
+      <div class="row g-3">
+        @if (canReadSuppliers) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/purchase/suppliers" class="overview-stat">
+              <div class="overview-stat-value">{{ suppliersCount }}</div>
+              <div class="overview-stat-label">Suppliers</div>
+            </a>
+          </div>
+        }
+        @if (canReadPurchaseOrders) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/purchase/purchase-orders" class="overview-stat">
+              <div class="overview-stat-value">{{ openPurchaseOrdersCount }}</div>
+              <div class="overview-stat-label">Open Purchase Orders</div>
+            </a>
+          </div>
+        }
+        @if (canReadGoodsReceipts) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/purchase/goods-receipts" class="overview-stat">
+              <div class="overview-stat-value">{{ pendingGoodsReceiptsCount }}</div>
+              <div class="overview-stat-label">Pending Goods Receipts</div>
+            </a>
+          </div>
+        }
+        @if (canReadPurchaseInvoices) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/purchase/purchase-invoices" class="overview-stat">
+              <div class="overview-stat-value">{{ unpaidPurchaseInvoicesCount }}</div>
+              <div class="overview-stat-label">Unpaid Purchase Invoices</div>
+            </a>
+          </div>
+        }
+      </div>
+    </app-list-state>
+  </div>
+</div>

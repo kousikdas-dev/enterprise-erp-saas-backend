@@ -39,6 +39,17 @@ export class CreateBomItemDto {
   sequence!: number;
 }
 
+export class CreateBomOperationDto {
+  @ApiProperty({ format: 'uuid', description: 'production-service Operation id.' })
+  @IsUUID()
+  operationId!: string;
+
+  @ApiProperty({ example: 1 })
+  @IsInt()
+  @Min(1)
+  sequence!: number;
+}
+
 export class CreateBomDto {
   @ApiProperty({ format: 'uuid', description: 'Inventory-service Product id.' })
   @IsUUID()
@@ -83,6 +94,26 @@ export class CreateBomDto {
   @ValidateNested({ each: true })
   @Type(() => CreateBomItemDto)
   items!: CreateBomItemDto[];
+
+  @ApiPropertyOptional({
+    type: [CreateBomOperationDto],
+    description:
+      'Ordered list of Operation Master operations required to build this BOM. Sequence only — no duration/work centre yet.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateBomOperationDto)
+  operations?: CreateBomOperationDto[];
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      "Optionally scopes this BOM to one specific variant of parentProductId (must be a variant of it). Omit to apply to all variants.",
+  })
+  @IsOptional()
+  @IsUUID()
+  productVariantId?: string;
 }
 
 export class UpdateBomDto {
@@ -120,6 +151,23 @@ export class UpdateBomDto {
   @ValidateNested({ each: true })
   @Type(() => CreateBomItemDto)
   items?: CreateBomItemDto[];
+
+  @ApiPropertyOptional({ type: [CreateBomOperationDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateBomOperationDto)
+  operations?: CreateBomOperationDto[];
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Pass a UUID to scope this BOM to one variant, or null to clear back to "all variants"; omit to leave unchanged.',
+  })
+  @IsOptional()
+  @IsUUID()
+  productVariantId?: string | null;
 }
 
 export class BomItemDto {
@@ -149,6 +197,23 @@ export class BomItemDto {
 
   @ApiPropertyOptional({ nullable: true })
   scrapPercentage!: string | null;
+
+  @ApiProperty()
+  sequence!: number;
+}
+
+export class BomOperationDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  operationId!: string;
+
+  @ApiProperty()
+  operationCode!: string;
+
+  @ApiProperty()
+  operationName!: string;
 
   @ApiProperty()
   sequence!: number;
@@ -197,8 +262,20 @@ export class BomDto {
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  productVariantId!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  productVariantSku!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  productVariantName!: string | null;
+
   @ApiProperty({ type: [BomItemDto] })
   items!: BomItemDto[];
+
+  @ApiProperty({ type: [BomOperationDto] })
+  operations!: BomOperationDto[];
 }
 
 export class BomListDto {

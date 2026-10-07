@@ -1,0 +1,236 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Purchase Settings
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="discard()" [disabled]="loading || saving">
+        Discard
+      </button>
+      <button type="button" class="btn btn-sm btn-primary" (click)="save()" [disabled]="loading || saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-4">
+      These preferences are stored in this browser only — there is no shared backend setting yet,
+      so they won't follow you to another device or browser.
+    </p>
+
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <h6 class="settings-section-title">Product Catalog</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableVariants" formControlName="enableVariants" />
+            <label class="form-check-label fw-semibold" for="enableVariants">Variants</label>
+          </div>
+          <div class="text-muted small ms-4">Purchase variants of a product using attributes (size, color, etc.)</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/inventory/attributes" class="small settings-link">Attributes →</a>
+          </div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableUnitsOfMeasure" formControlName="enableUnitsOfMeasure" />
+            <label class="form-check-label fw-semibold" for="enableUnitsOfMeasure">Units of Measure &amp; Packagings</label>
+          </div>
+          <div class="text-muted small ms-4">Purchase products in different units of measure or packagings.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/inventory/units" class="small settings-link">Units &amp; Packagings →</a>
+          </div>
+        </div>
+      </div>
+
+      <h6 class="settings-section-title">Pricing</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableDiscounts" formControlName="enableDiscounts" />
+            <label class="form-check-label fw-semibold" for="enableDiscounts">Discounts</label>
+          </div>
+          <div class="text-muted small ms-4">Grant discounts on purchase order lines.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableVendorPricelists" formControlName="enableVendorPricelists" />
+            <label class="form-check-label fw-semibold" for="enableVendorPricelists">Vendor Pricelists</label>
+          </div>
+          <div class="text-muted small ms-4">Set multiple prices per vendor and product.</div>
+        </div>
+      </div>
+
+      <h6 class="settings-section-title">Orders</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePurchaseOrderApproval" formControlName="enablePurchaseOrderApproval" />
+            <label class="form-check-label fw-semibold" for="enablePurchaseOrderApproval">Purchase Order Approval</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Request managers to approve orders above a minimum amount.</div>
+          @if (form.controls.enablePurchaseOrderApproval.value) {
+            <div class="ms-4 d-flex align-items-center gap-2">
+              <label class="small text-muted mb-0" for="purchaseOrderApprovalMinAmount">Minimum amount</label>
+              <input
+                type="number"
+                class="form-control form-control-sm settings-number-input"
+                id="purchaseOrderApprovalMinAmount"
+                formControlName="purchaseOrderApprovalMinAmount"
+                min="0" />
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="lockConfirmedOrders" formControlName="lockConfirmedOrders" />
+            <label class="form-check-label fw-semibold" for="lockConfirmedOrders">Lock Confirmed Orders</label>
+          </div>
+          <div class="text-muted small ms-4">Automatically lock confirmed orders to prevent editing.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePurchaseWarnings" formControlName="enablePurchaseWarnings" />
+            <label class="form-check-label fw-semibold" for="enablePurchaseWarnings">Warnings</label>
+          </div>
+          <div class="text-muted small ms-4">Get warnings in orders for products or vendors.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePurchaseAgreements" formControlName="enablePurchaseAgreements" />
+            <label class="form-check-label fw-semibold" for="enablePurchaseAgreements">Purchase Agreements</label>
+          </div>
+          <div class="text-muted small ms-4">Manage blanket orders and purchase templates.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableReceiptReminder" formControlName="enableReceiptReminder" />
+            <label class="form-check-label fw-semibold" for="enableReceiptReminder">Receipt Reminder</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Automatically remind the receipt date to your vendors.</div>
+          @if (form.controls.enableReceiptReminder.value) {
+            <div class="ms-4 d-flex align-items-center gap-2">
+              <label class="small text-muted mb-0" for="receiptReminderDaysBefore">Days before</label>
+              <input
+                type="number"
+                class="form-control form-control-sm settings-number-input"
+                id="receiptReminderDaysBefore"
+                formControlName="receiptReminderDaysBefore"
+                min="0"
+                max="30" />
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePurchaseAlternative" formControlName="enablePurchaseAlternative" />
+            <label class="form-check-label fw-semibold" for="enablePurchaseAlternative">Purchase Alternative</label>
+          </div>
+          <div class="text-muted small ms-4">Link RFQs together and compare them.</div>
+        </div>
+      </div>
+
+      <h6 class="settings-section-title">Receipts</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="requireReceiptDateOnOrders" formControlName="requireReceiptDateOnOrders" />
+            <label class="form-check-label fw-semibold" for="requireReceiptDateOnOrders">Require receipt date</label>
+          </div>
+          <div class="text-muted small ms-4">Block confirming a purchase order until an expected receipt date is set.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="allowPartialReceipts" formControlName="allowPartialReceipts" />
+            <label class="form-check-label fw-semibold" for="allowPartialReceipts">Allow partial receipts</label>
+          </div>
+          <div class="text-muted small ms-4">Let a goods receipt cover less than a purchase order's remaining quantity.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/purchase/goods-receipts" class="small settings-link">Goods Receipts →</a>
+          </div>
+        </div>
+      </div>
+
+      <h6 class="settings-section-title">Invoicing</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="defaultBillDueDays">Default payment due period (days)</label>
+          <div class="text-muted small mb-2">New purchase invoices default their due date this many days after the bill date.</div>
+          <input
+            type="number"
+            class="form-control form-control-sm settings-number-input"
+            id="defaultBillDueDays"
+            formControlName="defaultBillDueDays"
+            min="0"
+            max="365" />
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enable3WayMatching" formControlName="enable3WayMatching" />
+            <label class="form-check-label fw-semibold" for="enable3WayMatching">3-Way Matching</label>
+          </div>
+          <div class="text-muted small ms-4">Compare the order, receipt and bill quantities and prices before validating.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Bill Control</label>
+          <div class="text-muted small mb-2">Quantities to bill from purchase orders.</div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="radio"
+              id="billControlPolicyOrdered"
+              formControlName="billControlPolicy"
+              value="ORDERED_QUANTITIES" />
+            <label class="form-check-label" for="billControlPolicyOrdered">Ordered quantities</label>
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="radio"
+              id="billControlPolicyReceived"
+              formControlName="billControlPolicy"
+              value="RECEIVED_QUANTITIES" />
+            <label class="form-check-label" for="billControlPolicyReceived">Received quantities</label>
+          </div>
+        </div>
+      </div>
+
+      <h6 class="settings-section-title">Discounts &amp; approvals</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="maxDiscountPercentWithoutApproval">Max line discount without approval (%)</label>
+          <div class="text-muted small mb-2">Line discounts above this percentage are flagged for approval.</div>
+          <input
+            type="number"
+            class="form-control form-control-sm settings-number-input"
+            id="maxDiscountPercentWithoutApproval"
+            formControlName="maxDiscountPercentWithoutApproval"
+            min="0"
+            max="100" />
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="requireApprovalAboveDiscountLimit" formControlName="requireApprovalAboveDiscountLimit" />
+            <label class="form-check-label fw-semibold" for="requireApprovalAboveDiscountLimit">Require approval above the limit</label>
+          </div>
+          <div class="text-muted small ms-4">Prevent confirming a document with a line discount over the limit above.</div>
+        </div>
+      </div>
+
+      <h6 class="settings-section-title">Returns &amp; debit notes</h6>
+      <div class="row gy-3">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="requireReasonForReturns" formControlName="requireReasonForReturns" />
+            <label class="form-check-label fw-semibold" for="requireReasonForReturns">Require a reason</label>
+          </div>
+          <div class="text-muted small ms-4">Require a reason when creating a purchase return or debit note.</div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>

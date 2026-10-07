@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Bom, BomItem, Prisma } from '../../generated/prisma-client';
+import { Bom, BomItem, BomOperation, Prisma } from '../../generated/prisma-client';
 import { ActorContext } from '../auth/actor-context';
 import { parsePercent, parsePositiveDecimal } from '../common/decimal';
 import {
@@ -14,15 +14,25 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { isUniqueConstraintError } from '../prisma/prisma-errors';
 import { toBomResponse } from './dto/bom-response';
-import { CreateBomDto, CreateBomItemDto, UpdateBomDto } from './dto/bom.dto';
+import {
+  CreateBomDto,
+  CreateBomItemDto,
+  CreateBomOperationDto,
+  UpdateBomDto,
+} from './dto/bom.dto';
 
 const MAX_VERSION_RETRIES = 5;
 
-type BomWithItems = Bom & { items: BomItem[] };
+type BomWithItems = Bom & { items: BomItem[]; operations: BomOperation[] };
 
 interface MappedItem {
   data: Prisma.BomItemUncheckedCreateWithoutBomInput;
   componentProductId: string;
+}
+
+interface MappedOperation {
+  data: Prisma.BomOperationUncheckedCreateWithoutBomInput;
+  operationId: string;
 }
 
 @Injectable()
@@ -41,6 +51,10 @@ export class BillOfMaterialsService {
     const bomQuantity = parsePositiveDecimal(dto.bomQuantity);
     const outputUom = this.resolveUom(parent, dto.outputUnitOfMeasureId, 'parent product');
     const items = await this.mapItems(actor, dto.parentProductId, dto.items);
+    const operations = await this.mapOperations(actor, dto.operations);
+    const variant = dto.productVariantId
+      ? await this.requireProductVariant(actor, dto.productVariantId, dto.parentProductId)
+      : null;
     this.assertEffectiveDateRange(dto.effectiveFrom, dto.effectiveTo);
     await this.assertNoCycle(
       actor,
@@ -66,9 +80,13 @@ export class BillOfMaterialsService {
             effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : null,
             effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : null,
             notes: dto.notes?.trim() || null,
+            productVariantId: variant?.id ?? null,
+            productVariantSku: variant?.sku ?? null,
+            productVariantName: variant?.name ?? null,
             items: { create: items.map((item) => item.data) },
+            operations: { create: operations.map((operation) => operation.data) },
           },
-          include: { items: true },
+          include: { items: true, operations: true },
         });
         return toBomResponse(row);
       } catch (error) {
@@ -88,7 +106,7 @@ export class BillOfMaterialsService {
         ...(parentProductId ? { parentProductId } : {}),
       },
       orderBy: [{ parentProductId: 'asc' }, { version: 'desc' }],
-      include: { items: true },
+      include: { items: true, operations: true },
     });
     return { items: rows.map(toBomResponse) };
   }
@@ -140,9 +158,31 @@ export class BillOfMaterialsService {
       );
     }
 
+    let operations: MappedOperation[] | undefined;
+    if (dto.operations) {
+      operations = await this.mapOperations(actor, dto.operations);
+    }
+
+    let variant:
+      | { id: string; sku: string; name: string }
+      | null
+      | undefined;
+    if (dto.productVariantId !== undefined) {
+      variant = dto.productVariantId
+        ? await this.requireProductVariant(
+            actor,
+            dto.productVariantId,
+            bom.parentProductId,
+          )
+        : null;
+    }
+
     const row = await this.prisma.$transaction(async (tx) => {
       if (items) {
         await tx.bomItem.deleteMany({ where: { bomId: id } });
+      }
+      if (operations) {
+        await tx.bomOperation.deleteMany({ where: { bomId: id } });
       }
       return tx.bom.update({
         where: { id },
@@ -158,11 +198,21 @@ export class BillOfMaterialsService {
               }
             : {}),
           ...(dto.notes !== undefined ? { notes: dto.notes.trim() || null } : {}),
+          ...(variant !== undefined
+            ? {
+                productVariantId: variant?.id ?? null,
+                productVariantSku: variant?.sku ?? null,
+                productVariantName: variant?.name ?? null,
+              }
+            : {}),
           ...(items
             ? { items: { create: items.map((item) => item.data) } }
             : {}),
+          ...(operations
+            ? { operations: { create: operations.map((operation) => operation.data) } }
+            : {}),
         },
-        include: { items: true },
+        include: { items: true, operations: true },
       });
     });
     return toBomResponse(row);
@@ -186,7 +236,7 @@ export class BillOfMaterialsService {
       return tx.bom.update({
         where: { id },
         data: { status: 'ACTIVE' },
-        include: { items: true },
+        include: { items: true, operations: true },
       });
     });
     return toBomResponse(row);
@@ -200,7 +250,7 @@ export class BillOfMaterialsService {
     const row = await this.prisma.bom.update({
       where: { id },
       data: { status: 'INACTIVE' },
-      include: { items: true },
+      include: { items: true, operations: true },
     });
     return toBomResponse(row);
   }
@@ -226,6 +276,9 @@ export class BillOfMaterialsService {
             effectiveFrom: source.effectiveFrom,
             effectiveTo: source.effectiveTo,
             notes: source.notes,
+            productVariantId: source.productVariantId,
+            productVariantSku: source.productVariantSku,
+            productVariantName: source.productVariantName,
             items: {
               create: source.items.map((item) => ({
                 tenantId: actor.tenantId,
@@ -240,8 +293,17 @@ export class BillOfMaterialsService {
                 sequence: item.sequence,
               })),
             },
+            operations: {
+              create: source.operations.map((operation) => ({
+                tenantId: actor.tenantId,
+                operationId: operation.operationId,
+                operationCode: operation.operationCode,
+                operationName: operation.operationName,
+                sequence: operation.sequence,
+              })),
+            },
           },
-          include: { items: true },
+          include: { items: true, operations: true },
         });
         return toBomResponse(row);
       } catch (error) {
@@ -266,7 +328,7 @@ export class BillOfMaterialsService {
   private async requireBom(actor: ActorContext, id: string): Promise<BomWithItems> {
     const row = await this.prisma.bom.findFirst({
       where: { id, tenantId: actor.tenantId },
-      include: { items: true },
+      include: { items: true, operations: true },
     });
     if (!row) throw new NotFoundException('BOM not found');
     return row;
@@ -306,6 +368,31 @@ export class BillOfMaterialsService {
       throw new ConflictException(`${label} is not inventory-tracked`);
     }
     return product;
+  }
+
+  /**
+   * Validates that productVariantId is a real, active product whose
+   * inventory-service templateProductId equals this BOM's own
+   * parentProductId — i.e. it must actually be a variant of the product
+   * this BOM builds, not an arbitrary product. Returns the snapshot fields
+   * (id/sku/name) the caller writes onto the Bom row.
+   */
+  private async requireProductVariant(
+    actor: ActorContext,
+    productVariantId: string,
+    parentProductId: string,
+  ): Promise<{ id: string; sku: string; name: string }> {
+    const variant = await this.requireManufacturableProduct(
+      actor,
+      productVariantId,
+      'Product variant',
+    );
+    if (variant.templateProductId !== parentProductId) {
+      throw new ConflictException(
+        'Selected product variant does not belong to this BOM’s parent product',
+      );
+    }
+    return { id: variant.id, sku: variant.sku, name: variant.name };
   }
 
   private async mapItems(
@@ -352,6 +439,57 @@ export class BillOfMaterialsService {
           uomName: uom.name,
           scrapPercentage,
           sequence: item.sequence,
+        },
+      });
+    }
+    return mapped;
+  }
+
+  /**
+   * Operations are this service's own master data (unlike Product, which is
+   * cross-service), so resolution is a plain local Prisma lookup rather than
+   * InventoryProductClient. Rejects unknown/inactive/duplicate operationIds
+   * the same way mapItems() guards components.
+   */
+  private async mapOperations(
+    actor: ActorContext,
+    operations: CreateBomOperationDto[] | undefined,
+  ): Promise<MappedOperation[]> {
+    if (!operations || operations.length === 0) {
+      return [];
+    }
+    const seen = new Set<string>();
+    const mapped: MappedOperation[] = [];
+    for (const operation of operations) {
+      if (seen.has(operation.operationId)) {
+        throw new BadRequestException(
+          `Duplicate operation ${operation.operationId} in BOM operations`,
+        );
+      }
+      seen.add(operation.operationId);
+
+      const row = await this.prisma.operation.findFirst({
+        where: { id: operation.operationId, tenantId: actor.tenantId },
+      });
+      if (!row) {
+        throw new BadRequestException(
+          `Operation ${operation.operationId} was not found`,
+        );
+      }
+      if (!row.isActive) {
+        throw new ConflictException(
+          `Operation ${row.code} is not active`,
+        );
+      }
+
+      mapped.push({
+        operationId: operation.operationId,
+        data: {
+          tenantId: actor.tenantId,
+          operationId: operation.operationId,
+          operationCode: row.code,
+          operationName: row.name,
+          sequence: operation.sequence,
         },
       });
     }

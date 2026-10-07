@@ -1,0 +1,60 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Accounting Overview
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+      Refresh
+    </button>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="false"
+      (retry)="load()">
+      <div class="row g-3 mb-4">
+        @if (canReadAccounts) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/accounting/accounts" class="overview-stat">
+              <div class="overview-stat-value">{{ accountsCount }}</div>
+              <div class="overview-stat-label">Chart of Accounts</div>
+            </a>
+          </div>
+        }
+        @if (canReadTaxCodes) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/accounting/tax-codes" class="overview-stat">
+              <div class="overview-stat-value">{{ activeTaxCodesCount }}</div>
+              <div class="overview-stat-label">Active Tax Codes</div>
+            </a>
+          </div>
+        }
+        @if (canReadJournalEntries) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/accounting/journal-entries" class="overview-stat">
+              <div class="overview-stat-value">{{ draftJournalEntriesCount }}</div>
+              <div class="overview-stat-label">Draft Journal Entries</div>
+            </a>
+          </div>
+        }
+        @if (canReadAccountMappings) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/accounting/account-mappings" class="overview-stat">
+              <div class="overview-stat-value">{{ unmappedCoreAccountsCount }}</div>
+              <div class="overview-stat-label">Unmapped Core Accounts</div>
+            </a>
+          </div>
+        }
+      </div>
+
+      <h6 class="settings-section-title">Reports</h6>
+      <div class="d-flex flex-wrap gap-2">
+        <a routerLink="/accounting/reports/trial-balance" class="btn btn-sm btn-outline-secondary">Trial Balance</a>
+        <a routerLink="/accounting/reports/profit-loss" class="btn btn-sm btn-outline-secondary">Profit &amp; Loss</a>
+        <a routerLink="/accounting/reports/balance-sheet" class="btn btn-sm btn-outline-secondary">Balance Sheet</a>
+      </div>
+    </app-list-state>
+  </div>
+</div>

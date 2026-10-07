@@ -116,6 +116,59 @@ enum ProductType {
   COMBO
 }
 
+enum AttributeDisplayType {
+  RADIO
+  SELECT
+  COLOR
+  PILLS
+}
+
+enum AttributeVariantCreation {
+  INSTANTLY
+  DYNAMICALLY
+  NEVER
+}
+
+/// Attributes master (e.g. "Size", "Color") — reference data only in this
+/// phase, not yet wired into Product for variant generation.
+model Attribute {
+  id              String                   @id @default(uuid()) @db.Uuid
+  tenantId        String                   @db.Uuid
+  name            String
+  displayType     AttributeDisplayType     @default(RADIO)
+  variantCreation AttributeVariantCreation @default(INSTANTLY)
+  isActive        Boolean                  @default(true)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  values AttributeValue[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("attributes")
+}
+
+model AttributeValue {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  attributeId String   @db.Uuid
+  value       String
+  /** Odoo calls this "Free text" — the value is a customer-entered placeholder rather than a fixed option. */
+  isCustom    Boolean  @default(false)
+  extraPrice  Decimal  @default(0) @db.Decimal(19, 4)
+  sequence    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  productAttributeValues ProductAttributeValue[]
+
+  @@unique([tenantId, attributeId, value])
+  @@index([tenantId])
+  @@index([attributeId])
+  @@map("attribute_values")
+}
+
 model Category {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @db.Uuid
@@ -141,12 +194,45 @@ model UnitOfMeasure {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /** Conversion to referenceUnit — e.g. "km" has conversionFactor 1000, referenceUnit "m". Null for a base unit. */
+  referenceUnitId  String?  @db.Uuid
+  conversionFactor Decimal? @db.Decimal(19, 6)
+
+  referenceUnit UnitOfMeasure?  @relation("UnitReference", fields: [referenceUnitId], references: [id], onDelete: Restrict)
+  derivedUnits  UnitOfMeasure[] @relation("UnitReference")
+
+  /** Optional UN Standard Products and Services Code classification. */
+  unspscCategoryId String?         @db.Uuid
+  unspscCategory   UnspscCategory? @relation(fields: [unspscCategoryId], references: [id], onDelete: Restrict)
+
   products     Product[]
   productUnits ProductUnit[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
+  @@index([referenceUnitId])
+  @@index([unspscCategoryId])
   @@map("units_of_measure")
+}
+
+/// Tenant-managed UNSPSC classification codes. Not the full official UN
+/// standard list (thousands of entries, 4-level hierarchy) — a flat
+/// code+name lookup the tenant populates with the codes it actually uses,
+/// matching this app's other flat master-data lists (Units, Categories).
+model UnspscCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  code      String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  units UnitOfMeasure[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("unspsc_categories")
 }
 
 model Warehouse {
@@ -167,6 +253,16 @@ model Warehouse {
   @@map("warehouses")
 }
 
+// templateProductId marks this Product as a variant of another, "template"
+// Product (e.g. "T-Shirt Red L" has templateProductId pointing at "T-Shirt").
+// Nullable self-relation: a template product itself has templateProductId
+// null. Deliberately NOT enforced as a tree deeper than one level — the
+// service layer rejects setting templateProductId to a product that is
+// itself already a variant (no variant-of-a-variant chains), mirroring the
+// same "flat, not nested" shape Odoo uses for its own product templates.
+// onDelete: Restrict so a template can't be removed while variants still
+// reference it (there is no hard product delete in this service anyway —
+// isActive is the only status toggle — but the FK stays honest regardless).
 model Product {
   id              String      @id @default(uuid()) @db.Uuid
   tenantId        String      @db.Uuid
@@ -182,20 +278,48 @@ model Product {
   trackInventory  Boolean     @default(true)
   barcode         String?
   note            String?
+  templateProductId String?   @db.Uuid
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  category      Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  unitOfMeasure UnitOfMeasure   @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
-  stocks        Stock[]
-  movements     StockMovement[]
-  productUnits  ProductUnit[]
+  category        Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  unitOfMeasure   UnitOfMeasure           @relation(fields: [unitOfMeasureId], references: [id], onDelete: Restrict)
+  stocks          Stock[]
+  movements       StockMovement[]
+  productUnits    ProductUnit[]
+  templateProduct Product?                @relation("ProductVariants", fields: [templateProductId], references: [id], onDelete: Restrict)
+  variants        Product[]               @relation("ProductVariants")
+  attributeValues ProductAttributeValue[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
   @@index([categoryId])
   @@index([unitOfMeasureId])
+  @@index([templateProductId])
   @@map("products")
+}
+
+// Tags a specific Product (almost always a variant, though nothing stops
+// tagging a template) with the AttributeValue combination that defines it —
+// e.g. variant "T-Shirt Red L" gets rows for Color=Red and Size=Large. Pure
+// tagging, not variant generation: nothing here auto-creates Product rows
+// from an Attribute's values, mirroring this phase's "reference data only"
+// stance on Attribute/AttributeValue (see the Attribute model comment).
+model ProductAttributeValue {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  productId        String   @db.Uuid
+  attributeValueId String   @db.Uuid
+  createdAt        DateTime @default(now())
+
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeValue AttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, productId, attributeValueId])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([attributeValueId])
+  @@map("product_attribute_values")
 }
 
 model ProductUnit {

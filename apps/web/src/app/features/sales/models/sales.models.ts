@@ -819,3 +819,96 @@ export interface CreateSalesCreditNoteRequest {
 export interface ReverseSalesCreditNoteRequest {
   reason?: string;
 }
+
+export type PricelistApplyOn = 'ALL_PRODUCTS' | 'CATEGORY' | 'PRODUCT';
+
+export const PRICELIST_APPLY_ONS: readonly PricelistApplyOn[] = [
+  'ALL_PRODUCTS',
+  'CATEGORY',
+  'PRODUCT',
+] as const;
+
+export type PricelistComputeMethod = 'FIXED_PRICE' | 'DISCOUNT_PERCENT';
+
+export const PRICELIST_COMPUTE_METHODS: readonly PricelistComputeMethod[] = [
+  'FIXED_PRICE',
+  'DISCOUNT_PERCENT',
+] as const;
+
+export interface PricelistItem {
+  id: string;
+  tenantId: string;
+  pricelistId: string;
+  applyOn: PricelistApplyOn;
+  categoryId: string | null;
+  productId: string | null;
+  computeMethod: PricelistComputeMethod;
+  fixedPrice: string | null;
+  discountPercent: string | null;
+  minQuantity: string;
+  validFrom: string | null;
+  validTo: string | null;
+  sequence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Pricelist {
+  id: string;
+  tenantId: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  itemCount: number;
+  items?: PricelistItem[];
+}
+
+export interface CreatePricelistItemRequest {
+  applyOn?: PricelistApplyOn;
+  categoryId?: string;
+  productId?: string;
+  computeMethod?: PricelistComputeMethod;
+  fixedPrice?: string;
+  discountPercent?: string;
+  minQuantity?: string;
+  validFrom?: string;
+  validTo?: string;
+  sequence?: number;
+}
+
+export type UpdatePricelistItemRequest = CreatePricelistItemRequest;
+
+export interface CreatePricelistRequest {
+  name: string;
+  items?: CreatePricelistItemRequest[];
+}
+
+export interface UpdatePricelistRequest {
+  name?: string;
+  isActive?: boolean;
+}
+
+export interface DeliveryMethod {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  price: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDeliveryMethodRequest {
+  code: string;
+  name: string;
+  price?: string;
+}
+
+export interface UpdateDeliveryMethodRequest {
+  code?: string;
+  name?: string;
+  price?: string;
+  isActive?: boolean;
+}

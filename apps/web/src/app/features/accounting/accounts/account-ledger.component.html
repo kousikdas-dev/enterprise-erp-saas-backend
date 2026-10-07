@@ -1,8 +1,9 @@
 <div class="main-card mb-3 card">
   <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">
+    <div class="card-header-title d-flex align-items-center gap-2">
       Account Ledger
       <span *ngIf="result" class="text-muted">— {{ result.account.code }} · {{ result.account.name }} ({{ result.account.type }})</span>
+      <app-list-actions-menu label="Account Ledger"></app-list-actions-menu>
     </div>
     <a class="btn btn-sm btn-outline-secondary" routerLink="/accounting/accounts">Back to Chart of Accounts</a>
   </div>

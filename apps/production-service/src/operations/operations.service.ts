@@ -7,7 +7,10 @@ import {
 import { Operation } from '../../generated/prisma-client';
 import { ActorContext } from '../auth/actor-context';
 import { PrismaService } from '../prisma/prisma.service';
-import { isUniqueConstraintError } from '../prisma/prisma-errors';
+import {
+  isForeignKeyConstraintError,
+  isUniqueConstraintError,
+} from '../prisma/prisma-errors';
 import { toOperationResponse } from './dto/operation-response';
 import { CreateOperationDto, UpdateOperationDto } from './dto/operation.dto';
 
@@ -101,12 +104,22 @@ export class OperationsService {
     actor: ActorContext,
     id: string,
   ): Promise<{ id: string; removed: boolean }> {
-    // No entity references Operation yet (Manufacturing Routing doesn't
-    // exist). Once Routing is built, add a reference check here — Routing
-    // step records should block deletion the same way BOM blocks deleting a
-    // non-DRAFT version, rather than cascading.
+    // BomOperation references Operation with onDelete: Restrict — once any
+    // BOM lists this operation, deletion is blocked at the DB level; we
+    // translate that into a friendly ConflictException rather than letting
+    // the raw FK error bubble up. (Manufacturing Routing step records will
+    // need the same check once that feature exists.)
     await this.require(actor, id);
-    await this.prisma.operation.delete({ where: { id } });
+    try {
+      await this.prisma.operation.delete({ where: { id } });
+    } catch (error) {
+      if (isForeignKeyConstraintError(error)) {
+        throw new ConflictException(
+          'Operation is referenced by one or more BOMs and cannot be deleted',
+        );
+      }
+      throw error;
+    }
     return { id, removed: true };
   }
 

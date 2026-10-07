@@ -1,7 +1,16 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Opening stock</div>
-    <div class="d-flex flex-wrap gap-2">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-primary" (click)="openCreate()" [disabled]="saving">
+        New
+      </button>
+      <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+        Opening stock
+        <app-list-actions-menu label="Opening stock"></app-list-actions-menu>
+      </div>
+    </div>
+
+    <div class="flex-grow-1 d-flex flex-wrap justify-content-center gap-2">
       <select class="form-select form-select-sm" style="min-width: 140px;" [(ngModel)]="filterStatus" (ngModelChange)="load()">
         <option value="">All statuses</option>
         <option value="DRAFT">Draft</option>
@@ -16,11 +25,12 @@
         <option value="">All warehouses</option>
         <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
       </select>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="items"></app-list-paginator>
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
-      </button>
-      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-primary" (click)="openCreate()" [disabled]="saving">
-        New Opening Stock
       </button>
     </div>
   </div>
@@ -46,7 +56,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let row of items">
+            <tr *ngFor="let row of pager.pageItems">
               <td>{{ row.documentNumber }}</td>
               <td><span class="badge" [ngClass]="statusBadgeClass(row.status)">{{ row.status }}</span></td>
               <td>{{ row.effectiveDate | date: 'mediumDate' }}</td>

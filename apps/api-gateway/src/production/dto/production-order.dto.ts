@@ -1,12 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsEnum,
+  IsInt,
   IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
+  ValidateNested,
 } from 'class-validator';
 
 export enum ProductionOrderPriorityDto {
@@ -14,6 +18,26 @@ export enum ProductionOrderPriorityDto {
   NORMAL = 'NORMAL',
   HIGH = 'HIGH',
   URGENT = 'URGENT',
+}
+
+export class CreateProductionOrderItemDto {
+  @ApiProperty({ format: 'uuid', description: 'Inventory-service Product id.' })
+  @IsUUID()
+  componentProductId!: string;
+
+  @ApiProperty({ example: '1.050000' })
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  quantity!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  unitOfMeasureId!: string;
+
+  @ApiProperty({ example: 1 })
+  @IsInt()
+  @Min(1)
+  sequence!: number;
 }
 
 export class CreateProductionOrderDto {
@@ -63,6 +87,17 @@ export class CreateProductionOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({
+    type: [CreateProductionOrderItemDto],
+    description:
+      'Components for this order. Omit to default from the selected BOM (scaled to plannedQuantity); pass an array (possibly empty) to set the list explicitly.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductionOrderItemDto)
+  items?: CreateProductionOrderItemDto[];
 }
 
 export class UpdateProductionOrderDto {
@@ -117,6 +152,46 @@ export class UpdateProductionOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({
+    type: [CreateProductionOrderItemDto],
+    description:
+      'Replaces the full components list for this order (DRAFT only). Omit to leave components unchanged.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductionOrderItemDto)
+  items?: CreateProductionOrderItemDto[];
+}
+
+export class ProductionOrderItemDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  componentProductId!: string;
+
+  @ApiProperty()
+  componentProductSku!: string;
+
+  @ApiProperty()
+  componentProductName!: string;
+
+  @ApiProperty()
+  quantity!: string;
+
+  @ApiProperty()
+  unitOfMeasureId!: string;
+
+  @ApiProperty()
+  uomCode!: string;
+
+  @ApiProperty()
+  uomName!: string;
+
+  @ApiProperty()
+  sequence!: number;
 }
 
 export class ProductionOrderDto {
@@ -182,6 +257,9 @@ export class ProductionOrderDto {
 
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
+
+  @ApiProperty({ type: [ProductionOrderItemDto] })
+  items!: ProductionOrderItemDto[];
 }
 
 export class ProductionOrderListDto {

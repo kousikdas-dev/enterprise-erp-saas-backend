@@ -1,0 +1,22 @@
+.settings-section-title {
+  text-transform: uppercase;
+  font-size: .75rem;
+  letter-spacing: .04em;
+  color: var(--bs-secondary-color, #6c757d);
+  border-bottom: 1px solid rgba(0, 0, 0, .08);
+  padding-bottom: .4rem;
+  margin-bottom: 1rem;
+}
+
+.settings-number-input {
+  max-width: 140px;
+}
+
+.settings-link {
+  color: #5aa9ff;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}

@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -32,8 +33,11 @@ export class ProductsController {
   }
 
   @Get()
-  list(@CurrentActor() actor: ActorContext) {
-    return this.products.list(actor);
+  list(
+    @CurrentActor() actor: ActorContext,
+    @Query('templateProductId') templateProductId?: string,
+  ) {
+    return this.products.list(actor, templateProductId);
   }
 
   @Get(':id')

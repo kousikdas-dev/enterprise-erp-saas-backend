@@ -1,7 +1,11 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Stock balances</div>
-    <div class="d-flex flex-wrap gap-2">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Stock balances
+      <app-list-actions-menu label="Stock balances"></app-list-actions-menu>
+    </div>
+
+    <div class="flex-grow-1 d-flex flex-wrap justify-content-center gap-2">
       <select class="form-select form-select-sm" style="min-width: 180px;" [(ngModel)]="filterProductId" (ngModelChange)="load()">
         <option value="">All products</option>
         <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
@@ -10,6 +14,10 @@
         <option value="">All warehouses</option>
         <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
       </select>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="items"></app-list-paginator>
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
       </button>
@@ -45,7 +53,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of items">
+            <tr *ngFor="let item of pager.pageItems">
               <td>{{ productLabel(item.productId) }}</td>
               <td>{{ warehouseLabel(item.warehouseId) }}</td>
               <td class="text-end"><code>{{ item.quantity | qty }}</code></td>

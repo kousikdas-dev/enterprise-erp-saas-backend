@@ -33,6 +33,15 @@ export class CreateBomItemDto {
   sequence!: number;
 }
 
+export class CreateBomOperationDto {
+  @IsUUID()
+  operationId!: string;
+
+  @IsInt()
+  @Min(1)
+  sequence!: number;
+}
+
 export class CreateBomDto {
   @IsUUID()
   parentProductId!: string;
@@ -62,6 +71,16 @@ export class CreateBomDto {
   @ValidateNested({ each: true })
   @Type(() => CreateBomItemDto)
   items!: CreateBomItemDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateBomOperationDto)
+  operations?: CreateBomOperationDto[];
+
+  @IsOptional()
+  @IsUUID()
+  productVariantId?: string;
 }
 
 export class UpdateBomDto {
@@ -93,4 +112,15 @@ export class UpdateBomDto {
   @ValidateNested({ each: true })
   @Type(() => CreateBomItemDto)
   items?: CreateBomItemDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateBomOperationDto)
+  operations?: CreateBomOperationDto[];
+
+  /** Pass a UUID to scope this BOM to one variant, or explicit null to clear back to "all variants"; omit to leave unchanged. class-validator's @IsOptional() already treats null as "skip validators", which is exactly the pass-through-as-null behavior wanted here. */
+  @IsOptional()
+  @IsUUID()
+  productVariantId?: string | null;
 }

@@ -1,11 +1,13 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">BOM</div>
-    <div class="d-flex flex-wrap gap-2">
-      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
-        Create BOM
-      </button>
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <a *ngIf="canCreate" routerLink="/production/boms/new" class="btn btn-sm btn-success">
+      New
+    </a>
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      BOM
+      <app-list-actions-menu label="BOM"></app-list-actions-menu>
     </div>
+    <app-list-paginator #pager [items]="filtered" class="ms-auto"></app-list-paginator>
   </div>
 
   <div class="card-body">
@@ -68,7 +70,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filtered">
+            <tr *ngFor="let item of pager.pageItems">
               <td>{{ item.parentProductName }}</td>
               <td><code>{{ item.parentProductSku }}</code></td>
               <td class="text-end"><code>{{ item.bomQuantity }}</code> {{ item.outputUomCode }}</td>
@@ -80,9 +82,9 @@
               <td>{{ item.effectiveTo ? (item.effectiveTo | slice:0:10) : '—' }}</td>
               <td class="text-center">{{ item.items?.length || 0 }}</td>
               <td class="text-end text-nowrap">
-                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                <a [routerLink]="['/production/boms', item.id]" class="btn btn-sm btn-outline-secondary me-1">
                   View
-                </button>
+                </a>
                 <button
                   *ngIf="canEdit(item)"
                   type="button"

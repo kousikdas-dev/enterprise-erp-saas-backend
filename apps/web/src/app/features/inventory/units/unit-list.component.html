@@ -1,18 +1,28 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Units</div>
-    <div class="d-flex flex-wrap gap-2">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        New
+      </button>
+      <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+        Units
+        <app-list-actions-menu label="Units"></app-list-actions-menu>
+      </div>
+    </div>
+
+    <div class="flex-grow-1 d-flex justify-content-center">
       <input
         type="search"
         class="form-control form-control-sm"
-        style="min-width: 200px;"
+        style="max-width: 460px; width: 100%;"
         placeholder="Filter by code or name…"
         [(ngModel)]="filter" />
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="filtered"></app-list-paginator>
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
-      </button>
-      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
-        Create Unit
       </button>
     </div>
   </div>
@@ -30,14 +40,18 @@
             <tr>
               <th>Code</th>
               <th>Name</th>
+              <th class="text-end">Contains</th>
+              <th>Reference Unit</th>
               <th class="text-center">Status</th>
               <th class="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filtered">
+            <tr *ngFor="let item of pager.pageItems">
               <td><code>{{ item.code }}</code></td>
               <td>{{ item.name }}</td>
+              <td class="text-end">{{ item.conversionFactor ? formatFactor(item.conversionFactor) : '' }}</td>
+              <td>{{ item.referenceUnitCode ?? '' }}</td>
               <td class="text-center">
                 <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
                   {{ item.isActive ? 'Active' : 'Inactive' }}
@@ -80,6 +94,41 @@
         <div class="text-danger small" *ngIf="form.controls.name.touched && form.controls.name.invalid">
           Name is required (max 80 characters).
         </div>
+      </div>
+      <div class="row g-2 mb-3">
+        <div class="col-6">
+          <label class="form-label" for="unitConversionFactor">Quantity</label>
+          <input
+            id="unitConversionFactor"
+            type="number"
+            class="form-control"
+            formControlName="conversionFactor"
+            min="0"
+            step="any"
+            placeholder="1.000000" />
+        </div>
+        <div class="col-6">
+          <label class="form-label" for="unitReferenceUnitId">Reference Unit</label>
+          <select id="unitReferenceUnitId" class="form-select" formControlName="referenceUnitId">
+            <option value="">— None (base unit) —</option>
+            <option *ngFor="let u of referenceUnitOptions" [value]="u.id">{{ u.code }} — {{ u.name }}</option>
+          </select>
+        </div>
+        <div class="form-text">
+          Optional. If this unit converts to another (e.g. "km" contains 1000 of "m"), set both fields together.
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="unitUnspscCategoryId">UNSPSC Category</label>
+        <select
+          id="unitUnspscCategoryId"
+          class="form-select"
+          formControlName="unspscCategoryId"
+          (change)="onUnspscCategoryChange($any($event.target).value)">
+          <option value="">— None —</option>
+          <option *ngFor="let c of unspscCategoryOptions" [value]="c.id">{{ c.code }} — {{ c.name }}</option>
+          <option [value]="searchMoreValue" class="fst-italic">Search more…</option>
+        </select>
       </div>
       <div class="form-check" *ngIf="editing">
         <input class="form-check-input" type="checkbox" id="unitActive" formControlName="isActive" />

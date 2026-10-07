@@ -1,23 +1,33 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Categories</div>
-    <div class="d-flex flex-wrap gap-2">
-      <input
-        type="search"
-        class="form-control form-control-sm"
-        style="min-width: 200px;"
-        placeholder="Filter by name…"
-        [ngModel]="filter()"
-        (ngModelChange)="filter.set($event)" />
-      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading()">
-        Refresh
-      </button>
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="d-flex align-items-center gap-2">
       <button
         *ngIf="canCreate"
         type="button"
         class="btn btn-sm btn-success"
         (click)="openCreate()">
-        Create Category
+        New
+      </button>
+      <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+        Categories
+        <app-list-actions-menu label="Categories"></app-list-actions-menu>
+      </div>
+    </div>
+
+    <div class="flex-grow-1 d-flex justify-content-center">
+      <input
+        type="search"
+        class="form-control form-control-sm"
+        style="max-width: 460px; width: 100%;"
+        placeholder="Filter by name…"
+        [ngModel]="filter()"
+        (ngModelChange)="filter.set($event)" />
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="filtered()"></app-list-paginator>
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading()">
+        Refresh
       </button>
     </div>
   </div>
@@ -40,7 +50,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filtered()">
+            <tr *ngFor="let item of pager.pageItems">
               <td>
                 <div class="widget-heading">{{ item.name }}</div>
               </td>

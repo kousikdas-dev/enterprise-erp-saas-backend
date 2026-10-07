@@ -1,0 +1,53 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Inventory Overview
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+      Refresh
+    </button>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="false"
+      (retry)="load()">
+      <div class="row g-3">
+        @if (canReadProducts) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/inventory/products" class="overview-stat">
+              <div class="overview-stat-value">{{ activeProductsCount }}</div>
+              <div class="overview-stat-label">Active Products</div>
+            </a>
+          </div>
+        }
+        @if (canReadWarehouses) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/inventory/warehouses" class="overview-stat">
+              <div class="overview-stat-value">{{ warehousesCount }}</div>
+              <div class="overview-stat-label">Warehouses</div>
+            </a>
+          </div>
+        }
+        @if (canReadCategories) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/inventory/categories" class="overview-stat">
+              <div class="overview-stat-value">{{ categoriesCount }}</div>
+              <div class="overview-stat-label">Categories</div>
+            </a>
+          </div>
+        }
+        @if (canReadOpeningStock) {
+          <div class="col-6 col-md-3">
+            <a routerLink="/inventory/opening-stock" class="overview-stat">
+              <div class="overview-stat-value">{{ draftOpeningStockCount }}</div>
+              <div class="overview-stat-label">Draft Opening Stock</div>
+            </a>
+          </div>
+        }
+      </div>
+    </app-list-state>
+  </div>
+</div>

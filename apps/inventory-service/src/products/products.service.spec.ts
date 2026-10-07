@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, ProductType } from '../../generated/prisma-client';
 import { IdentityAuditClient } from '../audit/identity-audit.client';
 import { ProductsService } from './products.service';
@@ -27,11 +31,19 @@ describe('ProductsService', () => {
       trackInventory: true,
       barcode: null,
       note: null,
+      templateProductId: null,
+      attributeValues: [],
       createdAt: new Date('2026-01-01'),
       updatedAt: new Date('2026-01-02'),
       ...overrides,
     };
   }
+
+  const PRODUCT_INCLUDE = {
+    attributeValues: {
+      include: { attributeValue: { include: { attribute: true } } },
+    },
+  };
 
   function createService() {
     const prisma = {
@@ -41,9 +53,14 @@ describe('ProductsService', () => {
         findFirst: jest.fn(),
         update: jest.fn(),
       },
+      productAttributeValue: { deleteMany: jest.fn() },
+      attributeValue: { findMany: jest.fn().mockResolvedValue([]) },
       category: { findFirst: jest.fn() },
       unitOfMeasure: { findFirst: jest.fn() },
     };
+    (prisma as unknown as { $transaction: jest.Mock }).$transaction = jest.fn(
+      (fn: (tx: typeof prisma) => unknown) => fn(prisma),
+    );
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
     const service = new ProductsService(
       prisma as never,
@@ -108,7 +125,20 @@ describe('ProductsService', () => {
     expect(prisma.product.findMany).toHaveBeenCalledWith({
       where: { tenantId: actor.tenantId },
       orderBy: { sku: 'asc' },
+      include: PRODUCT_INCLUDE,
     });
+  });
+
+  it('filters list by templateProductId when provided', async () => {
+    const { service, prisma } = createService();
+    prisma.product.findMany.mockResolvedValue([]);
+    const templateId = '66666666-aaaa-4aaa-8aaa-666666666666';
+    await service.list(actor, templateId);
+    expect(prisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: actor.tenantId, templateProductId: templateId },
+      }),
+    );
   });
 
   it('gets a product in the actor tenant', async () => {
@@ -152,12 +182,14 @@ describe('ProductsService', () => {
         costPrice: '10',
       });
 
-      expect(prisma.product.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          productType: undefined,
-          trackInventory: undefined,
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productType: undefined,
+            trackInventory: undefined,
+          }),
         }),
-      });
+      );
       expect(result.productType).toBe('GOODS');
       expect(result.trackInventory).toBe(true);
     });
@@ -180,12 +212,14 @@ describe('ProductsService', () => {
         trackInventory: true,
       });
 
-      expect(prisma.product.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          productType: 'GOODS',
-          trackInventory: true,
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            productType: 'GOODS',
+            trackInventory: true,
+          }),
         }),
-      });
+      );
       expect(result.productType).toBe('GOODS');
       expect(result.trackInventory).toBe(true);
     });
@@ -205,9 +239,11 @@ describe('ProductsService', () => {
         productType: ProductType.SERVICE,
       });
 
-      expect(prisma.product.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ productType: 'SERVICE' }),
-      });
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ productType: 'SERVICE' }),
+        }),
+      );
       expect(result.productType).toBe('SERVICE');
     });
 
@@ -226,9 +262,11 @@ describe('ProductsService', () => {
         productType: ProductType.COMBO,
       });
 
-      expect(prisma.product.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ productType: 'COMBO' }),
-      });
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ productType: 'COMBO' }),
+        }),
+      );
       expect(result.productType).toBe('COMBO');
     });
 
@@ -250,12 +288,14 @@ describe('ProductsService', () => {
         note: 'Fragile, handle with care',
       });
 
-      expect(prisma.product.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          barcode: '8901234567890',
-          note: 'Fragile, handle with care',
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            barcode: '8901234567890',
+            note: 'Fragile, handle with care',
+          }),
         }),
-      });
+      );
       expect(result.barcode).toBe('8901234567890');
       expect(result.note).toBe('Fragile, handle with care');
     });
@@ -272,6 +312,7 @@ describe('ProductsService', () => {
       expect(prisma.product.update).toHaveBeenCalledWith({
         where: { id: row().id },
         data: { productType: 'SERVICE' },
+        include: PRODUCT_INCLUDE,
       });
       expect(result.productType).toBe('SERVICE');
     });
@@ -288,6 +329,7 @@ describe('ProductsService', () => {
       expect(prisma.product.update).toHaveBeenCalledWith({
         where: { id: row().id },
         data: { trackInventory: false },
+        include: PRODUCT_INCLUDE,
       });
       expect(result.trackInventory).toBe(false);
     });
@@ -307,6 +349,7 @@ describe('ProductsService', () => {
       expect(prisma.product.update).toHaveBeenCalledWith({
         where: { id: row().id },
         data: { barcode: '111222333', note: 'Updated note' },
+        include: PRODUCT_INCLUDE,
       });
       expect(result.barcode).toBe('111222333');
       expect(result.note).toBe('Updated note');
@@ -335,7 +378,165 @@ describe('ProductsService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.product.findFirst).toHaveBeenCalledWith({
         where: { id: row().id, tenantId: actor.tenantId },
+        include: PRODUCT_INCLUDE,
       });
+    });
+  });
+
+  describe('product variants', () => {
+    const templateId = '77777777-aaaa-4aaa-8aaa-777777777777';
+    const attributeValueId = '88888888-aaaa-4aaa-8aaa-888888888888';
+
+    it('creates a variant with a valid top-level templateProductId', async () => {
+      const { service, prisma } = createService();
+      mockRefs(prisma);
+      prisma.product.findFirst.mockResolvedValue(
+        row({ id: templateId, templateProductId: null }),
+      );
+      prisma.product.create.mockResolvedValue(row({ templateProductId: templateId }));
+
+      const result = await service.create(actor, {
+        sku: 'sku-variant',
+        name: 'Widget Red',
+        categoryId,
+        unitOfMeasureId: unitId,
+        sellingPrice: '19.99',
+        costPrice: '10',
+        templateProductId: templateId,
+      });
+
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ templateProductId: templateId }),
+        }),
+      );
+      expect(result.templateProductId).toBe(templateId);
+    });
+
+    it('rejects a templateProductId that does not exist for this tenant', async () => {
+      const { service, prisma } = createService();
+      mockRefs(prisma);
+      prisma.product.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create(actor, {
+          sku: 'sku-variant',
+          name: 'Widget Red',
+          categoryId,
+          unitOfMeasureId: unitId,
+          sellingPrice: '19.99',
+          costPrice: '10',
+          templateProductId: templateId,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects a templateProductId that is itself already a variant (no nested variants)', async () => {
+      const { service, prisma } = createService();
+      mockRefs(prisma);
+      prisma.product.findFirst.mockResolvedValue(
+        row({ id: templateId, templateProductId: '99999999-aaaa-4aaa-8aaa-999999999999' }),
+      );
+
+      await expect(
+        service.create(actor, {
+          sku: 'sku-variant',
+          name: 'Widget Red',
+          categoryId,
+          unitOfMeasureId: unitId,
+          sellingPrice: '19.99',
+          costPrice: '10',
+          templateProductId: templateId,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects a product being set as a variant of itself', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(row());
+
+      await expect(
+        service.update(actor, row().id, { templateProductId: row().id }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('creates a product tagged with attribute values', async () => {
+      const { service, prisma } = createService();
+      mockRefs(prisma);
+      prisma.attributeValue.findMany.mockResolvedValue([{ id: attributeValueId }]);
+      prisma.product.create.mockResolvedValue(
+        row({
+          attributeValues: [
+            {
+              attributeValue: {
+                id: attributeValueId,
+                attributeId: 'attr-1',
+                value: 'Red',
+                attribute: { name: 'Color' },
+              },
+            },
+          ],
+        }),
+      );
+
+      const result = await service.create(actor, {
+        sku: 'sku-variant',
+        name: 'Widget Red',
+        categoryId,
+        unitOfMeasureId: unitId,
+        sellingPrice: '19.99',
+        costPrice: '10',
+        attributeValueIds: [attributeValueId],
+      });
+
+      expect(prisma.product.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attributeValues: { create: [{ tenantId: actor.tenantId, attributeValueId }] },
+          }),
+        }),
+      );
+      expect(result.attributeValues).toEqual([
+        { id: attributeValueId, attributeId: 'attr-1', attributeName: 'Color', value: 'Red' },
+      ]);
+    });
+
+    it('rejects an attributeValueId that does not exist for this tenant', async () => {
+      const { service, prisma } = createService();
+      mockRefs(prisma);
+      prisma.attributeValue.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.create(actor, {
+          sku: 'sku-variant',
+          name: 'Widget Red',
+          categoryId,
+          unitOfMeasureId: unitId,
+          sellingPrice: '19.99',
+          costPrice: '10',
+          attributeValueIds: [attributeValueId],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('replaces attribute values on update inside a transaction', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(row());
+      prisma.attributeValue.findMany.mockResolvedValue([{ id: attributeValueId }]);
+      prisma.product.update.mockResolvedValue(row());
+
+      await service.update(actor, row().id, { attributeValueIds: [attributeValueId] });
+
+      expect(prisma.productAttributeValue.deleteMany).toHaveBeenCalledWith({
+        where: { productId: row().id },
+      });
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attributeValues: { create: [{ tenantId: actor.tenantId, attributeValueId }] },
+          }),
+        }),
+      );
     });
   });
 });

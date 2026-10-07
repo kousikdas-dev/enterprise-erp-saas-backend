@@ -13,9 +13,13 @@ export interface LoginResponse {
 export interface AuthMeResponse {
   userId: string;
   tenantId: string;
+  tenantName?: string;
+  userName?: string;
 }
 
 export interface CurrentUser {
   userId: string;
   tenantId: string;
+  tenantName?: string;
+  userName?: string;
 }

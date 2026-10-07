@@ -1,0 +1,111 @@
+.apps-home {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 120px);
+  padding: 1.5rem 0.5rem;
+  margin: -1.5rem -1.5rem 0;
+  position: relative;
+  overflow: hidden;
+  background-color: #150c1c;
+  background-image:
+    radial-gradient(circle at 18% 75%, rgba(226, 42, 90, 0.3), transparent 45%),
+    radial-gradient(circle at 82% 15%, rgba(94, 58, 214, 0.3), transparent 50%),
+    linear-gradient(135deg, #150c1c 0%, #2b1127 30%, #30183d 55%, #1e1034 80%, #140b21 100%);
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+  }
+}
+
+.apps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 2rem 2.5rem;
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 575px) {
+  .apps-home {
+    padding: 1rem 0.25rem;
+  }
+
+  .apps-grid {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 1.5rem 1rem;
+  }
+
+  .app-tile__icon-wrapper {
+    width: 58px;
+    height: 58px;
+    border-radius: 14px;
+
+    i {
+      font-size: 1.6rem;
+    }
+  }
+
+  .app-tile__label {
+    font-size: 0.75rem;
+  }
+}
+
+.app-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  padding: 0.5rem;
+  border-radius: 12px;
+  transition: background-color 0.15s ease;
+
+  &:hover,
+  &--active {
+    background-color: rgba(255, 255, 255, 0.08);
+    text-decoration: none;
+  }
+
+  &__icon-wrapper {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+    i {
+      font-size: 2.1rem;
+      color: #fff;
+
+      &::before {
+        margin: 0;
+      }
+    }
+  }
+
+  &:hover &__icon-wrapper {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+  }
+
+  &__label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.92);
+  }
+}

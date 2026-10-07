@@ -1,8 +1,9 @@
 <div class="main-card mb-3 card">
   <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">
+    <div class="card-header-title d-flex align-items-center gap-2">
       Profit &amp; Loss
       <span *ngIf="result" class="text-muted">— {{ result.fromDate }} to {{ result.toDate }}</span>
+      <app-list-actions-menu label="Profit &amp; Loss"></app-list-actions-menu>
     </div>
   </div>
 

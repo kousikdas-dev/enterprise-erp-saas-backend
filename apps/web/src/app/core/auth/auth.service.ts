@@ -79,6 +79,8 @@ export class AuthService {
       map((me) => ({
         userId: me.userId,
         tenantId: me.tenantId,
+        tenantName: me.tenantName,
+        userName: me.userName,
       })),
       tap((user) => this.currentUser.setUser(user)),
     );

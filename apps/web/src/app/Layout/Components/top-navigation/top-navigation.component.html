@@ -1,32 +1,52 @@
-<nav class="app-top-navigation">
-  <ul class="top-nav-primary">
-    @for (item of items; track item.id) {
-      <li class="top-nav-item"
-          [class.active]="activeModule === item.id"
-          [class.open]="openModule === item.id">
-        @if (item.route) {
-          <a [routerLink]="item.route" routerLinkActive="active" class="top-nav-link">
-            {{ item.label }}
-          </a>
-        } @else {
-          <a href="javascript:void(0);" class="top-nav-link" (click)="onItemClick(item)">
-            {{ item.label }}
-            <i class="top-nav-arrow"></i>
-          </a>
-        }
+@if (openItem; as item) {
+  <ul class="top-nav-secondary">
+    @for (child of item.children; track child.route) {
+      <li class="top-nav-subitem">
+        <a [routerLink]="child.route" routerLinkActive="active" class="top-nav-sublink">
+          {{ child.label }}
+        </a>
+      </li>
+    }
+    @for (group of item.dropdownGroups; track group.label) {
+      <li class="top-nav-subitem top-nav-config" ngbDropdown placement="bottom-start" container="body">
+        <button type="button" class="top-nav-sublink top-nav-config-toggle" ngbDropdownToggle>
+          {{ group.label }}
+        </button>
+        <div ngbDropdownMenu class="dropdown-menu-sm">
+          @for (groupItem of group.items; track groupItem.label) {
+            @if (groupItem.route) {
+              <a class="dropdown-item" [routerLink]="groupItem.route" routerLinkActive="active">
+                {{ groupItem.label }}
+              </a>
+            } @else {
+              <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+                {{ groupItem.label }}
+              </button>
+            }
+          }
+        </div>
+      </li>
+    }
+    @if (item.configItems; as configItems) {
+      <li class="top-nav-subitem top-nav-config" ngbDropdown placement="bottom-start" container="body">
+        <button type="button" class="top-nav-sublink top-nav-config-toggle" ngbDropdownToggle>
+          <i class="pe-7s-config me-1"></i>
+          Configuration
+        </button>
+        <div ngbDropdownMenu class="dropdown-menu-sm">
+          @for (configItem of configItems; track configItem.label) {
+            @if (configItem.route) {
+              <a class="dropdown-item" [routerLink]="configItem.route" routerLinkActive="active">
+                {{ configItem.label }}
+              </a>
+            } @else {
+              <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+                {{ configItem.label }}
+              </button>
+            }
+          }
+        </div>
       </li>
     }
   </ul>
-
-  @if (openItem?.children; as children) {
-    <ul class="top-nav-secondary">
-      @for (child of children; track child.route) {
-        <li class="top-nav-subitem">
-          <a [routerLink]="child.route" routerLinkActive="active" class="top-nav-sublink">
-            {{ child.label }}
-          </a>
-        </li>
-      }
-    </ul>
-  }
-</nav>
+}

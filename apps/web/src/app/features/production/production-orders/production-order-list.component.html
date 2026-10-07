@@ -1,11 +1,13 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Production Orders</div>
-    <div class="d-flex flex-wrap gap-2">
-      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
-        + New Production Order
-      </button>
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <a *ngIf="canCreate" routerLink="/production/production-orders/new" class="btn btn-sm btn-success">
+      New
+    </a>
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Production Orders
+      <app-list-actions-menu label="Production Orders"></app-list-actions-menu>
     </div>
+    <app-list-paginator #pager [items]="items" class="ms-auto"></app-list-paginator>
   </div>
 
   <div class="card-body">
@@ -68,9 +70,9 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of items">
+            <tr *ngFor="let item of pager.pageItems">
               <td>
-                <a href="javascript:void(0)" (click)="openDetail(item)"><code>{{ item.orderNumber }}</code></a>
+                <a [routerLink]="['/production/production-orders', item.id]"><code>{{ item.orderNumber }}</code></a>
               </td>
               <td>{{ item.productName }}</td>
               <td class="text-end"><code>{{ item.plannedQuantity }}</code></td>
@@ -80,9 +82,9 @@
                 <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
               </td>
               <td class="text-end text-nowrap">
-                <button type="button" class="btn btn-sm btn-outline-secondary me-1" (click)="openDetail(item)">
+                <a [routerLink]="['/production/production-orders', item.id]" class="btn btn-sm btn-outline-secondary me-1">
                   View
-                </button>
+                </a>
                 <button *ngIf="canEdit(item)" type="button" class="btn btn-sm btn-outline-primary me-1" (click)="openEdit(item)">
                   Edit
                 </button>

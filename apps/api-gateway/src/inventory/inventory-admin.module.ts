@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
+import { AttributesController } from './attributes.controller';
 import { CategoriesController } from './categories.controller';
 import { InventoryForwardService } from './inventory-forward.service';
 import { OpeningStockController } from './opening-stock.controller';
@@ -9,6 +10,7 @@ import { ProductUnitsController } from './product-units.controller';
 import { ProductsController } from './products.controller';
 import { StockController } from './stock.controller';
 import { UnitsController } from './units.controller';
+import { UnspscCategoriesController } from './unspsc-categories.controller';
 import { WarehousesController } from './warehouses.controller';
 
 @Module({
@@ -21,8 +23,10 @@ import { WarehousesController } from './warehouses.controller';
     RbacModule,
   ],
   controllers: [
+    AttributesController,
     CategoriesController,
     UnitsController,
+    UnspscCategoriesController,
     WarehousesController,
     ProductsController,
     ProductUnitsController,

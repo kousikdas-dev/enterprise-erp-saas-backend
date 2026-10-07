@@ -2,18 +2,7 @@ import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
-
-interface TopNavChild {
-  label: string;
-  route: string;
-}
-
-interface TopNavItem {
-  id: string;
-  label: string;
-  route?: string;
-  children?: TopNavChild[];
-}
+import { NAV_ITEMS, TopNavItem } from '../../nav-items';
 
 @Component({
   selector: 'app-top-navigation',
@@ -26,69 +15,7 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
   public activeModule: string | undefined;
   public openModule: string | undefined;
 
-  public readonly items: TopNavItem[] = [
-    { id: 'dashboardMenu', label: 'Dashboard', route: '/dashboard' },
-    {
-      id: 'salesMenu', label: 'Sales', children: [
-        { label: 'Customers', route: '/sales/customers' },
-        { label: 'Quotations', route: '/sales/quotations' },
-        { label: 'Proforma Invoices', route: '/sales/proforma-invoices' },
-        { label: 'Sales Orders', route: '/sales/sales-orders' },
-        { label: 'Shipments', route: '/sales/shipments' },
-        { label: 'Sales Invoices', route: '/sales/sales-invoices' },
-        { label: 'Sales Returns', route: '/sales/sales-returns' },
-        { label: 'Accounts Receivable', route: '/sales/accounts-receivable' },
-      ]
-    },
-    {
-      id: 'purchaseMenu', label: 'Purchase', children: [
-        { label: 'Suppliers', route: '/purchase/suppliers' },
-        { label: 'Purchase Orders', route: '/purchase/purchase-orders' },
-        { label: 'Goods Receipts', route: '/purchase/goods-receipts' },
-        { label: 'Purchase Invoices', route: '/purchase/purchase-invoices' },
-        { label: 'Purchase Returns', route: '/purchase/purchase-returns' },
-        { label: 'Accounts Payable', route: '/purchase/accounts-payable' },
-      ]
-    },
-    {
-      id: 'inventoryMenu', label: 'Inventory', children: [
-        { label: 'Products', route: '/inventory/products' },
-        { label: 'Categories', route: '/inventory/categories' },
-        { label: 'Units', route: '/inventory/units' },
-        { label: 'Warehouses', route: '/inventory/warehouses' },
-        { label: 'Stock', route: '/inventory/stock' },
-        { label: 'Stock Movements', route: '/inventory/stock-movements' },
-        { label: 'Opening Stock', route: '/inventory/opening-stock' },
-      ]
-    },
-    {
-      id: 'productionMenu', label: 'Production', children: [
-        { label: 'BOM', route: '/production/boms' },
-        { label: 'Operations', route: '/production/operations' },
-        { label: 'Work Centres', route: '/production/work-centres' },
-        { label: 'Production Orders', route: '/production/production-orders' },
-      ]
-    },
-    {
-      id: 'accountingMenu', label: 'Accounting', children: [
-        { label: 'Chart of Accounts', route: '/accounting/accounts' },
-        { label: 'Journal Entries', route: '/accounting/journal-entries' },
-        { label: 'Tax Master', route: '/accounting/tax-codes' },
-        { label: 'Account Mappings', route: '/accounting/account-mappings' },
-        { label: 'Trial Balance', route: '/accounting/reports/trial-balance' },
-        { label: 'Profit & Loss', route: '/accounting/reports/profit-loss' },
-        { label: 'Balance Sheet', route: '/accounting/reports/balance-sheet' },
-      ]
-    },
-    {
-      id: 'adminMenu', label: 'Administration', children: [
-        { label: 'Users', route: '/admin/users' },
-        { label: 'Roles', route: '/admin/roles' },
-        { label: 'Permissions', route: '/admin/permissions' },
-      ]
-    },
-    { id: 'auditMenu', label: 'Audit Logs', route: '/audit' },
-  ];
+  public readonly items: TopNavItem[] = NAV_ITEMS;
 
   private routeSub?: Subscription;
 
@@ -112,17 +39,13 @@ export class TopNavigationComponent implements OnInit, OnDestroy {
     return this.items.find((item) => item.id === this.openModule);
   }
 
-  onItemClick(item: TopNavItem): void {
-    if (!item.children) {
-      return;
-    }
-    this.openModule = this.openModule === item.id ? undefined : item.id;
-  }
-
   private syncFromRoute(): void {
     this.activeModule = this.findExtraParameter(this.activatedRoute);
     const activeItem = this.items.find((item) => item.id === this.activeModule);
-    this.openModule = activeItem?.children ? this.activeModule : undefined;
+    this.openModule =
+      activeItem?.children || activeItem?.dropdownGroups || activeItem?.configItems
+        ? this.activeModule
+        : undefined;
   }
 
   private findExtraParameter(route: ActivatedRoute): string | undefined {

@@ -1,92 +1,44 @@
-// Sits directly below the fixed app-header (header height is 60px, see
-// $app-header-height in assets/layout/_layout-variables.scss).
-.app-top-navigation {
-  position: relative;
-  z-index: 9;
-  margin-top: 60px;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
-}
-
-.top-nav-primary {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.top-nav-item {
-  position: relative;
-}
-
-.top-nav-link {
+// Renders inline inside the app-header row (between the left controls and
+// the right-side icons), matching Odoo's single-row app bar instead of a
+// separate nav strip below the header.
+:host {
   display: flex;
   align-items: center;
-  gap: .4rem;
-  padding: .9rem 1.25rem;
-  color: #495057;
-  text-decoration: none;
-  font-weight: 500;
-  white-space: nowrap;
-  transition: color .15s ease, background-color .15s ease;
-
-  &:hover {
-    color: var(--bs-primary, #1b55e2);
-    background-color: rgba(27, 85, 226, .06);
-  }
-
-  &.active {
-    color: var(--bs-primary, #1b55e2);
-  }
-}
-
-.top-nav-item.active > .top-nav-link {
-  color: var(--bs-primary, #1b55e2);
-}
-
-.top-nav-item.open > .top-nav-link {
-  background-color: rgba(27, 85, 226, .06);
-}
-
-.top-nav-arrow {
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid currentColor;
-  transition: transform .2s ease;
-}
-
-.top-nav-item.open .top-nav-arrow {
-  transform: rotate(180deg);
+  height: 100%;
+  margin-left: 1.25rem;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .top-nav-secondary {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-wrap: nowrap;
   align-items: center;
   list-style: none;
   margin: 0;
-  padding: .5rem 0;
-  background-color: #f8f9fa;
-  border-top: 1px solid rgba(0, 0, 0, .06);
+  padding: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .top-nav-subitem {
-  margin: 0 .25rem;
+  margin: 0;
 }
 
 .top-nav-sublink {
   display: block;
-  padding: .4rem .9rem;
+  padding: .5rem .6rem;
   border-radius: 4px;
-  color: #6c757d;
+  color: #495057;
   text-decoration: none;
-  font-size: .875rem;
+  font-size: 1rem;
+  font-weight: 500;
   white-space: nowrap;
   transition: color .15s ease, background-color .15s ease;
 
@@ -102,30 +54,45 @@
   }
 }
 
-// Responsive: below ~992px collapse each row into a horizontally
-// scrollable strip instead of wrapping, so the nav stays usable on
-// tablets/phones without hiding any menu entries behind a toggle.
-@media (max-width: 991px) {
-  .top-nav-primary,
-  .top-nav-secondary {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
+.top-nav-config {
+  flex: 0 0 auto;
+  margin-left: .25rem;
+  padding-left: .5rem;
+  border-left: 1px solid rgba(0, 0, 0, .08);
+}
 
-  .top-nav-link {
-    padding: .75rem 1rem;
-  }
+.top-nav-config-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
 
-  .top-nav-sublink {
-    padding: .35rem .75rem;
+  &::after {
+    content: '';
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-left: .4rem;
+    border-top: .35em solid;
+    border-right: .35em solid transparent;
+    border-left: .35em solid transparent;
+    opacity: .65;
   }
 }
 
-@media (max-width: 575px) {
-  .top-nav-link {
-    padding: .65rem .75rem;
+@media (max-width: 767px) {
+  :host {
+    margin-left: .5rem;
+  }
+
+  .top-nav-sublink {
+    padding: .4rem .75rem;
     font-size: .9rem;
+  }
+
+  .top-nav-config {
+    margin-left: 0;
+    padding-left: .25rem;
   }
 }

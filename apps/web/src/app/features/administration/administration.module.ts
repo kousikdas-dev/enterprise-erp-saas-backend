@@ -11,17 +11,17 @@ const routes: Routes = [
   {
     path: 'users',
     component: UserListComponent,
-    data: { extraParameter: 'adminMenu' },
+    data: { extraParameter: 'adminMenu', darkTheme: true },
   },
   {
     path: 'roles',
     component: RoleListComponent,
-    data: { extraParameter: 'adminMenu' },
+    data: { extraParameter: 'adminMenu', darkTheme: true },
   },
   {
     path: 'permissions',
     component: PermissionListComponent,
-    data: { extraParameter: 'adminMenu' },
+    data: { extraParameter: 'adminMenu', darkTheme: true },
   },
 ];
 

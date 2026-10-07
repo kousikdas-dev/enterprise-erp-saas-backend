@@ -48,10 +48,20 @@ model Bom {
   effectiveFrom         DateTime?
   effectiveTo           DateTime?
   notes                 String?
+  // Optionally scopes this BOM to exactly one variant of parentProductId
+  // (inventory-service's Product.templateProductId must equal
+  // parentProductId) — null means the BOM applies to all variants of the
+  // product (or the product has no variants). Logical reference, validated
+  // + snapshotted via InventoryProductClient the same way parentProductId
+  // is, never a cross-service FK.
+  productVariantId   String? @db.Uuid
+  productVariantSku  String?
+  productVariantName String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  items BomItem[]
+  items      BomItem[]
+  operations BomOperation[]
 
   @@unique([tenantId, parentProductId, version])
   @@index([tenantId])
@@ -89,12 +99,14 @@ model BomItem {
 
 // Operation Master: defines WHAT manufacturing work is performed (e.g. CUT,
 // WELD, MILL), independent of any industry or routing. Industry-neutral and
-// user-defined — no operations are hard-coded. Will later be referenced by
-// Manufacturing Routing step records via operationId (no FK yet, since
-// Routing doesn't exist); isActive is deactivation-only (no cascading
-// delete) so historical routing references keep resolving once Routing is
-// built, mirroring the tenant-scoped code+name master pattern already used
-// by inventory-service's UnitOfMeasure/Category.
+// user-defined — no operations are hard-coded. Referenced today by
+// BomOperation (an ordered, sequence-only list of operations required to
+// build a BOM's parent product — see below); will later also be referenced
+// by Manufacturing Routing step records via operationId once Routing adds
+// duration/work-centre assignment. isActive is deactivation-only (no
+// cascading delete) so historical references keep resolving, mirroring the
+// tenant-scoped code+name master pattern already used by
+// inventory-service's UnitOfMeasure/Category.
 model Operation {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @db.Uuid
@@ -105,9 +117,40 @@ model Operation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  bomOperations BomOperation[]
+
   @@unique([tenantId, code])
   @@index([tenantId])
   @@map("operations")
+}
+
+// Links the Operation Master to a BOM: an ordered list of operations
+// required to manufacture the BOM's parent product. Sequence only — no
+// duration or Work Centre assignment yet; that belongs to the future
+// Manufacturing Routing feature (see Operation/WorkCentre comments above),
+// which this table is deliberately kept simple enough to be absorbed into
+// once that exists. operationCode/operationName are snapshotted the same
+// way BomItem snapshots its component product, so a BOM's operation list
+// stays legible even if the Operation master is later renamed.
+model BomOperation {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  bomId         String   @db.Uuid
+  operationId   String   @db.Uuid
+  operationCode String
+  operationName String
+  sequence      Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bom       Bom       @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  operation Operation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, bomId, operationId])
+  @@index([tenantId])
+  @@index([bomId])
+  @@index([operationId])
+  @@map("bom_operations")
 }
 
 // Work Centre Master: defines WHERE manufacturing work is performed (e.g.
@@ -184,10 +227,15 @@ enum ProductionOrderPriority {
 // Warehouse (validated via InventoryWarehouseClient when provided) — no
 // warehouse data is duplicated here.
 //
-// No BomItem/RoutingStep snapshot table is created in this phase: per-order
-// material/operation detail is derived on demand from bomId/bomVersion (and
-// later routingId/routingVersion) rather than copied, avoiding a redundant
-// table before Material Planning/Execution actually need one.
+// RoutingStep snapshot is still not created in this phase (routingId/
+// routingVersion above stay reserved/null). Component detail, however, IS
+// now snapshotted per order via ProductionOrderItem (below): defaulted from
+// the selected BOM's items (scaled to plannedQuantity) when not supplied,
+// but independently editable per order from then on — deliberately
+// deviating from the "derive on demand, don't copy" note that used to cover
+// this field too, because Material Planning/Execution need a per-order
+// material list that can diverge from the master BOM (substitutions, extra
+// consumption) without ever mutating that BOM.
 model ProductionOrder {
   id          String @id @default(uuid()) @db.Uuid
   tenantId    String @db.Uuid
@@ -222,9 +270,42 @@ model ProductionOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  items ProductionOrderItem[]
+
   @@unique([tenantId, orderNumber])
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, productId])
   @@map("production_orders")
+}
+
+// Per-order component list ("Components" tab). componentProductId is a
+// logical reference to an inventory-service Product — validated +
+// snapshotted the same way Bom.parentProductId/BomItem.componentProductId
+// are. Defaults from the selected BOM's items (quantity scaled by
+// plannedQuantity / bom.bomQuantity) when the client omits `items` on
+// create; from then on the client owns the list and may add/remove/edit
+// lines freely, same editable-table UX as BomItem.
+model ProductionOrderItem {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid
+  productionOrderId    String   @db.Uuid
+  componentProductId   String   @db.Uuid
+  componentProductSku  String
+  componentProductName String
+  quantity             Decimal  @db.Decimal(19, 6)
+  unitOfMeasureId      String   @db.Uuid
+  uomCode              String
+  uomName              String
+  sequence             Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productionOrderId, componentProductId])
+  @@index([tenantId])
+  @@index([productionOrderId])
+  @@index([componentProductId])
+  @@map("production_order_items")
 }

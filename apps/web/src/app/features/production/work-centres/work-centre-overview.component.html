@@ -1,0 +1,87 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Work Centers Overview
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+        Refresh
+      </button>
+      <a routerLink="/production/work-centres" class="btn btn-sm btn-primary">Manage Work Centres</a>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="overview-stat">
+          <div class="overview-stat-value">{{ items.length }}</div>
+          <div class="overview-stat-label">Work Centres</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="overview-stat">
+          <div class="overview-stat-value text-success">{{ activeCount }}</div>
+          <div class="overview-stat-label">Active</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="overview-stat">
+          <div class="overview-stat-value text-secondary">{{ inactiveCount }}</div>
+          <div class="overview-stat-label">Inactive</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <a routerLink="/production/production-orders" class="overview-stat overview-stat-link">
+          <div class="overview-stat-value">{{ openProductionOrders }}</div>
+          <div class="overview-stat-label">Open Production Orders</div>
+        </a>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!items.length"
+      emptyMessage="No work centres found."
+      (retry)="load()">
+      <div class="row g-3">
+        @for (item of items; track item.id) {
+          <div class="col-md-6 col-lg-4">
+            <div class="card h-100 work-centre-card">
+              <div class="card-body">
+                <div class="d-flex align-items-start justify-content-between mb-2">
+                  <div>
+                    <span
+                      class="status-dot me-2"
+                      [class.status-dot-active]="item.isActive"
+                      [class.status-dot-inactive]="!item.isActive"
+                      [title]="item.isActive ? 'Active' : 'Inactive'"
+                    ></span>
+                    <span class="fw-semibold">{{ item.name }}</span>
+                  </div>
+                  <span class="badge" [class.bg-success]="item.isActive" [class.bg-secondary]="!item.isActive">
+                    {{ item.isActive ? 'Active' : 'Inactive' }}
+                  </span>
+                </div>
+                <div class="text-muted small mb-3"><code>{{ item.code }}</code></div>
+                <p class="text-muted small mb-3">{{ item.description || 'No description.' }}</p>
+                @if (canToggle(item)) {
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    [class.btn-outline-warning]="item.isActive"
+                    [class.btn-outline-success]="!item.isActive"
+                    [disabled]="busyId === item.id"
+                    (click)="toggle(item)">
+                    {{ busyId === item.id ? 'Working…' : (item.isActive ? 'Deactivate' : 'Activate') }}
+                  </button>
+                }
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    </app-list-state>
+  </div>
+</div>

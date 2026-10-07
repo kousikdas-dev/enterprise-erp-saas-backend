@@ -5,6 +5,22 @@ import {
 } from '../../../generated/prisma-client';
 import { quantityToString } from '../../common/decimal';
 
+type ProductionOrderItemRow = {
+  id: string;
+  tenantId: string;
+  productionOrderId: string;
+  componentProductId: string;
+  componentProductSku: string;
+  componentProductName: string;
+  quantity: Prisma.Decimal;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  sequence: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type ProductionOrderRow = {
   id: string;
   tenantId: string;
@@ -29,7 +45,26 @@ type ProductionOrderRow = {
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;
+  items: ProductionOrderItemRow[];
 };
+
+function toProductionOrderItemResponse(item: ProductionOrderItemRow) {
+  return {
+    id: item.id,
+    tenantId: item.tenantId,
+    productionOrderId: item.productionOrderId,
+    componentProductId: item.componentProductId,
+    componentProductSku: item.componentProductSku,
+    componentProductName: item.componentProductName,
+    quantity: quantityToString(item.quantity),
+    unitOfMeasureId: item.unitOfMeasureId,
+    uomCode: item.uomCode,
+    uomName: item.uomName,
+    sequence: item.sequence,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
 
 export function toProductionOrderResponse(row: ProductionOrderRow) {
   return {
@@ -56,5 +91,9 @@ export function toProductionOrderResponse(row: ProductionOrderRow) {
     notes: row.notes,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    items: row.items
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)
+      .map(toProductionOrderItemResponse),
   };
 }

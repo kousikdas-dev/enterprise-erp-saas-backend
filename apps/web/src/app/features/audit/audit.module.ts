@@ -14,6 +14,7 @@ const routes: Routes = [
       phaseMessage:
         'Coming later — no public Gateway audit-read API exists yet. This page is a UI placeholder only.',
       extraParameter: 'auditMenu',
+      darkTheme: true,
     },
   },
 ];

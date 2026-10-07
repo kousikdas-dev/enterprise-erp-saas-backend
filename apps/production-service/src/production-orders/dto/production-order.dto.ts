@@ -1,13 +1,33 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsEnum,
+  IsInt,
   IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
+  ValidateNested,
 } from 'class-validator';
 import { ProductionOrderPriority } from '../../../generated/prisma-client';
+
+export class CreateProductionOrderItemDto {
+  @IsUUID()
+  componentProductId!: string;
+
+  @Transform(({ value }: { value: unknown }) => String(value))
+  @IsString()
+  quantity!: string;
+
+  @IsUUID()
+  unitOfMeasureId!: string;
+
+  @IsInt()
+  @Min(1)
+  sequence!: number;
+}
 
 export class CreateProductionOrderDto {
   @IsUUID()
@@ -46,6 +66,12 @@ export class CreateProductionOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductionOrderItemDto)
+  items?: CreateProductionOrderItemDto[];
 }
 
 export class UpdateProductionOrderDto {
@@ -90,4 +116,10 @@ export class UpdateProductionOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductionOrderItemDto)
+  items?: CreateProductionOrderItemDto[];
 }

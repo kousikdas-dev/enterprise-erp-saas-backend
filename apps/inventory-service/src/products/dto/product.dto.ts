@@ -1,4 +1,6 @@
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
@@ -57,6 +59,16 @@ export class CreateProductDto {
   @IsString()
   @MaxLength(1000)
   note?: string;
+
+  @IsOptional()
+  @IsUUID()
+  templateProductId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  attributeValueIds?: string[];
 }
 
 export class UpdateProductDto {
@@ -120,4 +132,14 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(1000)
   note?: string;
+
+  @IsOptional()
+  @IsUUID()
+  templateProductId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  attributeValueIds?: string[];
 }

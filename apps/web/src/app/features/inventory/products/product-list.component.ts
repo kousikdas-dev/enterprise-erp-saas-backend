@@ -15,8 +15,10 @@ import { PermissionService } from '../../../core/permissions/permission.service'
 import { ToastService } from '../../../shared/toast/toast.service';
 import { apiErrorMessage } from '../../../shared/utils/api-error.util';
 import { isPositiveDecimal } from '../../../shared/utils/decimal.util';
+import { AttributeService } from '../attributes/attribute.service';
 import { CategoryService } from '../categories/category.service';
 import {
+  Attribute,
   Category,
   CreateProductUnitRequest,
   PRODUCT_TYPES,
@@ -47,6 +49,7 @@ export class ProductListComponent implements OnInit {
   private readonly products = inject(ProductService);
   private readonly categoryService = inject(CategoryService);
   private readonly unitService = inject(UnitService);
+  private readonly attributeService = inject(AttributeService);
   private readonly fb = inject(FormBuilder);
   private readonly modal = inject(NgbModal);
   private readonly toast = inject(ToastService);
@@ -61,6 +64,7 @@ export class ProductListComponent implements OnInit {
   items: Product[] = [];
   categories: Category[] = [];
   units: Unit[] = [];
+  attributes: Attribute[] = [];
   loading = false;
   error: string | null = null;
   filter = '';
@@ -86,8 +90,12 @@ export class ProductListComponent implements OnInit {
     trackInventory: [true],
     barcode: ['', [Validators.maxLength(128)]],
     note: ['', [Validators.maxLength(1000)]],
+    templateProductId: [''],
     additionalUnits: this.fb.array<FormGroup>([]),
   });
+
+  /** Plain array, not a FormArray — there's no per-item validation, just a set of ids toggled by checkbox. */
+  selectedAttributeValueIds: string[] = [];
 
   ngOnInit(): void {
     this.loadLookups();
@@ -112,6 +120,28 @@ export class ProductListComponent implements OnInit {
     return this.form.controls.additionalUnits;
   }
 
+  /** Only top-level products (not themselves a variant) can be a "Variant Of" target — no nested variant chains. */
+  get eligibleTemplateProducts(): Product[] {
+    return this.items.filter(
+      (p) => !p.templateProductId && p.id !== this.editing?.id,
+    );
+  }
+
+  toggleAttributeValue(id: string): void {
+    const index = this.selectedAttributeValueIds.indexOf(id);
+    if (index === -1) {
+      this.selectedAttributeValueIds = [...this.selectedAttributeValueIds, id];
+    } else {
+      this.selectedAttributeValueIds = this.selectedAttributeValueIds.filter(
+        (x) => x !== id,
+      );
+    }
+  }
+
+  isAttributeValueSelected(id: string): boolean {
+    return this.selectedAttributeValueIds.includes(id);
+  }
+
   get filtered(): Product[] {
     const q = this.filter.trim().toLowerCase();
     if (!q) {
@@ -129,6 +159,11 @@ export class ProductListComponent implements OnInit {
 
   categoryName(id: string): string {
     return this.categories.find((c) => c.id === id)?.name ?? id.slice(0, 8);
+  }
+
+  productLabel(id: string): string {
+    const p = this.items.find((x) => x.id === id);
+    return p ? `${p.sku} — ${p.name}` : id.slice(0, 8);
   }
 
   productTypeLabel(type: ProductType): string {
@@ -245,10 +280,12 @@ export class ProductListComponent implements OnInit {
     forkJoin({
       categories: this.categoryService.list(),
       units: this.unitService.list(),
+      attributes: this.attributeService.list(),
     }).subscribe({
-      next: ({ categories, units }) => {
+      next: ({ categories, units, attributes }) => {
         this.categories = categories.items ?? [];
         this.units = units.items ?? [];
+        this.attributes = (attributes.items ?? []).filter((a) => a.isActive);
         this.cdr.detectChanges();
       },
       error: (err) => {
@@ -294,7 +331,9 @@ export class ProductListComponent implements OnInit {
       trackInventory: true,
       barcode: '',
       note: '',
+      templateProductId: '',
     });
+    this.selectedAttributeValueIds = [];
     this.additionalUnits.clear();
     this.removedUnitIds = [];
     this.modalRef = this.modal.open(this.formModal, {
@@ -321,7 +360,9 @@ export class ProductListComponent implements OnInit {
       trackInventory: item.trackInventory,
       barcode: item.barcode ?? '',
       note: item.note ?? '',
+      templateProductId: item.templateProductId ?? '',
     });
+    this.selectedAttributeValueIds = item.attributeValues.map((av) => av.id);
     this.additionalUnits.clear();
     this.removedUnitIds = [];
     this.modalRef = this.modal.open(this.formModal, {
@@ -379,6 +420,8 @@ export class ProductListComponent implements OnInit {
     const description = value.description?.trim() || undefined;
     const barcode = value.barcode?.trim() || undefined;
     const note = value.note?.trim() || undefined;
+    const templateProductId = value.templateProductId?.trim() || undefined;
+    const attributeValueIds = this.selectedAttributeValueIds;
     this.saving = true;
     this.cdr.detectChanges();
 
@@ -396,6 +439,8 @@ export class ProductListComponent implements OnInit {
           trackInventory: !!value.trackInventory,
           barcode,
           note,
+          templateProductId,
+          attributeValueIds,
         })
       : this.products.create({
           sku: value.sku!.trim(),
@@ -409,6 +454,8 @@ export class ProductListComponent implements OnInit {
           trackInventory: !!value.trackInventory,
           barcode,
           note,
+          templateProductId,
+          attributeValueIds,
         });
 
     request$.subscribe({

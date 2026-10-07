@@ -1,0 +1,1038 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Accounting Settings
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="discard()" [disabled]="loading || saving">
+        Discard
+      </button>
+      <button type="button" class="btn btn-sm btn-primary" (click)="save()" [disabled]="loading || saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-4">
+      These preferences are stored in this browser only — there is no shared backend setting yet,
+      so they won't follow you to another device or browser.
+    </p>
+
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <!-- Initial Setup -->
+      <h6 class="settings-section-title">Initial Setup</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="fiscalLocalizationPackage">Fiscal Localization</label>
+          <div class="text-muted small mb-2">Taxes, fiscal positions, chart of accounts &amp; legal statements for your country.</div>
+          <select class="form-select form-select-sm" id="fiscalLocalizationPackage" formControlName="fiscalLocalizationPackage">
+            <option value="Generic (Minimal) Chart of Accounts">Generic (Minimal) Chart of Accounts</option>
+            <option value="India - GST Chart of Accounts">India - GST Chart of Accounts</option>
+            <option value="United States - Chart of Accounts">United States - Chart of Accounts</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2" (click)="load()">Reload</button>
+        </div>
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Accounting import</label>
+          <div class="text-muted small mb-2">Choose how you want to setup your CoA.</div>
+          <div><a routerLink="/accounting/accounts" class="small settings-link">Review Manually (end of year balances) →</a></div>
+          <div class="text-muted small">Import (for full history)</div>
+        </div>
+      </div>
+
+      <!-- Taxes -->
+      <h6 class="settings-section-title">Taxes</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Default Taxes</label>
+          <div class="text-muted small mb-2">Default taxes applied when creating new products.</div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="defaultSalesTaxCodeId">Sales Tax</label>
+            <select class="form-select form-select-sm" id="defaultSalesTaxCodeId" formControlName="defaultSalesTaxCodeId">
+              <option value="">—</option>
+              @for (tax of taxCodes; track tax.id) {
+                <option [value]="tax.id">{{ tax.code }} — {{ tax.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="defaultPurchaseTaxCodeId">Purchase Tax</label>
+            <select class="form-select form-select-sm" id="defaultPurchaseTaxCodeId" formControlName="defaultPurchaseTaxCodeId">
+              <option value="">—</option>
+              @for (tax of taxCodes; track tax.id) {
+                <option [value]="tax.id">{{ tax.code }} — {{ tax.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" id="pricesTaxIncluded" formControlName="pricesTaxMode" value="TAX_INCLUDED" />
+            <label class="form-check-label" for="pricesTaxIncluded">Tax Included</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" id="pricesTaxExcluded" formControlName="pricesTaxMode" value="TAX_EXCLUDED" />
+            <label class="form-check-label" for="pricesTaxExcluded">Tax Excluded</label>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Rounding Method</label>
+          <div class="text-muted small mb-2">How total tax amount is computed in orders and invoices.</div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" id="roundPerTax" formControlName="roundingMethod" value="ROUND_PER_TAX" />
+            <label class="form-check-label" for="roundPerTax">Round per Tax</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" id="roundPerLine" formControlName="roundingMethod" value="ROUND_PER_LINE" />
+            <label class="form-check-label" for="roundPerLine">Round per Line</label>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Tax Return Periodicity</label>
+          <div class="text-muted small mb-2">How often tax returns have to be made.</div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 6rem" for="taxReturnPeriodicity">Periodicity</label>
+            <select class="form-select form-select-sm" id="taxReturnPeriodicity" formControlName="taxReturnPeriodicity">
+              <option value="MONTHLY">Monthly</option>
+              <option value="QUARTERLY">Quarterly</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 6rem" for="taxReturnDeadlineDays">Deadline</label>
+            <input type="number" class="form-control form-control-sm settings-number-input" id="taxReturnDeadlineDays" formControlName="taxReturnDeadlineDays" min="0" max="365" />
+            <span class="small text-muted">days after period</span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 6rem" for="taxReturnJournal">Journal</label>
+            <input type="text" class="form-control form-control-sm" id="taxReturnJournal" formControlName="taxReturnJournal" />
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableAvaTax" formControlName="enableAvaTax" />
+            <label class="form-check-label fw-semibold" for="enableAvaTax">AvaTax</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Automatically compute US and Canadian tax rates.</div>
+          @if (form.controls.enableAvaTax.value) {
+            <div class="ms-4">
+              <label class="fw-semibold form-label d-block">Integration Method</label>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" id="avaTaxIncluded" formControlName="avaTaxIntegrationMethod" value="AVALARA_INCLUDED" />
+                <label class="form-check-label" for="avaTaxIncluded">Avalara Included</label>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="radio" id="avaTaxDirect" formControlName="avaTaxIntegrationMethod" value="AVALARA_DIRECT" />
+                <label class="form-check-label" for="avaTaxDirect">Avalara Direct</label>
+              </div>
+              <label class="small text-muted mb-1 d-block" for="avaTaxPortalEmail">Avatax Portal Email</label>
+              <input type="email" class="form-control form-control-sm mb-2" id="avaTaxPortalEmail" formControlName="avaTaxPortalEmail" />
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="avaTaxUseUpc" formControlName="avaTaxUseUpc" />
+                <label class="form-check-label" for="avaTaxUseUpc">Use UPC</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="avaTaxAddressValidation" formControlName="avaTaxAddressValidation" />
+                <label class="form-check-label" for="avaTaxAddressValidation">Address Validation</label>
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="verifyVatNumbers" formControlName="verifyVatNumbers" />
+            <label class="form-check-label fw-semibold" for="verifyVatNumbers">Verify VAT Numbers</label>
+          </div>
+          <div class="text-muted small ms-4">Verify VAT numbers using the European VIES service.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="cashBasis" formControlName="cashBasis" />
+            <label class="form-check-label fw-semibold" for="cashBasis">Cash Basis</label>
+          </div>
+          <div class="text-muted small ms-4">Allow to configure taxes using cash basis.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="fiscalCountry">Fiscal Country</label>
+          <div class="text-muted small mb-2">Domestic country of your accounting.</div>
+          <select class="form-select form-select-sm" id="fiscalCountry" formControlName="fiscalCountry">
+            <option value="">—</option>
+            <option value="India">India</option>
+            <option value="United States">United States</option>
+            <option value="United Kingdom">United Kingdom</option>
+            <option value="Australia">Australia</option>
+            <option value="Canada">Canada</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Currencies -->
+      <h6 class="settings-section-title">Currencies</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="mainCurrency">Main Currency</label>
+          <div class="text-muted small mb-2">Main currency of your company.</div>
+          <select class="form-select form-select-sm" id="mainCurrency" formControlName="mainCurrency">
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+            <option value="INR">INR</option>
+            <option value="AUD">AUD</option>
+            <option value="CAD">CAD</option>
+          </select>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableAutomaticCurrencyRates" formControlName="enableAutomaticCurrencyRates" />
+            <label class="form-check-label fw-semibold" for="enableAutomaticCurrencyRates">Automatic Currency Rates</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Update exchange rates automatically.</div>
+          @if (form.controls.enableAutomaticCurrencyRates.value) {
+            <div class="ms-4">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <label class="small text-muted mb-0" style="min-width: 5rem" for="currencyRateService">Service</label>
+                <select class="form-select form-select-sm" id="currencyRateService" formControlName="currencyRateService">
+                  <option value="European Central Bank">European Central Bank</option>
+                  <option value="Yahoo Finance">Yahoo Finance</option>
+                  <option value="Reserve Bank of India">Reserve Bank of India</option>
+                </select>
+              </div>
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <label class="small text-muted mb-0" style="min-width: 5rem" for="currencyRateInterval">Interval</label>
+                <select class="form-select form-select-sm" id="currencyRateInterval" formControlName="currencyRateInterval">
+                  <option value="MANUALLY">Manually</option>
+                  <option value="DAILY">Daily</option>
+                  <option value="WEEKLY">Weekly</option>
+                  <option value="MONTHLY">Monthly</option>
+                </select>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted mb-0" style="min-width: 5rem" for="currencyRateNextRun">Next Run</label>
+                <input type="date" class="form-control form-control-sm" id="currencyRateNextRun" formControlName="currencyRateNextRun" />
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Customer Invoices -->
+      <h6 class="settings-section-title">Customer Invoices</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableSnailmail" formControlName="enableSnailmail" />
+            <label class="form-check-label fw-semibold" for="enableSnailmail">Snailmail</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Send invoices and payment reminders by post.</div>
+          @if (form.controls.enableSnailmail.value) {
+            <div class="ms-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="snailmailPrintInColor" formControlName="snailmailPrintInColor" />
+                <label class="form-check-label" for="snailmailPrintInColor">Print In Color</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="snailmailPrintBothSides" formControlName="snailmailPrintBothSides" />
+                <label class="form-check-label" for="snailmailPrintBothSides">Print Both sides</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="snailmailAddCoverPage" formControlName="snailmailAddCoverPage" />
+                <label class="form-check-label" for="snailmailAddCoverPage">Add a Cover Page</label>
+              </div>
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableCustomerAddresses" formControlName="enableCustomerAddresses" />
+            <label class="form-check-label fw-semibold" for="enableCustomerAddresses">Customer Addresses</label>
+          </div>
+          <div class="text-muted small ms-4">Select specific invoice and delivery addresses.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableTotalRounding" formControlName="enableTotalRounding" />
+            <label class="form-check-label fw-semibold" for="enableTotalRounding">Total Rounding</label>
+          </div>
+          <div class="text-muted small ms-4">Apply rounding to the total amount of a sales invoice.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="defaultIncoterm">Default Incoterm</label>
+          <div class="text-muted small mb-2">Default Incoterm of your company.</div>
+          <select class="form-select form-select-sm" id="defaultIncoterm" formControlName="defaultIncoterm">
+            <option value="">—</option>
+            <option value="EXW">EXW — Ex Works</option>
+            <option value="FCA">FCA — Free Carrier</option>
+            <option value="FOB">FOB — Free On Board</option>
+            <option value="CIF">CIF — Cost, Insurance and Freight</option>
+            <option value="DAP">DAP — Delivered At Place</option>
+            <option value="DDP">DDP — Delivered Duty Paid</option>
+          </select>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableSaleReceipt" formControlName="enableSaleReceipt" />
+            <label class="form-check-label fw-semibold" for="enableSaleReceipt">Sale Receipt</label>
+          </div>
+          <div class="text-muted small ms-4">Activate to create sale receipt.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableDefaultTermsAndConditions" formControlName="enableDefaultTermsAndConditions" />
+            <label class="form-check-label fw-semibold" for="enableDefaultTermsAndConditions">Default Terms &amp; Conditions</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Add your terms &amp; conditions at the bottom of invoices/orders/quotations.</div>
+          @if (form.controls.enableDefaultTermsAndConditions.value) {
+            <div class="ms-4">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" id="termsNote" formControlName="termsAndConditionsMode" value="NOTE" />
+                <label class="form-check-label" for="termsNote">Add a Note</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" id="termsWebPage" formControlName="termsAndConditionsMode" value="WEB_PAGE" />
+                <label class="form-check-label" for="termsWebPage">Add a link to a Web Page</label>
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableSalesCreditLimit" formControlName="enableSalesCreditLimit" />
+            <label class="form-check-label fw-semibold" for="enableSalesCreditLimit">Sales Credit Limit</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Trigger alerts when creating Invoices and Sales Orders for Partners with a Total Receivable amount exceeding a limit. Set a value greater than 0.0 to activate a credit limit check.</div>
+          @if (form.controls.enableSalesCreditLimit.value) {
+            <div class="ms-4">
+              <input type="number" class="form-control form-control-sm settings-number-input" id="salesCreditLimitAmount" formControlName="salesCreditLimitAmount" min="0" />
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showInvoiceTotalInWords" formControlName="showInvoiceTotalInWords" />
+            <label class="form-check-label fw-semibold" for="showInvoiceTotalInWords">Total amount of invoice in words</label>
+          </div>
+          <div class="text-muted small ms-4">Display the total amount of an invoice in words.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showTaxesInCompanyCurrency" formControlName="showTaxesInCompanyCurrency" />
+            <label class="form-check-label fw-semibold" for="showTaxesInCompanyCurrency">Taxes in company currency</label>
+          </div>
+          <div class="text-muted small ms-4">Taxes are also displayed in local currency on invoices.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableAuthorizedSignatory" formControlName="enableAuthorizedSignatory" />
+            <label class="form-check-label fw-semibold" for="enableAuthorizedSignatory">Authorized Signatory on invoice</label>
+          </div>
+          <div class="text-muted small ms-4">To enhance authenticity, add a signature to your invoices.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableAutomaticInvoiceReminders" formControlName="enableAutomaticInvoiceReminders" />
+            <label class="form-check-label fw-semibold" for="enableAutomaticInvoiceReminders">Automatic Invoice Reminders</label>
+          </div>
+          <div class="text-muted small ms-4">Send reminders for invoices and customer statement.</div>
+        </div>
+      </div>
+
+      <!-- Units & Packagings -->
+      <h6 class="settings-section-title">Units &amp; Packagings</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableUnitsOfMeasure" formControlName="enableUnitsOfMeasure" />
+            <label class="form-check-label fw-semibold" for="enableUnitsOfMeasure">Units of Measure &amp; Packagings</label>
+          </div>
+          <div class="text-muted small ms-4">Sell and purchase products in different units of measure or packagings.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/inventory/units" class="small settings-link">Units &amp; Packagings →</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Customer Payments -->
+      <h6 class="settings-section-title">Customer Payments</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableInvoiceOnlinePayment" formControlName="enableInvoiceOnlinePayment" />
+            <label class="form-check-label fw-semibold" for="enableInvoiceOnlinePayment">Invoice Online Payment</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Let your customers pay their invoices on your portal.</div>
+          @if (form.controls.enableInvoiceOnlinePayment.value) {
+            <div class="form-check ms-4">
+              <input class="form-check-input" type="checkbox" id="addQrCodeLinkOnPdf" formControlName="addQrCodeLinkOnPdf" />
+              <label class="form-check-label" for="addQrCodeLinkOnPdf">Add QR-code link on PDF</label>
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePaymentQrCodes" formControlName="enablePaymentQrCodes" />
+            <label class="form-check-label fw-semibold" for="enablePaymentQrCodes">Payment QR Codes</label>
+          </div>
+          <div class="text-muted small ms-4">Add a QR-code to your invoices so that your customers can pay instantly with their banking application.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableBatchPayments" formControlName="enableBatchPayments" />
+            <label class="form-check-label fw-semibold" for="enableBatchPayments">Batch Payments</label>
+          </div>
+          <div class="text-muted small ms-4">Group payments into a single batch to ease the reconciliation process.</div>
+        </div>
+      </div>
+
+      <!-- Vendor Payments -->
+      <h6 class="settings-section-title">Vendor Payments</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableChecks" formControlName="enableChecks" />
+            <label class="form-check-label fw-semibold" for="enableChecks">Checks</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Print checks to pay your vendors.</div>
+          @if (form.controls.enableChecks.value) {
+            <div class="ms-4">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <label class="small text-muted mb-0" style="min-width: 8rem" for="checkLayout">Check Layout</label>
+                <select class="form-select form-select-sm" id="checkLayout" formControlName="checkLayout">
+                  <option value="NONE">None</option>
+                  <option value="STANDARD">Standard</option>
+                  <option value="VOUCHER">Voucher</option>
+                  <option value="THREE_PER_PAGE">Three per page</option>
+                </select>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="checkMultiPagesStub" formControlName="checkMultiPagesStub" />
+                <label class="form-check-label" for="checkMultiPagesStub">Multi-Pages Check Stub</label>
+              </div>
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <label class="small text-muted mb-0" style="min-width: 8rem" for="checkTopMargin">Check Top Margin</label>
+                <input type="number" class="form-control form-control-sm settings-number-input" id="checkTopMargin" formControlName="checkTopMargin" min="0" step="0.01" />
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted mb-0" style="min-width: 8rem" for="checkLeftMargin">Check Left Margin</label>
+                <input type="number" class="form-control form-control-sm settings-number-input" id="checkLeftMargin" formControlName="checkLeftMargin" min="0" step="0.01" />
+              </div>
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableUsDirectDeposit" formControlName="enableUsDirectDeposit" />
+            <label class="form-check-label fw-semibold" for="enableUsDirectDeposit">U.S. Direct Deposit (via Wise)</label>
+          </div>
+          <div class="text-muted small ms-4">Initiate payments in one-click using a Wise Business account.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableSepaCreditTransfer" formControlName="enableSepaCreditTransfer" />
+            <label class="form-check-label fw-semibold" for="enableSepaCreditTransfer">SEPA Credit Transfer / ISO20022</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Pay your bills in one-click using Euro SEPA Service / ISO20022.</div>
+          @if (form.controls.enableSepaCreditTransfer.value) {
+            <div class="ms-4">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <label class="small text-muted mb-0" style="min-width: 10rem" for="sepaCompanyIdentification">Company Identification</label>
+                <input type="text" class="form-control form-control-sm" id="sepaCompanyIdentification" formControlName="sepaCompanyIdentification" />
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted mb-0" style="min-width: 10rem" for="sepaIssuer">Issuer</label>
+                <input type="text" class="form-control form-control-sm" id="sepaIssuer" formControlName="sepaIssuer" />
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Digitization -->
+      <h6 class="settings-section-title">Digitization</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-12 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableDocumentDigitization" formControlName="enableDocumentDigitization" />
+            <label class="form-check-label fw-semibold" for="enableDocumentDigitization">Document Digitization</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Digitize your PDF or scanned documents with OCR and Artificial Intelligence.</div>
+          @if (form.controls.enableDocumentDigitization.value) {
+            <div class="row ms-4 gy-3">
+              <div class="col-md-6">
+                <label class="fw-semibold form-label d-block">Customer Invoices</label>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeCustomerInvoicesNo" formControlName="digitizeCustomerInvoices" value="DO_NOT_DIGITIZE" />
+                  <label class="form-check-label" for="digitizeCustomerInvoicesNo">Do not digitize</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeCustomerInvoicesDemand" formControlName="digitizeCustomerInvoices" value="ON_DEMAND" />
+                  <label class="form-check-label" for="digitizeCustomerInvoicesDemand">Digitize on demand only</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeCustomerInvoicesAuto" formControlName="digitizeCustomerInvoices" value="AUTOMATIC" />
+                  <label class="form-check-label" for="digitizeCustomerInvoicesAuto">Digitize automatically</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <label class="fw-semibold form-label d-block">Vendor Bills</label>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeVendorBillsNo" formControlName="digitizeVendorBills" value="DO_NOT_DIGITIZE" />
+                  <label class="form-check-label" for="digitizeVendorBillsNo">Do not digitize</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeVendorBillsDemand" formControlName="digitizeVendorBills" value="ON_DEMAND" />
+                  <label class="form-check-label" for="digitizeVendorBillsDemand">Digitize on demand only</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeVendorBillsAuto" formControlName="digitizeVendorBills" value="AUTOMATIC" />
+                  <label class="form-check-label" for="digitizeVendorBillsAuto">Digitize automatically</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <label class="fw-semibold form-label d-block">Bank Statements</label>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeBankStatementsNo" formControlName="digitizeBankStatements" value="DO_NOT_DIGITIZE" />
+                  <label class="form-check-label" for="digitizeBankStatementsNo">Do not digitize</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeBankStatementsAuto" formControlName="digitizeBankStatements" value="AUTOMATIC" />
+                  <label class="form-check-label" for="digitizeBankStatementsAuto">Digitize automatically</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <label class="fw-semibold form-label d-block">Loans</label>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeLoansNo" formControlName="digitizeLoans" value="DO_NOT_DIGITIZE" />
+                  <label class="form-check-label" for="digitizeLoansNo">Do not digitize</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" id="digitizeLoansAuto" formControlName="digitizeLoans" value="AUTOMATIC" />
+                  <label class="form-check-label" for="digitizeLoansAuto">Digitize automatically</label>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableSingleInvoiceLinePerTax" formControlName="enableSingleInvoiceLinePerTax" />
+            <label class="form-check-label fw-semibold" for="enableSingleInvoiceLinePerTax">Single Invoice Line Per Tax</label>
+          </div>
+          <div class="text-muted small ms-4">Enable to get only one invoice line per tax.</div>
+        </div>
+      </div>
+
+      <!-- Default Accounts -->
+      <h6 class="settings-section-title">Default Accounts</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Exchange difference entries</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 5rem" for="exchangeDifferenceJournal">Journal</label>
+            <input type="text" class="form-control form-control-sm" id="exchangeDifferenceJournal" formControlName="exchangeDifferenceJournal" />
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 5rem" for="exchangeGainAccountId">Gain</label>
+            <select class="form-select form-select-sm" id="exchangeGainAccountId" formControlName="exchangeGainAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 5rem" for="exchangeLossAccountId">Loss</label>
+            <select class="form-select form-select-sm" id="exchangeLossAccountId" formControlName="exchangeLossAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Bank transactions and payments</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem" for="bankSuspenseAccountId">Bank Suspense</label>
+            <select class="form-select form-select-sm" id="bankSuspenseAccountId" formControlName="bankSuspenseAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem" for="internalTransferAccountId">Internal Transfer</label>
+            <select class="form-select form-select-sm" id="internalTransferAccountId" formControlName="internalTransferAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Deferred expense entries</label>
+          <div class="text-muted small mb-2">Recognize bill expenses over multiple periods.</div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredExpenseJournal">Journal</label>
+            <input type="text" class="form-control form-control-sm" id="deferredExpenseJournal" formControlName="deferredExpenseJournal" />
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredExpenseAccountId">Account</label>
+            <select class="form-select form-select-sm" id="deferredExpenseAccountId" formControlName="deferredExpenseAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredExpenseGenerateEntries">Generate Entries</label>
+            <select class="form-select form-select-sm" id="deferredExpenseGenerateEntries" formControlName="deferredExpenseGenerateEntries">
+              <option value="ON_BILL_VALIDATION">On bill validation</option>
+              <option value="ON_PERIOD_END">On period end</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredExpensePeriodicity">Periodicity</label>
+            <select class="form-select form-select-sm" id="deferredExpensePeriodicity" formControlName="deferredExpensePeriodicity">
+              <option value="MONTHLY">Monthly</option>
+              <option value="QUARTERLY">Quarterly</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredExpenseComputation">Computation</label>
+            <select class="form-select form-select-sm" id="deferredExpenseComputation" formControlName="deferredExpenseComputation">
+              <option value="BY_MONTHS">By Months</option>
+              <option value="BY_DAYS">By Days</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Deferred revenue entries</label>
+          <div class="text-muted small mb-2">Recognize invoice revenue over multiple periods.</div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredRevenueJournal">Journal</label>
+            <input type="text" class="form-control form-control-sm" id="deferredRevenueJournal" formControlName="deferredRevenueJournal" />
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredRevenueAccountId">Account</label>
+            <select class="form-select form-select-sm" id="deferredRevenueAccountId" formControlName="deferredRevenueAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredRevenueGenerateEntries">Generate Entries</label>
+            <select class="form-select form-select-sm" id="deferredRevenueGenerateEntries" formControlName="deferredRevenueGenerateEntries">
+              <option value="ON_INVOICE_VALIDATION">On invoice validation</option>
+              <option value="ON_PERIOD_END">On period end</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredRevenuePeriodicity">Periodicity</label>
+            <select class="form-select form-select-sm" id="deferredRevenuePeriodicity" formControlName="deferredRevenuePeriodicity">
+              <option value="MONTHLY">Monthly</option>
+              <option value="QUARTERLY">Quarterly</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 7rem" for="deferredRevenueComputation">Computation</label>
+            <select class="form-select form-select-sm" id="deferredRevenueComputation" formControlName="deferredRevenueComputation">
+              <option value="BY_MONTHS">By Months</option>
+              <option value="BY_DAYS">By Days</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Invoice line discounts</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem">Customer Invoices</label>
+            <input type="text" class="form-control form-control-sm" value="Same Account as product" disabled />
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem">Vendor Bills</label>
+            <input type="text" class="form-control form-control-sm" value="Same Account as product" disabled />
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Early payment discounts</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem" for="earlyDiscountGainAccountId">Early Discount Gain</label>
+            <select class="form-select form-select-sm" id="earlyDiscountGainAccountId" formControlName="earlyDiscountGainAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem" for="earlyDiscountLossAccountId">Early Discount Loss</label>
+            <select class="form-select form-select-sm" id="earlyDiscountLossAccountId" formControlName="earlyDiscountLossAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Product Accounts</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="incomeAccountId">Income Account</label>
+            <select class="form-select form-select-sm" id="incomeAccountId" formControlName="incomeAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="expenseAccountId">Expense Account</label>
+            <select class="form-select form-select-sm" id="expenseAccountId" formControlName="expenseAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem">Downpayment Account</label>
+            <input type="text" class="form-control form-control-sm" value="Client's most used account" disabled />
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Sale Accruals</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="salesAccrualInvoicesToBeIssuedAccountId">Invoices to be Issued</label>
+            <select class="form-select form-select-sm" id="salesAccrualInvoicesToBeIssuedAccountId" formControlName="salesAccrualInvoicesToBeIssuedAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="salesAccrualInvoicedNotDeliveredAccountId">Invoiced Not Delivered</label>
+            <select class="form-select form-select-sm" id="salesAccrualInvoicedNotDeliveredAccountId" formControlName="salesAccrualInvoicedNotDeliveredAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Purchase Accruals</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="purchaseAccrualBillsToReceiveAccountId">Bills to Receive</label>
+            <select class="form-select form-select-sm" id="purchaseAccrualBillsToReceiveAccountId" formControlName="purchaseAccrualBillsToReceiveAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="purchaseAccrualBilledNotReceivedAccountId">Billed Not Received</label>
+            <select class="form-select form-select-sm" id="purchaseAccrualBilledNotReceivedAccountId" formControlName="purchaseAccrualBilledNotReceivedAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Total Rounding Accounts</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem" for="roundingProfitAccountId">Profit Account</label>
+            <select class="form-select form-select-sm" id="roundingProfitAccountId" formControlName="roundingProfitAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 8rem" for="roundingLossAccountId">Loss Account</label>
+            <select class="form-select form-select-sm" id="roundingLossAccountId" formControlName="roundingLossAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Intercompany Clearing</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="intercompanyClearingJournal">Journal</label>
+            <input type="text" class="form-control form-control-sm" id="intercompanyClearingJournal" formControlName="intercompanyClearingJournal" />
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="intercompanyAccountPayableId">Account Payable</label>
+            <select class="form-select form-select-sm" id="intercompanyAccountPayableId" formControlName="intercompanyAccountPayableId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="intercompanyAccountReceivableId">Account Receivable</label>
+            <select class="form-select form-select-sm" id="intercompanyAccountReceivableId" formControlName="intercompanyAccountReceivableId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Withholding</label>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="withholdingTaxBaseAccountId">Withholding Tax Base</label>
+            <select class="form-select form-select-sm" id="withholdingTaxBaseAccountId" formControlName="withholdingTaxBaseAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inventory Valuation -->
+      <h6 class="settings-section-title">Inventory Valuation</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Inventory Accounting</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="inventoryValuationMethod">Inventory Valuation</label>
+            <select class="form-select form-select-sm" id="inventoryValuationMethod" formControlName="inventoryValuationMethod">
+              <option value="PERIODIC">Periodic (at closing)</option>
+              <option value="PERPETUAL">Perpetual (automated)</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="inventoryCostMethod">Inventory Cost Method</label>
+            <select class="form-select form-select-sm" id="inventoryCostMethod" formControlName="inventoryCostMethod">
+              <option value="STANDARD">Standard Price</option>
+              <option value="FIFO">First In First Out (FIFO)</option>
+              <option value="AVERAGE">Average Cost (AVCO)</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="periodicValuationMode">Periodic Valuation</label>
+            <select class="form-select form-select-sm" id="periodicValuationMode" formControlName="periodicValuationMode">
+              <option value="MANUAL">Manual</option>
+              <option value="AUTOMATIC">Automatic</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="stockValuationAccountId">Stock Valuation Account</label>
+            <select class="form-select form-select-sm" id="stockValuationAccountId" formControlName="stockValuationAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 10rem" for="inventoryValuationJournal">Journal</label>
+            <input type="text" class="form-control form-control-sm" id="inventoryValuationJournal" formControlName="inventoryValuationJournal" />
+          </div>
+          <div class="text-muted small">
+            Other accounts can be defined on "Inventory Loss" and "Production" on dedicated locations.
+          </div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Manufacturing</label>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="wipAccountId">WIP Account</label>
+            <select class="form-select form-select-sm" id="wipAccountId" formControlName="wipAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" style="min-width: 9rem" for="wipOverheadAccountId">WIP Overhead Account</label>
+            <select class="form-select form-select-sm" id="wipOverheadAccountId" formControlName="wipOverheadAccountId">
+              <option value="">—</option>
+              @for (account of accounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} — {{ account.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bank & Cash -->
+      <h6 class="settings-section-title">Bank &amp; Cash</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableQifImport" formControlName="enableQifImport" />
+            <label class="form-check-label fw-semibold" for="enableQifImport">QIF Import</label>
+          </div>
+          <div class="text-muted small ms-4">Import your bank statements in QIF.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableAutoTransfer" formControlName="enableAutoTransfer" />
+            <label class="form-check-label fw-semibold" for="enableAutoTransfer">Enable Auto Transfer</label>
+          </div>
+          <div class="text-muted small ms-4">Enable Auto Transfers.</div>
+        </div>
+      </div>
+
+      <!-- Fiscal Periods -->
+      <h6 class="settings-section-title">Fiscal Periods</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Fiscal Year</label>
+          <div class="text-muted small mb-2">Last day of your fiscal year.</div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0" for="fiscalYearLastDayMonth">Last Day</label>
+            <select class="form-select form-select-sm" id="fiscalYearLastDayMonth" formControlName="fiscalYearLastDayMonth">
+              <option [value]="1">January</option>
+              <option [value]="2">February</option>
+              <option [value]="3">March</option>
+              <option [value]="4">April</option>
+              <option [value]="5">May</option>
+              <option [value]="6">June</option>
+              <option [value]="7">July</option>
+              <option [value]="8">August</option>
+              <option [value]="9">September</option>
+              <option [value]="10">October</option>
+              <option [value]="11">November</option>
+              <option [value]="12">December</option>
+            </select>
+            <input type="number" class="form-control form-control-sm settings-number-input" id="fiscalYearLastDayOfMonth" formControlName="fiscalYearLastDayOfMonth" min="1" max="31" />
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="enableMultiYearFiscalYears" formControlName="enableMultiYearFiscalYears" />
+            <label class="form-check-label" for="enableMultiYearFiscalYears">Fiscal Years</label>
+          </div>
+          <div class="text-muted small ms-4">Define fiscal years of more or less than one year.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="invoicingSwitchThresholdDate">Invoicing Switch Threshold</label>
+          <div class="text-muted small mb-2">All entries created by Invoicing before that date will be ignored in Accounting.</div>
+          <input type="date" class="form-control form-control-sm" id="invoicingSwitchThresholdDate" formControlName="invoicingSwitchThresholdDate" />
+        </div>
+      </div>
+
+      <!-- Analytics -->
+      <h6 class="settings-section-title">Analytics</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableAnalyticAccounting" formControlName="enableAnalyticAccounting" />
+            <label class="form-check-label fw-semibold" for="enableAnalyticAccounting">Analytic Accounting</label>
+          </div>
+          <div class="text-muted small ms-4">Track costs &amp; revenues by project, department, etc.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableBudgetManagement" formControlName="enableBudgetManagement" />
+            <label class="form-check-label fw-semibold" for="enableBudgetManagement">Budget Management</label>
+          </div>
+          <div class="text-muted small ms-4">Use budgets to compare actual with expected revenues and costs.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableMarginAnalysis" formControlName="enableMarginAnalysis" />
+            <label class="form-check-label fw-semibold" for="enableMarginAnalysis">Margin Analysis</label>
+          </div>
+          <div class="text-muted small ms-4">Monitor your product margins from invoices.</div>
+        </div>
+      </div>
+
+      <!-- Reporting -->
+      <h6 class="settings-section-title">Reporting</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableRestrictiveAuditTrail" formControlName="enableRestrictiveAuditTrail" />
+            <label class="form-check-label fw-semibold" for="enableRestrictiveAuditTrail">Restrictive Audit Trail</label>
+          </div>
+          <div class="text-muted small ms-4">Log changes to posted journal entries immutably.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableTotalsBelowSections" formControlName="enableTotalsBelowSections" />
+            <label class="form-check-label fw-semibold" for="enableTotalsBelowSections">Add totals below sections</label>
+          </div>
+          <div class="text-muted small ms-4">When ticked, totals and subtotals appear below the sections of the report.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="negativeAmountDisplay">Negative amount display</label>
+          <div class="text-muted small mb-2">How negative amounts are displayed on financial reports.</div>
+          <select class="form-select form-select-sm" id="negativeAmountDisplay" formControlName="negativeAmountDisplay">
+            <option value="-100">-100</option>
+            <option value="100-">100-</option>
+          </select>
+        </div>
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="datevGlAccountLength">DateV G/L account length</label>
+          <input type="number" class="form-control form-control-sm settings-number-input" id="datevGlAccountLength" formControlName="datevGlAccountLength" min="1" max="20" />
+        </div>
+      </div>
+
+      <!-- Accounting Firms mode -->
+      <h6 class="settings-section-title">Accounting Firms mode</h6>
+      <div class="row gy-3">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableQuickEncoding" formControlName="enableQuickEncoding" />
+            <label class="form-check-label fw-semibold" for="enableQuickEncoding">Quick encoding</label>
+          </div>
+          <div class="text-muted small ms-4">A new field 'Total (tax inc.)' to speed up and control the encoding by automating line creation with the right account and tax.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableDocumentSequenceEditable" formControlName="enableDocumentSequenceEditable" />
+            <label class="form-check-label fw-semibold" for="enableDocumentSequenceEditable">Document's sequence editable</label>
+          </div>
+          <div class="text-muted small ms-4">The document's sequence becomes editable on all documents.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableReviewData" formControlName="enableReviewData" />
+            <label class="form-check-label fw-semibold" for="enableReviewData">Review data</label>
+          </div>
+          <div class="text-muted small ms-4">Review all the modification done by the user with right under bookkeeper.</div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>

@@ -58,7 +58,9 @@ export class AuthService {
     const accessToken = this.tokenService.signAccessToken({
       sub: user.id,
       tenantId: user.tenantId,
+      tenantName: tenant.name,
       email: user.email,
+      userName: `${user.firstName} ${user.lastName}`.trim(),
     });
     const refresh = this.tokenService.createRefreshToken();
 

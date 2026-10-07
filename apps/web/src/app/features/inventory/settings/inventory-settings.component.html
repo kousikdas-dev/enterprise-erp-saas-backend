@@ -1,0 +1,342 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Inventory Settings
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="discard()" [disabled]="loading || saving">
+        Discard
+      </button>
+      <button type="button" class="btn btn-sm btn-primary" (click)="save()" [disabled]="loading || saving || form.invalid">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="text-muted small mb-4">
+      These preferences are stored in this browser only — there is no shared backend setting yet,
+      so they won't follow you to another device or browser.
+    </p>
+
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <!-- Operations -->
+      <h6 class="settings-section-title">Operations</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePackages" formControlName="enablePackages" />
+            <label class="form-check-label fw-semibold" for="enablePackages">Packages</label>
+          </div>
+          <div class="text-muted small ms-4">Put your products in packs (e.g. parcels, boxes) and track them.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableBatchWaveClusterTransfers" formControlName="enableBatchWaveClusterTransfers" />
+            <label class="form-check-label fw-semibold" for="enableBatchWaveClusterTransfers">Batch, Wave &amp; Cluster Transfers</label>
+          </div>
+          <div class="text-muted small ms-4">Optimize your transfers by grouping operations together and assigning jobs to workers.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enablePartnerSpecificInstructions" formControlName="enablePartnerSpecificInstructions" />
+            <label class="form-check-label fw-semibold" for="enablePartnerSpecificInstructions">Partner-Specific Instructions</label>
+          </div>
+          <div class="text-muted small ms-4">Display instructions tailored to the customer or vendor on stock operations.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="shippingPolicy">Shipping Policy</label>
+          <div class="text-muted small mb-2">When to start shipping.</div>
+          <select class="form-select form-select-sm" id="shippingPolicy" formControlName="shippingPolicy">
+            <option value="ASAP">As soon as possible</option>
+            <option value="WHEN_ALL_READY">When all products are ready</option>
+          </select>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableQuality" formControlName="enableQuality" />
+            <label class="form-check-label fw-semibold" for="enableQuality">Quality</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Add quality checks to your transfer operations.</div>
+          @if (form.controls.enableQuality.value) {
+            <div class="form-check ms-4">
+              <input class="form-check-input" type="checkbox" id="enableQualityWorksheet" formControlName="enableQualityWorksheet" />
+              <label class="form-check-label fw-semibold" for="enableQualityWorksheet">Quality Worksheet</label>
+              <div class="text-muted small">Create customizable worksheets for your quality checks.</div>
+            </div>
+          }
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="enableSpontaneousReturns" formControlName="enableSpontaneousReturns" />
+            <label class="form-check-label fw-semibold" for="enableSpontaneousReturns">Allow Spontaneous Returns</label>
+          </div>
+          <div class="text-muted small ms-4">Allow users to return products.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label d-block">Annual Inventory Date</label>
+          <div class="text-muted small mb-2">By default, next physical inventory will be scheduled at this date.</div>
+          <div class="d-flex align-items-center gap-2">
+            <input type="number" class="form-control form-control-sm settings-number-input" id="annualInventoryDay" formControlName="annualInventoryDay" min="1" max="31" />
+            <select class="form-select form-select-sm" id="annualInventoryMonth" formControlName="annualInventoryMonth">
+              <option [value]="1">January</option>
+              <option [value]="2">February</option>
+              <option [value]="3">March</option>
+              <option [value]="4">April</option>
+              <option [value]="5">May</option>
+              <option [value]="6">June</option>
+              <option [value]="7">July</option>
+              <option [value]="8">August</option>
+              <option [value]="9">September</option>
+              <option [value]="10">October</option>
+              <option [value]="11">November</option>
+              <option [value]="12">December</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barcode -->
+      <h6 class="settings-section-title">Barcode</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableBarcodeScanner" formControlName="enableBarcodeScanner" />
+            <label class="form-check-label fw-semibold" for="enableBarcodeScanner">Barcode Scanner</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Process operations faster with barcodes.</div>
+          @if (form.controls.enableBarcodeScanner.value) {
+            <div class="ms-4 d-flex align-items-center gap-2">
+              <label class="small text-muted mb-0" for="barcodeNomenclature">Barcode Nomenclature</label>
+              <select class="form-select form-select-sm" id="barcodeNomenclature" formControlName="barcodeNomenclature">
+                <option value="Default Nomenclature">Default Nomenclature</option>
+                <option value="GS1 Nomenclature">GS1 Nomenclature</option>
+              </select>
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableStockBarcodeDatabase" formControlName="enableStockBarcodeDatabase" />
+            <label class="form-check-label fw-semibold" for="enableStockBarcodeDatabase">Stock Barcode Database</label>
+          </div>
+          <div class="text-muted small ms-4">Create products easily by scanning using barcodelookup.com in barcode.</div>
+        </div>
+      </div>
+
+      <!-- Shipping -->
+      <h6 class="settings-section-title">Shipping</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableDeliveryMethods" formControlName="enableDeliveryMethods" />
+            <label class="form-check-label fw-semibold" for="enableDeliveryMethods">Delivery Methods</label>
+          </div>
+          <div class="text-muted small ms-4">Compute shipping costs.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/sales/delivery-methods" class="small settings-link">Delivery Methods →</a>
+          </div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableTransportManagement" formControlName="enableTransportManagement" />
+            <label class="form-check-label fw-semibold" for="enableTransportManagement">Transport Management</label>
+          </div>
+          <div class="text-muted small ms-4">Organize deliveries by dock, assign drivers and vehicles, and print consignment notes.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableConfirmationEmail" formControlName="enableConfirmationEmail" />
+            <label class="form-check-label fw-semibold" for="enableConfirmationEmail">Confirmation Email</label>
+          </div>
+          <div class="text-muted small ms-4">Send an automatic confirmation email when Delivery Orders are done.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableTextConfirmation" formControlName="enableTextConfirmation" />
+            <label class="form-check-label fw-semibold" for="enableTextConfirmation">Text Confirmation</label>
+          </div>
+          <div class="text-muted small ms-4">Send an automatic confirmation Text Message when Delivery Orders are done.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="requireSignatureOnDeliveryOrders" formControlName="requireSignatureOnDeliveryOrders" />
+            <label class="form-check-label fw-semibold" for="requireSignatureOnDeliveryOrders">Signature</label>
+          </div>
+          <div class="text-muted small ms-4">Require a signature on your delivery orders.</div>
+        </div>
+      </div>
+
+      <!-- Products -->
+      <h6 class="settings-section-title">Products</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableVariants" formControlName="enableVariants" />
+            <label class="form-check-label fw-semibold" for="enableVariants">Variants</label>
+          </div>
+          <div class="text-muted small ms-4">Set product attributes (e.g. color, size) to manage variants.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/inventory/attributes" class="small settings-link">Attributes →</a>
+          </div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableUnitsOfMeasure" formControlName="enableUnitsOfMeasure" />
+            <label class="form-check-label fw-semibold" for="enableUnitsOfMeasure">Units of Measure &amp; Packagings</label>
+          </div>
+          <div class="text-muted small ms-4">Sell and purchase products in different units of measure or packagings.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/inventory/units" class="small settings-link">Units &amp; Packagings →</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Traceability -->
+      <h6 class="settings-section-title">Traceability</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableLotsAndSerialNumbers" formControlName="enableLotsAndSerialNumbers" />
+            <label class="form-check-label fw-semibold" for="enableLotsAndSerialNumbers">Lots &amp; Serial Numbers</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Get a full traceability from vendors to customers.</div>
+          @if (form.controls.enableLotsAndSerialNumbers.value) {
+            <div class="ms-4">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="printGs1BarcodesForLots" formControlName="printGs1BarcodesForLots" />
+                <label class="form-check-label fw-semibold" for="printGs1BarcodesForLots">Print GS1 Barcodes for Lots &amp; Serial Numbers</label>
+                <div class="text-muted small">Use GS1 nomenclature datamatrix whenever barcodes are printed for lots and serial numbers.</div>
+              </div>
+              <label class="fw-semibold form-label mb-0 d-block">Scannable Package Contents</label>
+              <div class="text-muted small mb-1">If a separator is defined, a QR code containing all serial numbers contained in package will be generated, using the defined character(s) to separate each numbers.</div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted mb-0" for="scannablePackageContentsSeparator">Separator</label>
+                <input type="text" class="form-control form-control-sm settings-number-input" id="scannablePackageContentsSeparator" formControlName="scannablePackageContentsSeparator" maxlength="4" />
+              </div>
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableExpirationDates" formControlName="enableExpirationDates" />
+            <label class="form-check-label fw-semibold" for="enableExpirationDates">Expiration Dates</label>
+          </div>
+          <div class="text-muted small ms-4">Set expiration dates on lots &amp; serial numbers.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="displayLotsSerialNumbersOnDeliverySlips" formControlName="displayLotsSerialNumbersOnDeliverySlips" />
+            <label class="form-check-label fw-semibold" for="displayLotsSerialNumbersOnDeliverySlips">Display Lots &amp; Serial Numbers on Delivery Slips</label>
+          </div>
+          <div class="text-muted small ms-4">Lots &amp; Serial numbers will appear on the delivery slip.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableConsignment" formControlName="enableConsignment" />
+            <label class="form-check-label fw-semibold" for="enableConsignment">Consignment</label>
+          </div>
+          <div class="text-muted small ms-4">Set owner on stored products.</div>
+        </div>
+      </div>
+
+      <!-- Valuation -->
+      <h6 class="settings-section-title">Valuation</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableLandedCosts" formControlName="enableLandedCosts" />
+            <label class="form-check-label fw-semibold" for="enableLandedCosts">Landed Costs</label>
+          </div>
+          <div class="text-muted small ms-4 mb-2">Add additional cost (transport, customs, ...) in the value of the product.</div>
+          @if (form.controls.enableLandedCosts.value) {
+            <div class="ms-4 d-flex align-items-center gap-2">
+              <label class="small text-muted mb-0" for="landedCostsDefaultJournal">Default Journal</label>
+              <input type="text" class="form-control form-control-sm" id="landedCostsDefaultJournal" formControlName="landedCostsDefaultJournal" />
+            </div>
+          }
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="displayLotsSerialNumbersOnInvoices" formControlName="displayLotsSerialNumbersOnInvoices" />
+            <label class="form-check-label fw-semibold" for="displayLotsSerialNumbersOnInvoices">Display Lots &amp; Serial Numbers on Invoices</label>
+          </div>
+          <div class="text-muted small ms-4">Lots &amp; Serial numbers will appear on the invoice.</div>
+        </div>
+      </div>
+
+      <!-- Warehouse -->
+      <h6 class="settings-section-title">Warehouse</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableStorageLocations" formControlName="enableStorageLocations" />
+            <label class="form-check-label fw-semibold" for="enableStorageLocations">Storage Locations</label>
+          </div>
+          <div class="text-muted small ms-4">Track product location in your warehouse.</div>
+          <div class="ms-4 mt-1">
+            <a routerLink="/inventory/warehouses" class="small settings-link">Warehouses →</a>
+          </div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableMultiStepRoutes" formControlName="enableMultiStepRoutes" />
+            <label class="form-check-label fw-semibold" for="enableMultiStepRoutes">Multi-Step Routes</label>
+          </div>
+          <div class="text-muted small ms-4">Use your own routes.</div>
+        </div>
+      </div>
+
+      <!-- Advanced Scheduling -->
+      <h6 class="settings-section-title">Advanced Scheduling</h6>
+      <div class="row gy-3 mb-4">
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="replenishmentHorizonDays">Replenishment Horizon</label>
+          <div class="text-muted small mb-2">Configure your horizon to trigger reordering rules earlier to get a head start on replenishment and avoid delays, or trigger it just-in-time ('0 days') to avoid overstocking.</div>
+          <div class="d-flex align-items-center gap-2">
+            <input type="number" class="form-control form-control-sm settings-number-input" id="replenishmentHorizonDays" formControlName="replenishmentHorizonDays" min="0" />
+            <span class="small text-muted">days</span>
+          </div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableSecurityLeadTimeForSales" formControlName="enableSecurityLeadTimeForSales" />
+            <label class="form-check-label fw-semibold" for="enableSecurityLeadTimeForSales">Security Lead Time for Sales</label>
+          </div>
+          <div class="text-muted small ms-4">Schedule deliveries earlier to avoid delays.</div>
+        </div>
+
+        <div class="col-md-6 settings-item">
+          <label class="fw-semibold form-label" for="daysToPurchase">Days to Purchase</label>
+          <div class="text-muted small mb-2">Days needed to confirm a PO.</div>
+          <div class="d-flex align-items-center gap-2">
+            <input type="number" class="form-control form-control-sm settings-number-input" id="daysToPurchase" formControlName="daysToPurchase" min="0" />
+            <span class="small text-muted">days</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logistics -->
+      <h6 class="settings-section-title">Logistics</h6>
+      <div class="row gy-3">
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableDropshipping" formControlName="enableDropshipping" />
+            <label class="form-check-label fw-semibold" for="enableDropshipping">Dropshipping</label>
+          </div>
+          <div class="text-muted small ms-4">Request your vendors to deliver to your customers.</div>
+        </div>
+        <div class="col-md-6 settings-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enableReplenishOnOrder" formControlName="enableReplenishOnOrder" />
+            <label class="form-check-label fw-semibold" for="enableReplenishOnOrder">Replenish on Order (MTO)</label>
+          </div>
+          <div class="text-muted small ms-4">Allow Make to Order, or automate PO, when a product is sold and get direct links between documents.</div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>

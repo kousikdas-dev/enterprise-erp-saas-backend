@@ -1,0 +1,12 @@
+<div class="apps-home">
+  <div class="apps-grid">
+    @for (app of apps; track app.route) {
+      <a class="app-tile" [routerLink]="app.route" routerLinkActive="app-tile--active">
+        <span class="app-tile__icon-wrapper" [ngClass]="app.bgClass">
+          <i [class]="app.icon"></i>
+        </span>
+        <span class="app-tile__label">{{ app.label }}</span>
+      </a>
+    }
+  </div>
+</div>

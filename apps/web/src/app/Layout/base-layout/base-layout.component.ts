@@ -3,22 +3,27 @@ import {Observable} from 'rxjs';
 import { ConfigService } from '../../ThemeOptions/store/config.service';
 import { ConfigState } from '../../ThemeOptions/store/config.state';
 import {ThemeOptions} from '../../theme-options';
+import {PageThemeService} from '../services/page-theme.service';
 
 @Component({
   selector: 'app-base-layout',
   templateUrl: './base-layout.component.html',
+  styleUrl: './base-layout.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class BaseLayoutComponent {
 
   public config$: Observable<ConfigState>;
+  public readonly darkTheme;
 
   constructor(
     public globals: ThemeOptions,
-    private configService: ConfigService
+    private configService: ConfigService,
+    private pageThemeService: PageThemeService,
   ) {
     this.config$ = this.configService.config$;
+    this.darkTheme = this.pageThemeService.darkTheme;
 
     afterNextRender(() => {
       const bootstrap = typeof window !== 'undefined' ? window.bootstrap : undefined;

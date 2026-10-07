@@ -16,8 +16,11 @@ import {
 export class ProductService {
   constructor(private readonly api: ApiClient) {}
 
-  list(): Observable<ItemList<Product>> {
-    return this.api.get<ItemList<Product>>('/v1/products');
+  list(templateProductId?: string): Observable<ItemList<Product>> {
+    const query = templateProductId
+      ? `?templateProductId=${encodeURIComponent(templateProductId)}`
+      : '';
+    return this.api.get<ItemList<Product>>(`/v1/products${query}`);
   }
 
   getById(id: string): Observable<Product> {

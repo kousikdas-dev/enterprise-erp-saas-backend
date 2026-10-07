@@ -6,6 +6,8 @@ import { AccountsReceivableModule } from './accounts-receivable/accounts-receiva
 import { SalesAuditModule } from './audit/sales-audit.module';
 import { SalesEnvironmentVariables } from './config/sales-env';
 import { CustomersModule } from './customers/customers.module';
+import { DeliveryMethodsModule } from './delivery-methods/delivery-methods.module';
+import { PricelistsModule } from './pricelists/pricelists.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProformaInvoicesModule } from './proforma-invoices/proforma-invoices.module';
 import { QuotationsModule } from './quotations/quotations.module';
@@ -27,6 +29,8 @@ import { ShipmentsModule } from './shipments/shipments.module';
     PrismaModule,
     SalesAuditModule,
     CustomersModule,
+    DeliveryMethodsModule,
+    PricelistsModule,
     QuotationsModule,
     ProformaInvoicesModule,
     SalesInvoicesModule,

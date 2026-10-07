@@ -9,6 +9,8 @@ export function toAuthenticatedUser(payload: unknown): AuthenticatedUser {
   const typ = payload['typ'];
   const sub = payload['sub'];
   const tenantId = payload['tenantId'];
+  const tenantName = payload['tenantName'];
+  const userName = payload['userName'];
 
   if (typ !== 'access') {
     throw new UnauthorizedException();
@@ -20,7 +22,12 @@ export function toAuthenticatedUser(payload: unknown): AuthenticatedUser {
     throw new UnauthorizedException();
   }
 
-  return { userId: sub, tenantId };
+  return {
+    userId: sub,
+    tenantId,
+    tenantName: typeof tenantName === 'string' && tenantName.length > 0 ? tenantName : undefined,
+    userName: typeof userName === 'string' && userName.length > 0 ? userName : undefined,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,7 +1,6 @@
 <div class="header-btn-lg d-flex align-items-center">
   <div class="widget-content-left me-2">
-    <div class="widget-heading">{{ displayName$ | async }}</div>
-    <div class="widget-subheading">{{ displaySubheading$ | async }}</div>
+    <div class="widget-heading">{{ displaySubheading$ | async }}</div>
   </div>
   <div ngbDropdown placement="bottom-end">
     <button type="button" class="btn btn-link p-0" ngbDropdownToggle>
@@ -13,6 +12,32 @@
         <h6 class="mb-0">{{ displayName$ | async }}</h6>
         <small class="text-muted">{{ displaySubheading$ | async }}</small>
       </div>
+      <div class="dropdown-divider"></div>
+      <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+        <i class="pe-7s-help1 me-2"></i>
+        Help
+      </button>
+      <button type="button" class="dropdown-item d-flex align-items-center justify-content-between" disabled title="Will be implemented in a future phase.">
+        <span><i class="pe-7s-keypad me-2"></i>Shortcuts</span>
+        <small class="text-muted">Ctrl+K</small>
+      </button>
+      <div class="dropdown-divider"></div>
+      <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+        <span class="user-status-dot me-2"></span>
+        Online
+      </button>
+      <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+        <i class="pe-7s-user me-2"></i>
+        My Preferences
+      </button>
+      <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+        <i class="pe-7s-id me-2"></i>
+        Account Settings
+      </button>
+      <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+        <i class="pe-7s-download me-2"></i>
+        Install App
+      </button>
       <div class="dropdown-divider"></div>
       <button type="button" class="dropdown-item text-danger" (click)="logout()">
         <i class="pe-7s-power me-2"></i>

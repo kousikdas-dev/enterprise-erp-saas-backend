@@ -1,16 +1,18 @@
 <div [ngClass]="{
 'header-menu-open' : globals.toggleHeaderMobile(),
-'fixed-footer' : globals.toggleFixedFooter()
+'fixed-footer' : globals.toggleFixedFooter(),
+'app-container--dark-theme' : darkTheme()
 }" [class]="'app-container app-theme-white'">
   <app-header></app-header>
-  <app-top-navigation></app-top-navigation>
-  <div class="app-main__outer">
-    <div class="app-main__inner">
-      <div class="router-outlet-container">
-        <router-outlet #o="outlet"></router-outlet>
+  <div class="app-below-header">
+    <div class="app-main__outer">
+      <div class="app-main__inner">
+        <div class="router-outlet-container">
+          <router-outlet #o="outlet"></router-outlet>
+        </div>
       </div>
+      <app-footer></app-footer>
     </div>
-    <app-footer></app-footer>
   </div>
   <app-toast-container></app-toast-container>
 </div>

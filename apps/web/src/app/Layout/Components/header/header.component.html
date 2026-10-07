@@ -2,14 +2,23 @@
   <div class="logo-src"></div>
   <div class="app-header__content">
     <div class="app-header-left">
-      <button type="button" class="hamburger hamburger--elastic me-2"
-              [ngClass]="{'is-active' : globals.toggleSidebar()}" (click)="toggleSidebar()">
-        <span class="hamburger-box">
-            <span class="hamburger-inner"></span>
+      <a routerLink="/dashboard" class="app-module-label">
+        @if (activeModuleBadgeImage(); as badgeImage) {
+          <span class="app-module-label__badge app-module-label__badge--default app-module-label__badge--image">
+            <img [src]="badgeImage" alt="" />
+          </span>
+        } @else {
+          <span class="app-module-label__badge app-module-label__badge--default" [ngClass]="activeModuleBgClass()">
+            <i [class]="activeModuleIcon()"></i>
+          </span>
+        }
+        <span class="app-module-label__badge app-module-label__badge--hover">
+          <i class="pe-7s-back"></i>
         </span>
-      </button>
-      <app-search-box></app-search-box>
+        {{ activeModuleLabel() }}
+      </a>
     </div>
+    <app-top-navigation></app-top-navigation>
     <div class="app-header-right">
       <app-notifications-box></app-notifications-box>
       <app-messages-box></app-messages-box>

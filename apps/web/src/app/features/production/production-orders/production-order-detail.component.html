@@ -1,0 +1,292 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="d-flex align-items-center gap-2">
+      <a routerLink="/production/production-orders" class="btn btn-sm btn-outline-secondary">← Manufacturing Orders</a>
+      <span class="card-header-title mb-0">{{ order?.orderNumber || 'New' }}</span>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      @if (isEditable) {
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="discard()" [disabled]="saving">
+          Discard
+        </button>
+        <button type="button" class="btn btn-sm btn-primary" (click)="save()" [disabled]="saving || form.invalid">
+          {{ saving ? 'Saving…' : 'Save' }}
+        </button>
+      }
+      @if (canPlanOrder) {
+        <button type="button" class="btn btn-sm btn-primary" (click)="runAction('plan')" [disabled]="actionBusy">
+          Confirm
+        </button>
+      }
+      @if (canReleaseOrder) {
+        <button type="button" class="btn btn-sm btn-primary" (click)="runAction('release')" [disabled]="actionBusy">
+          Release
+        </button>
+      }
+      @if (canStartOrder) {
+        <button type="button" class="btn btn-sm btn-warning" (click)="runAction('start')" [disabled]="actionBusy">
+          Start
+        </button>
+      }
+      @if (canCloseOrder) {
+        <button type="button" class="btn btn-sm btn-dark" (click)="runAction('close')" [disabled]="actionBusy">
+          Close
+        </button>
+      }
+      @if (canCancelOrder) {
+        <button type="button" class="btn btn-sm btn-outline-danger" (click)="runAction('cancel')" [disabled]="actionBusy">
+          Cancel
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="card-body">
+    @if (loading) {
+      <p class="text-muted">Loading…</p>
+    }
+    @if (error) {
+      <p class="text-danger">{{ error }}</p>
+    }
+    @if (!loading) {
+      <!-- Status bar -->
+      <div class="d-flex flex-wrap align-items-center gap-1 mb-4 status-bar">
+        @if (order?.status === 'CANCELLED') {
+          <span class="badge bg-danger">Cancelled</span>
+        } @else {
+          @for (step of statusSteps; track step; let last = $last) {
+            <span class="badge" [ngClass]="(order?.status ?? 'DRAFT') === step ? statusBadgeClass(step) : 'bg-light text-muted border'">
+              {{ step === 'IN_PROGRESS' ? 'In Progress' : (step | titlecase) }}
+            </span>
+            @if (!last) {
+              <span class="text-muted">→</span>
+            }
+          }
+        }
+      </div>
+
+      <form [formGroup]="form">
+        <div class="row gy-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label" for="poProduct">Product</label>
+            @if (isEditable) {
+              <select id="poProduct" class="form-select" formControlName="productId">
+                <option value="">Product to build…</option>
+                @for (p of eligibleProducts; track p.id) {
+                  <option [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+                }
+              </select>
+              @if (form.get('productId')?.touched && form.get('productId')?.invalid) {
+                <div class="text-danger small">Product is required.</div>
+              }
+            } @else {
+              <div class="form-control-plaintext">{{ order?.productName }} (<code>{{ order?.productSku }}</code>)</div>
+            }
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="poBom">Bill of Material</label>
+            @if (isEditable) {
+              <select id="poBom" class="form-select" formControlName="bomId" (change)="onBomChange($any($event.target).value)">
+                <option value="">Select BOM…</option>
+                @for (b of bomsForSelectedProduct; track b.id) {
+                  <option [value]="b.id">v{{ b.version }} — {{ b.bomQuantity }} {{ b.outputUomCode }} ({{ b.status }})</option>
+                }
+              </select>
+              @if (form.value.productId && !bomsForSelectedProduct.length) {
+                <div class="form-text">This product has no ACTIVE BOM yet.</div>
+              }
+            } @else {
+              <div class="form-control-plaintext">v{{ order?.bomVersion }}</div>
+            }
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label" for="poQuantity">Quantity</label>
+            @if (isEditable) {
+              <input id="poQuantity" class="form-control" formControlName="plannedQuantity" placeholder="1.00" />
+            } @else {
+              <div class="form-control-plaintext"><code>{{ order?.plannedQuantity }}</code></div>
+            }
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="poOutputUom">To Produce (Unit)</label>
+            @if (isEditable) {
+              <select id="poOutputUom" class="form-select" formControlName="outputUnitOfMeasureId">
+                <option value="">Select UOM…</option>
+                @for (u of outputUomOptionsFor(form.value.productId || ''); track u.id) {
+                  <option [value]="u.id">{{ u.label }}</option>
+                }
+              </select>
+            } @else {
+              <div class="form-control-plaintext">{{ order?.outputUomCode }}</div>
+            }
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="poStart">Scheduled Date</label>
+            @if (isEditable) {
+              <input id="poStart" type="date" class="form-control" formControlName="plannedStartDate" />
+            } @else {
+              <div class="form-control-plaintext">{{ order?.plannedStartDate ? (order?.plannedStartDate | slice:0:10) : '—' }}</div>
+            }
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="poEnd">Planned End</label>
+            @if (isEditable) {
+              <input id="poEnd" type="date" class="form-control" formControlName="plannedEndDate" />
+            } @else {
+              <div class="form-control-plaintext">{{ order?.plannedEndDate ? (order?.plannedEndDate | slice:0:10) : '—' }}</div>
+            }
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item">
+            <button type="button" class="nav-link" [class.active]="activeTab === 'components'" (click)="activeTab = 'components'">
+              Components
+            </button>
+          </li>
+          <li class="nav-item">
+            <button type="button" class="nav-link" [class.active]="activeTab === 'workOrders'" (click)="activeTab = 'workOrders'">
+              Work Orders
+            </button>
+          </li>
+          <li class="nav-item">
+            <button type="button" class="nav-link" [class.active]="activeTab === 'misc'" (click)="activeTab = 'misc'">
+              Miscellaneous
+            </button>
+          </li>
+        </ul>
+
+        @if (activeTab === 'components') {
+          <div class="table-responsive" formArrayName="items">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th style="min-width: 70px;">Seq</th>
+                  <th style="min-width: 220px;">Product</th>
+                  <th style="min-width: 130px;">To Consume</th>
+                  <th style="min-width: 150px;">Unit</th>
+                  @if (isEditable) {
+                    <th></th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (line of lines.controls; track line; let i = $index) {
+                  <tr [formGroupName]="i">
+                    @if (isEditable) {
+                      <td>
+                        <input class="form-control form-control-sm" type="number" min="1" formControlName="sequence" />
+                      </td>
+                      <td>
+                        <select class="form-select form-select-sm" formControlName="componentProductId">
+                          <option value="">Select component…</option>
+                          @for (p of eligibleProducts; track p.id) {
+                            <option [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+                          }
+                        </select>
+                        @if (line.get('componentProductId')?.touched && line.get('componentProductId')?.invalid) {
+                          <div class="text-danger small">Required.</div>
+                        }
+                      </td>
+                      <td>
+                        <input class="form-control form-control-sm" formControlName="quantity" placeholder="1.050000" />
+                        @if (line.get('quantity')?.touched && line.get('quantity')?.invalid) {
+                          <div class="text-danger small">Must be greater than zero.</div>
+                        }
+                      </td>
+                      <td>
+                        <select class="form-select form-select-sm" formControlName="unitOfMeasureId">
+                          <option value="">Select UOM…</option>
+                          @for (u of componentUomOptionsFor(line.value.componentProductId); track u.id) {
+                            <option [value]="u.id">{{ u.label }}</option>
+                          }
+                        </select>
+                      </td>
+                      <td class="text-end">
+                        <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeLine(i)">
+                          Remove
+                        </button>
+                      </td>
+                    } @else {
+                      <td>{{ line.value.sequence }}</td>
+                      <td>{{ productLabel(line.value.componentProductId) }}</td>
+                      <td><code>{{ line.value.quantity }}</code></td>
+                      <td>{{ order?.items?.[i]?.uomCode }}</td>
+                    }
+                  </tr>
+                }
+                @if (!lines.controls.length) {
+                  <tr>
+                    <td [attr.colspan]="isEditable ? 5 : 4" class="text-muted">
+                      Select a product and Bill of Material to default components, or add a line.
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (isEditable) {
+            <button type="button" class="btn btn-sm btn-outline-primary" (click)="addLine()">Add a line</button>
+            <div class="form-text mt-2">
+              Defaults from the selected BOM (scaled to quantity) — add, remove, or edit lines freely for this order only; the BOM itself is never changed.
+            </div>
+          }
+        }
+
+        @if (activeTab === 'workOrders') {
+          <p class="text-muted mb-0">
+            Work Orders aren't tracked in this system yet — this phase runs production orders against a BOM only, with no shop-floor routing/work-order steps.
+          </p>
+        }
+
+        @if (activeTab === 'misc') {
+          <div class="row gy-3">
+            <div class="col-md-4">
+              <label class="form-label" for="poOrderDate">Order Date</label>
+              @if (isEditable) {
+                <input id="poOrderDate" type="date" class="form-control" formControlName="orderDate" />
+              } @else {
+                <div class="form-control-plaintext">{{ order?.orderDate | slice:0:10 }}</div>
+              }
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="poWarehouse">Warehouse</label>
+              @if (isEditable) {
+                <select id="poWarehouse" class="form-select" formControlName="warehouseId">
+                  <option value="">Not specified</option>
+                  @for (w of warehouses; track w.id) {
+                    <option [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+                  }
+                </select>
+              } @else {
+                <div class="form-control-plaintext">{{ warehouseLabel(order?.warehouseId ?? null) }}</div>
+              }
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="poPriority">Priority</label>
+              @if (isEditable) {
+                <select id="poPriority" class="form-select" formControlName="priority">
+                  @for (p of priorities; track p) {
+                    <option [value]="p">{{ p }}</option>
+                  }
+                </select>
+              } @else {
+                <div class="form-control-plaintext">{{ order?.priority }}</div>
+              }
+            </div>
+            <div class="col-md-12">
+              <label class="form-label" for="poNotes">Additional Notes</label>
+              @if (isEditable) {
+                <textarea id="poNotes" class="form-control" rows="3" formControlName="notes" maxlength="500"></textarea>
+              } @else {
+                <div class="form-control-plaintext">{{ order?.notes || '—' }}</div>
+              }
+            </div>
+          </div>
+        }
+      </form>
+    }
+  </div>
+</div>

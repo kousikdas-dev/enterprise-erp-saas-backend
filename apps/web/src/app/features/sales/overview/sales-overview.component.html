@@ -1,0 +1,61 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+      Sales Overview
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+      Refresh
+    </button>
+  </div>
+
+  <div class="card-body">
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="false"
+      (retry)="load()">
+      <div class="row g-3">
+        @if (canReadCustomers) {
+          <div class="col-6 col-md-4 col-lg">
+            <a routerLink="/sales/customers" class="overview-stat">
+              <div class="overview-stat-value">{{ customersCount }}</div>
+              <div class="overview-stat-label">Customers</div>
+            </a>
+          </div>
+        }
+        @if (canReadQuotations) {
+          <div class="col-6 col-md-4 col-lg">
+            <a routerLink="/sales/quotations" class="overview-stat">
+              <div class="overview-stat-value">{{ openQuotationsCount }}</div>
+              <div class="overview-stat-label">Open Quotations</div>
+            </a>
+          </div>
+        }
+        @if (canReadSalesOrders) {
+          <div class="col-6 col-md-4 col-lg">
+            <a routerLink="/sales/sales-orders" class="overview-stat">
+              <div class="overview-stat-value">{{ openSalesOrdersCount }}</div>
+              <div class="overview-stat-label">Open Sales Orders</div>
+            </a>
+          </div>
+        }
+        @if (canReadShipments) {
+          <div class="col-6 col-md-4 col-lg">
+            <a routerLink="/sales/shipments" class="overview-stat">
+              <div class="overview-stat-value">{{ pendingShipmentsCount }}</div>
+              <div class="overview-stat-label">Pending Shipments</div>
+            </a>
+          </div>
+        }
+        @if (canReadSalesInvoices) {
+          <div class="col-6 col-md-4 col-lg">
+            <a routerLink="/sales/sales-invoices" class="overview-stat">
+              <div class="overview-stat-value">{{ unpaidSalesInvoicesCount }}</div>
+              <div class="overview-stat-label">Unpaid Sales Invoices</div>
+            </a>
+          </div>
+        }
+      </div>
+    </app-list-state>
+  </div>
+</div>

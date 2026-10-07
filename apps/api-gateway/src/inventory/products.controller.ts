@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -75,11 +76,15 @@ export class ProductsController {
   })
   @ApiOkResponse({ type: ProductListDto })
   @ApiManagementErrors()
-  list(@CurrentUser() user: AuthenticatedUser): Promise<ProductListDto> {
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('templateProductId') templateProductId?: string,
+  ): Promise<ProductListDto> {
     return this.inventory.forward<ProductListDto>({
       method: 'GET',
       path: '/api/v1/products',
       user,
+      query: templateProductId ? { templateProductId } : undefined,
     });
   }
 

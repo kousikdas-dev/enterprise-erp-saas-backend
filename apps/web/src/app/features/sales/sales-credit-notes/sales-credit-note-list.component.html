@@ -1,7 +1,16 @@
 <div class="main-card mb-3 card">
-  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">Sales Credit Notes</div>
-    <div class="d-flex flex-wrap gap-2">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
+        New
+      </button>
+      <div class="card-header-title d-flex align-items-center gap-2 mb-0">
+        Sales Credit Notes
+        <app-list-actions-menu label="Sales Credit Notes"></app-list-actions-menu>
+      </div>
+    </div>
+
+    <div class="flex-grow-1 d-flex flex-wrap justify-content-center gap-2">
       <input
         type="search"
         class="form-control form-control-sm"
@@ -20,11 +29,12 @@
       </select>
       <input type="date" class="form-control form-control-sm" [(ngModel)]="filterFromDate" title="From date" />
       <input type="date" class="form-control form-control-sm" [(ngModel)]="filterToDate" title="To date" />
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <app-list-paginator #pager [items]="filtered"></app-list-paginator>
       <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
         Refresh
-      </button>
-      <button *ngIf="canCreate" type="button" class="btn btn-sm btn-success" (click)="openCreate()">
-        Create Credit Note
       </button>
     </div>
   </div>
@@ -60,7 +70,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filtered">
+            <tr *ngFor="let item of pager.pageItems">
               <td><code>{{ item.creditNoteNumber }}</code></td>
               <td>{{ item.customerName }}</td>
               <td>{{ item.creditNoteDate }}</td>

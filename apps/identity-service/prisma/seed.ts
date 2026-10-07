@@ -94,6 +94,66 @@ const MANAGEMENT_PERMISSIONS: Array<{
     description: 'Update units of measure',
   },
   {
+    resource: 'unspsc-categories',
+    action: 'create',
+    description: 'Create UNSPSC categories',
+  },
+  {
+    resource: 'unspsc-categories',
+    action: 'read',
+    description: 'Read UNSPSC categories',
+  },
+  {
+    resource: 'unspsc-categories',
+    action: 'update',
+    description: 'Update UNSPSC categories',
+  },
+  {
+    resource: 'attributes',
+    action: 'create',
+    description: 'Create attributes',
+  },
+  {
+    resource: 'attributes',
+    action: 'read',
+    description: 'Read attributes',
+  },
+  {
+    resource: 'attributes',
+    action: 'update',
+    description: 'Update attributes',
+  },
+  {
+    resource: 'pricelists',
+    action: 'create',
+    description: 'Create pricelists',
+  },
+  {
+    resource: 'pricelists',
+    action: 'read',
+    description: 'Read pricelists',
+  },
+  {
+    resource: 'pricelists',
+    action: 'update',
+    description: 'Update pricelists',
+  },
+  {
+    resource: 'delivery-methods',
+    action: 'create',
+    description: 'Create delivery methods',
+  },
+  {
+    resource: 'delivery-methods',
+    action: 'read',
+    description: 'Read delivery methods',
+  },
+  {
+    resource: 'delivery-methods',
+    action: 'update',
+    description: 'Update delivery methods',
+  },
+  {
     resource: 'warehouses',
     action: 'create',
     description: 'Create warehouses',

@@ -8,7 +8,9 @@ import { parseExpiresInToSeconds } from './parse-expires-in';
 export interface AccessTokenClaims {
   sub: string;
   tenantId: string;
+  tenantName: string;
   email: string;
+  userName: string;
   typ: 'access';
 }
 
@@ -45,7 +47,9 @@ export class TokenService {
     const payload: AccessTokenClaims = {
       sub: claims.sub,
       tenantId: claims.tenantId,
+      tenantName: claims.tenantName,
       email: claims.email,
+      userName: claims.userName,
       typ: 'access',
     };
 

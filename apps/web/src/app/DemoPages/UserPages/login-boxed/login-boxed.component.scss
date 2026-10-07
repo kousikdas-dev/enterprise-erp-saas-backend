@@ -1,0 +1,166 @@
+:host {
+  display: block;
+}
+
+.login-split {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+
+  @media (max-width: 991.98px) {
+    min-height: 100dvh;
+  }
+}
+
+// ---- Branding panel ----
+
+// Same treatment as the Dashboard's app-tile screen (apps-home.component.scss):
+// dark wash + two glow blobs + a faint grid overlay, so the login page reads
+// as the same product rather than a generic template gradient.
+.login-split__brand {
+  position: relative;
+  flex: 1 1 50%;
+  display: none;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3.5rem 4rem;
+  overflow: hidden;
+  color: #fff;
+  background-color: #150c1c;
+  background-image:
+    radial-gradient(circle at 18% 75%, rgba(226, 42, 90, 0.3), transparent 45%),
+    radial-gradient(circle at 82% 15%, rgba(94, 58, 214, 0.3), transparent 50%),
+    linear-gradient(135deg, #150c1c 0%, #2b1127 30%, #30183d 55%, #1e1034 80%, #140b21 100%);
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+  }
+
+  @media (min-width: 992px) {
+    display: flex;
+  }
+}
+
+.login-split__brand-content {
+  position: relative;
+  z-index: 1;
+  max-width: 460px;
+}
+
+.login-split__logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .16);
+  font-size: 1.25rem;
+
+  &--sm {
+    width: 34px;
+    height: 34px;
+    font-size: 1rem;
+  }
+}
+
+.login-split__wordmark {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: .01em;
+
+  &--sm {
+    font-size: 1.05rem;
+    color: var(--bs-body-color, #495057);
+  }
+}
+
+.login-split__headline {
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-bottom: 1rem;
+}
+
+.login-split__subtext {
+  font-size: 1rem;
+  opacity: .85;
+  margin-bottom: 2.25rem;
+}
+
+.login-split__features {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    font-size: .925rem;
+    opacity: .92;
+  }
+}
+
+.login-split__feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .14);
+  font-size: 1rem;
+}
+
+.login-split__copyright {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-size: .8rem;
+  opacity: .7;
+}
+
+// ---- Form panel ----
+
+.login-split__form-panel {
+  flex: 1 1 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  background: var(--bs-body-bg, #fff);
+}
+
+.login-split__form-wrap {
+  width: 100%;
+  max-width: 380px;
+}
+
+.login-split__mobile-brand {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: 2rem;
+
+  .login-split__logo-mark--sm {
+    background: #5e3ad6;
+    color: #fff;
+  }
+}
+
+.login-split__mobile-copyright {
+  margin: 1.5rem 0 0;
+  text-align: center;
+  font-size: .8rem;
+  color: var(--bs-secondary-color, #6c757d);
+}

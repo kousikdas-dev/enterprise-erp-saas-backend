@@ -136,6 +136,81 @@ enum SalesReturnPostingStatus {
   REVERSED
 }
 
+enum PricelistApplyOn {
+  ALL_PRODUCTS
+  CATEGORY
+  PRODUCT
+}
+
+enum PricelistComputeMethod {
+  FIXED_PRICE
+  DISCOUNT_PERCENT
+}
+
+/// Delivery Methods master — reference data only in this phase, not yet
+/// linked from Shipment (no carrier/rate integration exists).
+model DeliveryMethod {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  name      String
+  code      String
+  price     Decimal  @default(0) @db.Decimal(19, 4)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("delivery_methods")
+}
+
+/// Pricelist master — reference data only in this phase, not yet looked up
+/// during Quotation/SalesOrder/Invoice line pricing.
+model Pricelist {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items PricelistItem[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("pricelists")
+}
+
+model PricelistItem {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @db.Uuid
+  pricelistId String           @db.Uuid
+  applyOn     PricelistApplyOn @default(ALL_PRODUCTS)
+  /** Set only when applyOn = CATEGORY. Soft reference — Category lives in inventory-service, no FK here. */
+  categoryId  String?          @db.Uuid
+  /** Set only when applyOn = PRODUCT. Soft reference — Product lives in inventory-service, no FK here. */
+  productId   String?          @db.Uuid
+
+  computeMethod   PricelistComputeMethod @default(FIXED_PRICE)
+  /** Set only when computeMethod = FIXED_PRICE. */
+  fixedPrice      Decimal?               @db.Decimal(19, 4)
+  /** Set only when computeMethod = DISCOUNT_PERCENT. */
+  discountPercent Decimal?               @db.Decimal(5, 2)
+
+  minQuantity Decimal   @default(0) @db.Decimal(19, 4)
+  validFrom   DateTime?
+  validTo     DateTime?
+  sequence    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  pricelist Pricelist @relation(fields: [pricelistId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([pricelistId])
+  @@map("pricelist_items")
+}
+
 model Customer {
   id       String @id @default(uuid()) @db.Uuid
   tenantId String @db.Uuid

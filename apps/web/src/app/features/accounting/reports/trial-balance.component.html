@@ -1,8 +1,9 @@
 <div class="main-card mb-3 card">
   <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
-    <div class="card-header-title">
+    <div class="card-header-title d-flex align-items-center gap-2">
       Trial Balance
       <span *ngIf="result" class="text-muted">— as of {{ result.asOfDate }}</span>
+      <app-list-actions-menu label="Trial Balance"></app-list-actions-menu>
     </div>
   </div>
 
