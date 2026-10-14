@@ -8,6 +8,7 @@ import { OperationsModule } from './operations/operations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductionOrdersModule } from './production-orders/production-orders.module';
 import { RoutingsModule } from './routings/routings.module';
+import { UnbuildOrdersModule } from './unbuild-orders/unbuild-orders.module';
 import { WorkCentresModule } from './work-centres/work-centres.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 
@@ -27,6 +28,7 @@ import { WorkOrdersModule } from './work-orders/work-orders.module';
     ProductionOrdersModule,
     WorkOrdersModule,
     RoutingsModule,
+    UnbuildOrdersModule,
     MessagingModule.register(),
   ],
 })

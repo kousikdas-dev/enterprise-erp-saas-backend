@@ -1,6 +1,7 @@
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { InventoryProductClient } from './inventory-product.client';
+import { InventoryUnbuildClient } from './inventory-unbuild.client';
 import { InventoryWarehouseClient } from './inventory-warehouse.client';
 
 @Module({
@@ -10,7 +11,7 @@ import { InventoryWarehouseClient } from './inventory-warehouse.client';
       maxRedirects: 0,
     }),
   ],
-  providers: [InventoryProductClient, InventoryWarehouseClient],
-  exports: [InventoryProductClient, InventoryWarehouseClient],
+  providers: [InventoryProductClient, InventoryWarehouseClient, InventoryUnbuildClient],
+  exports: [InventoryProductClient, InventoryWarehouseClient, InventoryUnbuildClient],
 })
 export class InventoryClientModule {}

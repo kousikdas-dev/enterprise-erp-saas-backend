@@ -840,6 +840,31 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'deactivate',
     description: 'Deactivate production Manufacturing Routings',
   },
+  {
+    resource: 'production-unbuild-orders',
+    action: 'create',
+    description: 'Create unbuild orders',
+  },
+  {
+    resource: 'production-unbuild-orders',
+    action: 'read',
+    description: 'Read unbuild orders',
+  },
+  {
+    resource: 'production-unbuild-orders',
+    action: 'update',
+    description: 'Update DRAFT unbuild orders',
+  },
+  {
+    resource: 'production-unbuild-orders',
+    action: 'complete',
+    description: 'Complete unbuild orders (post component returns to inventory)',
+  },
+  {
+    resource: 'production-unbuild-orders',
+    action: 'cancel',
+    description: 'Cancel DRAFT unbuild orders',
+  },
 ];
 
 async function seedSuperAdminPermissions(

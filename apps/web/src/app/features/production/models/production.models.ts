@@ -398,6 +398,90 @@ export interface UpdateRoutingRequest {
   steps?: RoutingStepLineInput[];
 }
 
+export type UnbuildOrderStatus = 'DRAFT' | 'PROCESSING' | 'DONE' | 'CANCELLED';
+
+export const UNBUILD_ORDER_STATUSES: readonly UnbuildOrderStatus[] = [
+  'DRAFT',
+  'PROCESSING',
+  'DONE',
+  'CANCELLED',
+] as const;
+
+export interface UnbuildOrderItem {
+  id: string;
+  unbuildOrderId: string;
+  componentProductId: string;
+  componentProductSku: string;
+  componentProductName: string;
+  quantity: string;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  sequence: number;
+  /** inventory-service StockMovement id for this component's return leg — set only once the order is DONE. */
+  stockMovementId: string | null;
+}
+
+export interface UnbuildOrder {
+  id: string;
+  tenantId: string;
+  orderNumber: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  bomId: string;
+  bomVersion: number;
+  quantity: string;
+  unitOfMeasureId: string;
+  uomCode: string;
+  uomName: string;
+  warehouseId: string;
+  sourceProductionOrderId: string | null;
+  sourceProductionOrderNumber: string | null;
+  status: UnbuildOrderStatus | string;
+  unbuildDate: string;
+  notes: string | null;
+  completedAt: string | null;
+  completedBy: string | null;
+  /** inventory-service StockMovement id for the finished-goods issue leg. */
+  finishedGoodsMovementId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: UnbuildOrderItem[];
+}
+
+export interface CreateUnbuildOrderRequest {
+  productId: string;
+  bomId: string;
+  quantity: string;
+  unitOfMeasureId: string;
+  warehouseId: string;
+  sourceProductionOrderId?: string;
+  unbuildDate: string;
+  notes?: string;
+}
+
+export interface UpdateUnbuildOrderRequest {
+  quantity?: string;
+  warehouseId?: string;
+  unbuildDate?: string;
+  notes?: string;
+}
+
+export interface UnbuildOrderListQuery {
+  status?: UnbuildOrderStatus;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UnbuildOrderListResponse {
+  items: UnbuildOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface ItemList<T> {
   items: T[];
 }

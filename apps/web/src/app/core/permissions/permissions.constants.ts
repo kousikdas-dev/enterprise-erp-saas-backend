@@ -179,6 +179,11 @@ export const AppPermissions = {
   PRODUCTION_ROUTINGS_DELETE: 'production-routings.delete',
   PRODUCTION_ROUTINGS_ACTIVATE: 'production-routings.activate',
   PRODUCTION_ROUTINGS_DEACTIVATE: 'production-routings.deactivate',
+  PRODUCTION_UNBUILD_ORDERS_CREATE: 'production-unbuild-orders.create',
+  PRODUCTION_UNBUILD_ORDERS_READ: 'production-unbuild-orders.read',
+  PRODUCTION_UNBUILD_ORDERS_UPDATE: 'production-unbuild-orders.update',
+  PRODUCTION_UNBUILD_ORDERS_COMPLETE: 'production-unbuild-orders.complete',
+  PRODUCTION_UNBUILD_ORDERS_CANCEL: 'production-unbuild-orders.cancel',
 } as const;
 
 export type AppPermission =

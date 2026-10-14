@@ -1,0 +1,223 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="card-header-title mb-0">
+      {{ isNew ? 'New Unbuild Order' : (order ? order.orderNumber : 'Unbuild Order') }}
+    </div>
+    <span *ngIf="order" class="badge" [ngClass]="statusBadgeClass(order.status)">{{ order.status }}</span>
+    <div class="ms-auto d-flex gap-2">
+      <button
+        *ngIf="canCompleteOrder"
+        type="button"
+        class="btn btn-sm btn-outline-success"
+        (click)="askComplete()">
+        Complete
+      </button>
+      <button
+        *ngIf="canCancelOrder"
+        type="button"
+        class="btn btn-sm btn-outline-secondary"
+        (click)="askCancel()">
+        Cancel Order
+      </button>
+      <a routerLink="/production/unbuild-orders" class="btn btn-sm btn-outline-secondary">Back to list</a>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <app-list-state [loading]="loading" [error]="error" [empty]="false" (retry)="order && loadOrder(order.id)">
+      <form [formGroup]="form" (ngSubmit)="save()">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label" for="uboProduct">Finished Product</label>
+            <select
+              id="uboProduct"
+              class="form-select"
+              formControlName="productId"
+              [class.is-invalid]="form.get('productId')!.invalid && form.get('productId')!.touched">
+              <option value="" disabled>Select a product…</option>
+              <option *ngFor="let p of products" [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+            </select>
+            <div class="invalid-feedback">Finished product is required.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label" for="uboBom">Bill of Material</label>
+            <select
+              id="uboBom"
+              class="form-select"
+              formControlName="bomId"
+              [class.is-invalid]="form.get('bomId')!.invalid && form.get('bomId')!.touched">
+              <option value="" disabled>Select a BOM…</option>
+              <option *ngFor="let b of bomsForSelectedProduct" [value]="b.id">
+                v{{ b.version }} ({{ b.status }}) — {{ b.bomQuantity }} {{ b.outputUomCode }}
+              </option>
+            </select>
+            <div class="invalid-feedback">A BOM is required.</div>
+            <div class="form-text" *ngIf="form.value.productId && !bomsForSelectedProduct.length">
+              No activated BOM exists for this product.
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label" for="uboQuantity">Quantity to Unbuild</label>
+            <input
+              id="uboQuantity"
+              type="text"
+              class="form-control"
+              formControlName="quantity"
+              placeholder="0.000000"
+              [class.is-invalid]="form.get('quantity')!.invalid && form.get('quantity')!.touched" />
+            <div class="invalid-feedback" *ngIf="form.get('quantity')!.errors?.['required']">
+              Quantity is required.
+            </div>
+            <div class="invalid-feedback" *ngIf="form.get('quantity')!.errors?.['pattern'] || form.get('quantity')!.errors?.['positive']">
+              Quantity must be a positive number (up to 6 decimal places).
+            </div>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Unit</label>
+            <input
+              type="text"
+              class="form-control"
+              [value]="form.value.productId ? baseUomLabel(form.value.productId) : '—'"
+              readonly
+              disabled />
+            <div class="form-text">Always the product's base unit.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label" for="uboWarehouse">Warehouse</label>
+            <select
+              id="uboWarehouse"
+              class="form-select"
+              formControlName="warehouseId"
+              [class.is-invalid]="form.get('warehouseId')!.invalid && form.get('warehouseId')!.touched">
+              <option value="" disabled>Select a warehouse…</option>
+              <option *ngFor="let w of warehouses" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+            </select>
+            <div class="invalid-feedback">Warehouse is required.</div>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label" for="uboDate">Unbuild Date</label>
+            <input
+              id="uboDate"
+              type="date"
+              class="form-control"
+              formControlName="unbuildDate"
+              [class.is-invalid]="form.get('unbuildDate')!.invalid && form.get('unbuildDate')!.touched" />
+            <div class="invalid-feedback">Unbuild date is required.</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label" for="uboNotes">Notes</label>
+            <textarea id="uboNotes" class="form-control" rows="2" maxlength="500" formControlName="notes"></textarea>
+          </div>
+        </div>
+
+        <hr />
+
+        <h6>
+          {{ isEditable ? 'Expected Component Returns (theoretical estimate)' : 'Component Returns' }}
+        </h6>
+        <p class="text-muted small" *ngIf="isEditable">
+          These quantities are calculated the same way production-service will when you save — they are a
+          theoretical estimate only, not an actual stock movement. The real return quantities and stock
+          postings are only created once this order is completed.
+        </p>
+        <p class="text-muted small" *ngIf="!isEditable && order?.status !== 'DONE'">
+          These are the component return quantities this order will post when completed — still theoretical
+          until completion actually posts the stock movements below.
+        </p>
+
+        <div class="table-responsive">
+          <table class="align-middle mb-0 table table-borderless table-striped table-sm">
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th class="text-end">Quantity</th>
+                <th>Unit</th>
+                <th *ngIf="!isEditable">Stock Movement</th>
+              </tr>
+            </thead>
+            <tbody>
+              <ng-container *ngIf="isEditable">
+                <tr *ngFor="let item of previewItems">
+                  <td>{{ item.componentProductSku }} — {{ item.componentProductName }}</td>
+                  <td class="text-end">{{ item.quantity | slice:0:-4 }}</td>
+                  <td>{{ item.uomCode }}</td>
+                </tr>
+                <tr *ngIf="!previewItems.length">
+                  <td colspan="3" class="text-muted text-center">
+                    Select a product, BOM, and quantity to see the expected components.
+                  </td>
+                </tr>
+              </ng-container>
+              <ng-container *ngIf="!isEditable">
+                <tr *ngFor="let item of order?.items ?? []">
+                  <td>{{ item.componentProductSku }} — {{ item.componentProductName }}</td>
+                  <td class="text-end">{{ item.quantity | slice:0:-4 }}</td>
+                  <td>{{ item.uomCode }}</td>
+                  <td><code *ngIf="item.stockMovementId">{{ item.stockMovementId }}</code><span *ngIf="!item.stockMovementId">—</span></td>
+                </tr>
+              </ng-container>
+            </tbody>
+          </table>
+        </div>
+
+        <div *ngIf="order && order.status === 'DONE'" class="alert alert-success mt-3">
+          <div><strong>Completed:</strong> {{ order.completedAt | slice:0:19 }}</div>
+          <div><strong>Finished-goods stock movement:</strong> <code>{{ order.finishedGoodsMovementId }}</code></div>
+        </div>
+
+        <div *ngIf="order" class="mt-3 small text-muted">
+          <div *ngIf="order.sourceProductionOrderNumber">
+            Traceability source: Manufacturing Order <code>{{ order.sourceProductionOrderNumber }}</code>
+          </div>
+          <div>Created {{ order.createdAt | slice:0:19 }} · Last updated {{ order.updatedAt | slice:0:19 }}</div>
+        </div>
+
+        <div class="d-flex gap-2 mt-4" *ngIf="isEditable && (canCreate || canUpdate)">
+          <button type="submit" class="btn btn-primary" [disabled]="saving">
+            {{ saving ? 'Saving…' : (order ? 'Save Changes' : 'Create Unbuild Order') }}
+          </button>
+          <button type="button" class="btn btn-outline-secondary" (click)="discard()" [disabled]="saving">
+            Discard
+          </button>
+        </div>
+      </form>
+    </app-list-state>
+  </div>
+</div>
+
+<ng-template #confirmModal let-modal>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      {{ pendingAction === 'complete' ? 'Complete unbuild order?' : 'Cancel unbuild order?' }}
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="modal.dismiss()"></button>
+  </div>
+  <div class="modal-body" *ngIf="order">
+    <p class="mb-0" *ngIf="pendingAction === 'complete'">
+      Complete {{ order.orderNumber }}? This issues {{ order.quantity | slice:0:-4 }} {{ order.uomCode }} of
+      {{ order.productName }} out of stock and returns the BOM's component quantities into stock at
+      {{ warehouseLabel(order.warehouseId) }}. This posts real inventory movements and cannot be undone.
+    </p>
+    <p class="mb-0" *ngIf="pendingAction === 'cancel'">
+      Cancel {{ order.orderNumber }}? This cannot be undone.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-link" (click)="modal.dismiss()">Close</button>
+    <button
+      type="button"
+      class="btn"
+      [class.btn-success]="pendingAction === 'complete'"
+      [class.btn-danger]="pendingAction === 'cancel'"
+      [disabled]="actionBusy"
+      (click)="runPendingAction(modal)">
+      {{ actionBusy ? 'Working…' : (pendingAction === 'complete' ? 'Complete' : 'Cancel Order') }}
+    </button>
+  </div>
+</ng-template>

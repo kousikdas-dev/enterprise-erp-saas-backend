@@ -476,3 +476,130 @@ model RoutingStep {
   @@index([workCentreId])
   @@map("routing_steps")
 }
+
+// Unbuild Order lifecycle. DRAFT -> PROCESSING -> DONE is one-directional;
+// DRAFT -> CANCELLED is the only other path. PROCESSING is a claim held by
+// an in-flight complete() call (see UnbuildOrdersService.complete()) — it
+// is reachable again from itself (a stale claim being reclaimed) and falls
+// back to DRAFT only on a definite rejection from inventory-service (e.g.
+// insufficient finished-goods stock), never on an ambiguous failure, where
+// it is deliberately left PROCESSING so a retry can safely resume (the
+// inventory-service posting this leads to is idempotent on this order's own
+// id — see StockUnbuildPostingsService). DONE/CANCELLED are terminal: no
+// update()/cancel() is accepted against them.
+enum UnbuildOrderStatus {
+  DRAFT
+  PROCESSING
+  DONE
+  CANCELLED
+}
+
+// Unbuild Order: breaks down a finished product back into its BOM
+// components, the inverse of a Production Order. productId/bomId mirror
+// ProductionOrder's own conventions exactly — logical references to this
+// service's own Bom table and to an inventory-service Product, validated
+// and snapshotted the same way (productSku/productName never drift from
+// what was true at create time). bomVersion is snapshotted so the order
+// keeps referring to the exact BOM version it was created against even if
+// a newer version is later activated.
+//
+// sourceProductionOrderId is optional and traceability-only — an Unbuild
+// Order is valid for a finished product received through opening stock or
+// any other source, not only one built by a Production Order in this
+// system (see UnbuildOrdersService.create()). It is never read by
+// complete() and never mutates the referenced Production Order or its Work
+// Orders.
+//
+// quantity/unitOfMeasureId are the finished-good quantity being unbuilt,
+// restricted to the product's own BASE unit at completion time (re-
+// validated live against inventory-service, never trusted from this
+// snapshot) — see UnbuildOrdersService.complete() and the design report's
+// "base-unit-only" policy. Stock has no UOM dimension at all, so this
+// restriction removes any need for quantity conversion anywhere in this
+// flow.
+//
+// finishedGoodsMovementId is inventory-service's own StockMovement.id — a
+// logical, cross-service reference (never an FK; inventory-service owns a
+// separate database), populated only once status reaches DONE.
+model UnbuildOrder {
+  id          String @id @default(uuid()) @db.Uuid
+  tenantId    String @db.Uuid
+  orderNumber String
+
+  productId   String @db.Uuid
+  productSku  String
+  productName String
+
+  bomId      String @db.Uuid
+  bomVersion Int
+
+  quantity        Decimal @db.Decimal(19, 6)
+  unitOfMeasureId String  @db.Uuid
+  uomCode         String
+  uomName         String
+
+  warehouseId String @db.Uuid
+
+  sourceProductionOrderId     String? @db.Uuid
+  sourceProductionOrderNumber String?
+
+  status UnbuildOrderStatus @default(DRAFT)
+
+  // Non-null only while status = PROCESSING. processingStartedAt drives the
+  // staleness window a later complete() call uses to decide whether a live
+  // claim can be reclaimed; processingToken is the fencing token that
+  // decides whether THIS call's own eventual completion write is still the
+  // one allowed to land (see UnbuildOrdersService.complete()) — a late
+  // response from a superseded attempt must not be able to overwrite a
+  // reclaiming attempt's result.
+  processingStartedAt DateTime?
+  processingToken     String?   @db.Uuid
+
+  unbuildDate DateTime
+  notes       String?
+
+  completedAt             DateTime?
+  completedBy             String?   @db.Uuid
+  finishedGoodsMovementId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items UnbuildOrderItem[]
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, productId])
+  @@map("unbuild_orders")
+}
+
+// Component return lines, snapshotted from the selected BOM's items at
+// create time (scaled by quantity / bom.bomQuantity — the exact formula
+// ProductionOrdersService.defaultItemsFromBom() already uses). The unique
+// constraint mirrors BomItem's own [tenantId, bomId, componentProductId]
+// constraint exactly: a BOM cannot list the same component twice, so this
+// introduces no restriction beyond what the source BOM already enforces.
+// stockMovementId is inventory-service's own StockMovement.id for this
+// component's UNBUILD_RETURN leg, populated only once the order is DONE.
+model UnbuildOrderItem {
+  id                   String  @id @default(uuid()) @db.Uuid
+  tenantId             String  @db.Uuid
+  unbuildOrderId       String  @db.Uuid
+  componentProductId   String  @db.Uuid
+  componentProductSku  String
+  componentProductName String
+  quantity             Decimal @db.Decimal(19, 6)
+  unitOfMeasureId      String  @db.Uuid
+  uomCode              String
+  uomName              String
+  sequence             Int
+  stockMovementId      String?
+
+  unbuildOrder UnbuildOrder @relation(fields: [unbuildOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, unbuildOrderId, componentProductId])
+  @@index([tenantId])
+  @@index([unbuildOrderId])
+  @@map("unbuild_order_items")
+}

@@ -10,6 +10,8 @@ import { ProductionOrderListComponent } from './production-orders/production-ord
 import { ProductionOrderDetailComponent } from './production-orders/production-order-detail.component';
 import { RoutingListComponent } from './routings/routing-list.component';
 import { RoutingDetailComponent } from './routings/routing-detail.component';
+import { UnbuildOrderListComponent } from './unbuild-orders/unbuild-order-list.component';
+import { UnbuildOrderDetailComponent } from './unbuild-orders/unbuild-order-detail.component';
 import { WorkCentreListComponent } from './work-centres/work-centre-list.component';
 import { WorkCentreOverviewComponent } from './work-centres/work-centre-overview.component';
 import { WorkOrderListComponent } from './work-orders/work-order-list.component';
@@ -78,6 +80,16 @@ const routes: Routes = [
     component: WorkOrdersPlanningComponent,
     data: { extraParameter: 'productionMenu', darkTheme: true },
   },
+  {
+    path: 'unbuild-orders',
+    component: UnbuildOrderListComponent,
+    data: { extraParameter: 'productionMenu', darkTheme: true },
+  },
+  {
+    path: 'unbuild-orders/:id',
+    component: UnbuildOrderDetailComponent,
+    data: { extraParameter: 'productionMenu', darkTheme: true },
+  },
 ];
 
 @NgModule({
@@ -94,6 +106,8 @@ const routes: Routes = [
     WorkOrderListComponent,
     WorkOrdersKanbanComponent,
     WorkOrdersPlanningComponent,
+    UnbuildOrderListComponent,
+    UnbuildOrderDetailComponent,
   ],
   imports: [SharedModule, ListStateComponent, DragDropModule, RouterModule.forChild(routes)],
 })

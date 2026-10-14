@@ -7,6 +7,7 @@ import { OperationsController } from './operations.controller';
 import { ProductionForwardService } from './production-forward.service';
 import { ProductionOrdersController } from './production-orders.controller';
 import { RoutingsController } from './routings.controller';
+import { UnbuildOrdersController } from './unbuild-orders.controller';
 import { WorkCentresController } from './work-centres.controller';
 import { WorkOrdersController } from './work-orders.controller';
 
@@ -26,6 +27,7 @@ import { WorkOrdersController } from './work-orders.controller';
     ProductionOrdersController,
     WorkOrdersController,
     RoutingsController,
+    UnbuildOrdersController,
   ],
   providers: [ProductionForwardService],
 })

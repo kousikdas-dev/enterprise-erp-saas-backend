@@ -4,10 +4,12 @@ import { InternalServiceGuard } from '../auth/internal-service.guard';
 import { InternalStockIssuesController } from './internal-stock-issues.controller';
 import { InternalStockReceiptsController } from './internal-stock-receipts.controller';
 import { InternalStockReturnsController } from './internal-stock-returns.controller';
+import { InternalStockUnbuildPostingsController } from './internal-stock-unbuild-postings.controller';
 import { StockController } from './stock.controller';
 import { StockIssuesService } from './stock-issues.service';
 import { StockReceiptsService } from './stock-receipts.service';
 import { StockReturnsService } from './stock-returns.service';
+import { StockUnbuildPostingsService } from './stock-unbuild-postings.service';
 import { StockService } from './stock.service';
 
 @Module({
@@ -17,14 +19,16 @@ import { StockService } from './stock.service';
     InternalStockReceiptsController,
     InternalStockIssuesController,
     InternalStockReturnsController,
+    InternalStockUnbuildPostingsController,
   ],
   providers: [
     StockService,
     StockReceiptsService,
     StockIssuesService,
     StockReturnsService,
+    StockUnbuildPostingsService,
     InternalServiceGuard,
   ],
-  exports: [StockReceiptsService, StockIssuesService, StockReturnsService],
+  exports: [StockReceiptsService, StockIssuesService, StockReturnsService, StockUnbuildPostingsService],
 })
 export class StockModule {}

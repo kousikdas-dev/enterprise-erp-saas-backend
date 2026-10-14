@@ -109,7 +109,7 @@ export const NAV_ITEMS: TopNavItem[] = [
         label: 'Operations', items: [
           { label: 'Manufacturing Orders', route: '/production/production-orders' },
           { label: 'Work Orders', route: '/production/work-orders' },
-          { label: 'Unbuild Orders' },
+          { label: 'Unbuild Orders', route: '/production/unbuild-orders' },
           { label: 'Scrap' },
         ]
       },

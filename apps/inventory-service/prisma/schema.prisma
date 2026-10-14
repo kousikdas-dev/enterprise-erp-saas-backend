@@ -68,6 +68,18 @@ enum StockMovementType {
   // (ShipmentsService.reverse()). Sets StockMovement.reversesMovementId —
   // see StockReturnsService's RETURN_CONFIG.
   SALE_REVERSAL
+  // Phase 4 (Unbuild Order) — the finished-good leg of an unbuild: stock
+  // goes out (subtractive, same moving-average-snapshot costing as SALE/
+  // ADJUSTMENT_OUT). Always paired, in the same posting transaction, with
+  // one or more UNBUILD_RETURN movements for the disassembled components —
+  // see StockUnbuildPostingsService.
+  UNBUILD_ISSUE
+  // Phase 4 (Unbuild Order) — a component-return leg of an unbuild: stock
+  // comes back in (additive). Costed by allocating the paired
+  // UNBUILD_ISSUE's removed value across every component line in the same
+  // posting, weighted by componentQty × Product.costPrice, never by an
+  // externally supplied cost — see StockUnbuildPostingsService.
+  UNBUILD_RETURN
 }
 
 // Opening Stock document lifecycle (Inventory Design v4, Phase B). DRAFT is
