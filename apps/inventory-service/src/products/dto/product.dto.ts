@@ -84,10 +84,12 @@ export class UpdateProductDto {
   @MaxLength(160)
   name?: string;
 
+  // Nullable editable field: omit the key to leave unchanged, send `null`
+  // to clear it, send a string to set it — see ProductsService.update().
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  description?: string;
+  description?: string | null;
 
   @IsOptional()
   @IsUUID()
@@ -123,23 +125,34 @@ export class UpdateProductDto {
   @IsBoolean()
   trackInventory?: boolean;
 
+  // Nullable editable field — see `description` above.
   @IsOptional()
   @IsString()
   @MaxLength(128)
-  barcode?: string;
+  barcode?: string | null;
 
+  // Nullable editable field — see `description` above.
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  note?: string;
+  note?: string | null;
 
+  // Nullable editable field — see `description` above. `null` detaches this
+  // product from its variant template; a string reassigns it (both are
+  // validated in ProductsService.assertValidTemplateAssignment()).
   @IsOptional()
   @IsUUID()
-  templateProductId?: string;
+  templateProductId?: string | null;
 
   @IsOptional()
   @IsArray()
   @ArrayUnique()
   @IsUUID('4', { each: true })
   attributeValueIds?: string[];
+}
+
+export class ProductQueryDto {
+  @IsOptional()
+  @IsUUID()
+  templateProductId?: string;
 }

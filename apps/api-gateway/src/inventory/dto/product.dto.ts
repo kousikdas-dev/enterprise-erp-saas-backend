@@ -4,12 +4,20 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
 } from 'class-validator';
+
+/** Mirrors inventory-service's `ProductType` enum (Prisma-generated there; plain string enum here since the gateway has no Prisma client of its own). */
+export enum ProductTypeDto {
+  GOODS = 'GOODS',
+  SERVICE = 'SERVICE',
+  COMBO = 'COMBO',
+}
 
 export class CreateProductDto {
   @ApiProperty({ example: 'SKU-001' })
@@ -48,6 +56,28 @@ export class CreateProductDto {
   @IsString()
   costPrice!: string;
 
+  @ApiPropertyOptional({ enum: ProductTypeDto, default: 'GOODS' })
+  @IsOptional()
+  @IsEnum(ProductTypeDto)
+  productType?: ProductTypeDto;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  trackInventory?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  barcode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
+
   @ApiPropertyOptional({
     format: 'uuid',
     description: 'Marks this product as a variant of a top-level product.',
@@ -79,11 +109,13 @@ export class UpdateProductDto {
   @MaxLength(160)
   name?: string;
 
-  @ApiPropertyOptional()
+  // Nullable editable field: omit to leave unchanged, send `null` to clear
+  // it, send a string to set it — mirrors inventory-service's UpdateProductDto.
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  description?: string;
+  description?: string | null;
 
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
@@ -116,13 +148,40 @@ export class UpdateProductDto {
   @IsBoolean()
   isActive?: boolean;
 
+  @ApiPropertyOptional({ enum: ProductTypeDto })
+  @IsOptional()
+  @IsEnum(ProductTypeDto)
+  productType?: ProductTypeDto;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  trackInventory?: boolean;
+
+  // Nullable editable field — see `description` above.
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  barcode?: string | null;
+
+  // Nullable editable field — see `description` above.
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
+
+  // Nullable editable field — see `description` above. `null` detaches this
+  // product from its variant template; a string reassigns it.
   @ApiPropertyOptional({
     format: 'uuid',
-    description: 'Marks this product as a variant of a top-level product.',
+    nullable: true,
+    description: 'Marks this product as a variant of a top-level product. Send null to detach.',
   })
   @IsOptional()
   @IsUUID()
-  templateProductId?: string;
+  templateProductId?: string | null;
 
   @ApiPropertyOptional({ type: [String], description: 'AttributeValue ids tagging this variant.' })
   @IsOptional()
@@ -176,6 +235,18 @@ export class ProductDto {
 
   @ApiProperty()
   isActive!: boolean;
+
+  @ApiProperty({ enum: ProductTypeDto })
+  productType!: string;
+
+  @ApiProperty()
+  trackInventory!: boolean;
+
+  @ApiPropertyOptional({ nullable: true })
+  barcode!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  note!: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   templateProductId!: string | null;

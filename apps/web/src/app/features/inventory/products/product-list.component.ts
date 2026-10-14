@@ -417,19 +417,20 @@ export class ProductListComponent implements OnInit {
       this.toast.error(unitsError);
       return;
     }
-    const description = value.description?.trim() || undefined;
-    const barcode = value.barcode?.trim() || undefined;
-    const note = value.note?.trim() || undefined;
-    const templateProductId = value.templateProductId?.trim() || undefined;
     const attributeValueIds = this.selectedAttributeValueIds;
     this.saving = true;
     this.cdr.detectChanges();
 
+    // Editing an existing product always submits a definite answer for
+    // these fields — empty means "clear it", so they're sent as explicit
+    // `null` rather than omitted, per the PATCH contract (absent = leave
+    // unchanged, null = clear, value = set). Creating has nothing to clear,
+    // so empty stays omitted as before.
     const request$ = this.editing
       ? this.products.update(this.editing.id, {
           sku: value.sku!.trim(),
           name: value.name!.trim(),
-          description,
+          description: value.description?.trim() || null,
           categoryId: value.categoryId!,
           unitOfMeasureId: value.unitOfMeasureId!,
           sellingPrice: String(value.sellingPrice!).trim(),
@@ -437,24 +438,24 @@ export class ProductListComponent implements OnInit {
           isActive: !!value.isActive,
           productType: value.productType!,
           trackInventory: !!value.trackInventory,
-          barcode,
-          note,
-          templateProductId,
+          barcode: value.barcode?.trim() || null,
+          note: value.note?.trim() || null,
+          templateProductId: value.templateProductId?.trim() || null,
           attributeValueIds,
         })
       : this.products.create({
           sku: value.sku!.trim(),
           name: value.name!.trim(),
-          description,
+          description: value.description?.trim() || undefined,
           categoryId: value.categoryId!,
           unitOfMeasureId: value.unitOfMeasureId!,
           sellingPrice: String(value.sellingPrice!).trim(),
           costPrice: String(value.costPrice!).trim(),
           productType: value.productType!,
           trackInventory: !!value.trackInventory,
-          barcode,
-          note,
-          templateProductId,
+          barcode: value.barcode?.trim() || undefined,
+          note: value.note?.trim() || undefined,
+          templateProductId: value.templateProductId?.trim() || undefined,
           attributeValueIds,
         });
 

@@ -20,6 +20,29 @@ const PRODUCT_INCLUDE = {
   },
 } satisfies Prisma.ProductInclude;
 
+/**
+ * `isUniqueConstraintError` only confirms a P2002 fired — it says nothing
+ * about *which* unique index. Scoped locally to this service (rather than
+ * widening the shared helper other services rely on for their own distinct
+ * messages) so only an actual `sku` constraint violation is ever reported
+ * as "SKU already exists"; any other unique-index violation reachable from
+ * these writes (e.g. ProductAttributeValue's per-product-per-value index)
+ * falls through to a generic conflict instead of being mislabeled.
+ */
+function isSkuUniqueConstraintError(error: unknown): boolean {
+  if (!isUniqueConstraintError(error)) {
+    return false;
+  }
+  const target = (error as { meta?: { target?: unknown } }).meta?.target;
+  if (Array.isArray(target)) {
+    return target.includes('sku');
+  }
+  if (typeof target === 'string') {
+    return target.toLowerCase().includes('sku');
+  }
+  return false;
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -35,7 +58,7 @@ export class ProductsService {
     await this.requireCategory(actor, dto.categoryId);
     await this.requireUnit(actor, dto.unitOfMeasureId);
     if (dto.templateProductId !== undefined) {
-      await this.requireTemplateProduct(actor, dto.templateProductId);
+      await this.assertValidTemplateAssignment(actor, dto.templateProductId);
     }
     if (dto.attributeValueIds !== undefined) {
       await this.requireAttributeValues(actor, dto.attributeValueIds);
@@ -77,8 +100,11 @@ export class ProductsService {
       });
       return toProductResponse(row);
     } catch (error) {
-      if (isUniqueConstraintError(error)) {
+      if (isSkuUniqueConstraintError(error)) {
         throw new ConflictException('SKU already exists in this tenant');
+      }
+      if (isUniqueConstraintError(error)) {
+        throw new ConflictException('A related record already exists');
       }
       throw error;
     }
@@ -109,11 +135,8 @@ export class ProductsService {
     await this.requireProduct(actor, id);
     if (dto.categoryId) await this.requireCategory(actor, dto.categoryId);
     if (dto.unitOfMeasureId) await this.requireUnit(actor, dto.unitOfMeasureId);
-    if (dto.templateProductId !== undefined) {
-      if (dto.templateProductId === id) {
-        throw new ConflictException('A product cannot be a variant of itself');
-      }
-      await this.requireTemplateProduct(actor, dto.templateProductId);
+    if (dto.templateProductId !== undefined && dto.templateProductId !== null) {
+      await this.assertValidTemplateAssignment(actor, dto.templateProductId, id);
     }
     if (dto.attributeValueIds !== undefined) {
       await this.requireAttributeValues(actor, dto.attributeValueIds);
@@ -122,7 +145,7 @@ export class ProductsService {
     if (dto.sku !== undefined) data.sku = dto.sku.trim().toUpperCase();
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.description !== undefined)
-      data.description = dto.description.trim() || null;
+      data.description = dto.description === null ? null : dto.description.trim() || null;
     if (dto.categoryId !== undefined) data.categoryId = dto.categoryId;
     if (dto.unitOfMeasureId !== undefined)
       data.unitOfMeasureId = dto.unitOfMeasureId;
@@ -133,8 +156,14 @@ export class ProductsService {
     if (dto.productType !== undefined) data.productType = dto.productType;
     if (dto.trackInventory !== undefined)
       data.trackInventory = dto.trackInventory;
-    if (dto.barcode !== undefined) data.barcode = dto.barcode.trim() || null;
-    if (dto.note !== undefined) data.note = dto.note.trim() || null;
+    if (dto.barcode !== undefined)
+      data.barcode = dto.barcode === null ? null : dto.barcode.trim() || null;
+    if (dto.note !== undefined)
+      data.note = dto.note === null ? null : dto.note.trim() || null;
+    // `null` here is an explicit "detach this variant"; a validated string
+    // reassigns it — assertValidTemplateAssignment() above already checked
+    // it without ever querying Prisma with `id: null` (the crash this
+    // replaces).
     if (dto.templateProductId !== undefined)
       data.templateProductId = dto.templateProductId;
     if (Object.keys(data).length === 0 && dto.attributeValueIds === undefined) {
@@ -175,8 +204,11 @@ export class ProductsService {
       });
       return toProductResponse(row);
     } catch (error) {
-      if (isUniqueConstraintError(error)) {
+      if (isSkuUniqueConstraintError(error)) {
         throw new ConflictException('SKU already exists in this tenant');
+      }
+      if (isUniqueConstraintError(error)) {
+        throw new ConflictException('A related record already exists');
       }
       throw error;
     }
@@ -207,18 +239,79 @@ export class ProductsService {
     return row;
   }
 
-  /** The template itself must not already be a variant — only one level of variant nesting is allowed. */
-  private async requireTemplateProduct(actor: ActorContext, id: string) {
-    const row = await this.prisma.product.findFirst({
-      where: { id, tenantId: actor.tenantId },
-    });
-    if (!row) throw new NotFoundException('Template product not found');
-    if (row.templateProductId) {
+  /**
+   * Enforces the one-level variant nesting rule for `productId` (omitted on
+   * create) adopting `candidateTemplateId` as its template:
+   *   - `productId` can never be `candidateTemplateId`, directly or by
+   *     walking the candidate's ancestor chain back to it (cycle guard).
+   *   - the candidate must resolve, by walking its own ancestor chain (not
+   *     just reading one field), to a genuine top-level product — a
+   *     real walk rather than a one-hop peek, so it keeps working if this
+   *     module's nesting-depth rule is ever relaxed, matching the discipline
+   *     already used by BillOfMaterialsService.assertNoCycle /
+   *     AccountsService.assertNoCycle elsewhere in this codebase.
+   *   - (update only) `productId` must not already have variants of its
+   *     own — giving a product-with-children a template would silently
+   *     turn those children into second-level variants, the one direction
+   *     the original single-hop check on the candidate side never covered.
+   */
+  private async assertValidTemplateAssignment(
+    actor: ActorContext,
+    candidateTemplateId: string,
+    productId?: string,
+  ): Promise<void> {
+    if (productId && candidateTemplateId === productId) {
+      throw new ConflictException('A product cannot be a variant of itself');
+    }
+
+    const visited = new Set<string>();
+    let currentId: string | null = candidateTemplateId;
+    let isTopLevelCandidate = false;
+    let firstHop = true;
+    while (currentId) {
+      if (productId && currentId === productId) {
+        throw new ConflictException(
+          'This would create a circular variant relationship',
+        );
+      }
+      if (visited.has(currentId)) {
+        throw new ConflictException(
+          'This would create a circular variant relationship',
+        );
+      }
+      visited.add(currentId);
+
+      const link: { templateProductId: string | null } | null =
+        await this.prisma.product.findFirst({
+          where: { id: currentId, tenantId: actor.tenantId },
+          select: { templateProductId: true },
+        });
+      if (!link) {
+        throw new NotFoundException('Template product not found');
+      }
+      if (firstHop) {
+        isTopLevelCandidate = link.templateProductId === null;
+        firstHop = false;
+      }
+      currentId = link.templateProductId;
+    }
+
+    if (!isTopLevelCandidate) {
       throw new ConflictException(
         'Selected template is itself a variant; a product can only be a variant of a top-level product',
       );
     }
-    return row;
+
+    if (productId) {
+      const childCount = await this.prisma.product.count({
+        where: { tenantId: actor.tenantId, templateProductId: productId },
+      });
+      if (childCount > 0) {
+        throw new ConflictException(
+          'This product already has variants and cannot itself become a variant',
+        );
+      }
+    }
   }
 
   private async requireAttributeValues(actor: ActorContext, ids: string[]) {

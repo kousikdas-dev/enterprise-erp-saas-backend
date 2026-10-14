@@ -56,7 +56,8 @@ export interface CreateProductRequest {
 export interface UpdateProductRequest {
   sku?: string;
   name?: string;
-  description?: string;
+  /** Omit to leave unchanged, `null` to clear, a string to set. */
+  description?: string | null;
   categoryId?: string;
   unitOfMeasureId?: string;
   sellingPrice?: string;
@@ -64,9 +65,12 @@ export interface UpdateProductRequest {
   isActive?: boolean;
   productType?: ProductType;
   trackInventory?: boolean;
-  barcode?: string;
-  note?: string;
-  templateProductId?: string;
+  /** Omit to leave unchanged, `null` to clear, a string to set. */
+  barcode?: string | null;
+  /** Omit to leave unchanged, `null` to clear, a string to set. */
+  note?: string | null;
+  /** Omit to leave unchanged, `null` to detach from its variant template, a UUID to (re)assign it. */
+  templateProductId?: string | null;
   attributeValueIds?: string[];
 }
 

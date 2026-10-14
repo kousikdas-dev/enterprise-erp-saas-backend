@@ -15,7 +15,7 @@ import { ActorContext } from '../auth/actor-context';
 import { ActorGuard } from '../auth/actor.guard';
 import { CurrentActor } from '../auth/current-actor.decorator';
 import { requestAuditMeta } from '../http/request-audit-meta';
-import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
+import { CreateProductDto, ProductQueryDto, UpdateProductDto } from './dto/product.dto';
 import { ProductsService } from './products.service';
 
 @Controller({ path: 'products', version: '1' })
@@ -33,11 +33,8 @@ export class ProductsController {
   }
 
   @Get()
-  list(
-    @CurrentActor() actor: ActorContext,
-    @Query('templateProductId') templateProductId?: string,
-  ) {
-    return this.products.list(actor, templateProductId);
+  list(@CurrentActor() actor: ActorContext, @Query() query: ProductQueryDto) {
+    return this.products.list(actor, query.templateProductId);
   }
 
   @Get(':id')

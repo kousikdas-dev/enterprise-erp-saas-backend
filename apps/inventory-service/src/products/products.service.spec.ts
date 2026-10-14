@@ -52,6 +52,7 @@ describe('ProductsService', () => {
         findMany: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
       },
       productAttributeValue: { deleteMany: jest.fn() },
       attributeValue: { findMany: jest.fn().mockResolvedValue([]) },
@@ -102,10 +103,13 @@ describe('ProductsService', () => {
     expect(metadata).not.toHaveProperty('accessToken');
   });
 
-  it('rejects a duplicate SKU', async () => {
+  it('rejects a duplicate SKU with a SKU-specific message', async () => {
     const { service, prisma } = createService();
     mockRefs(prisma);
-    prisma.product.create.mockRejectedValue({ code: 'P2002' });
+    prisma.product.create.mockRejectedValue({
+      code: 'P2002',
+      meta: { target: ['tenantId', 'sku'] },
+    });
     await expect(
       service.create(actor, {
         sku: 'SKU-001',
@@ -115,7 +119,34 @@ describe('ProductsService', () => {
         sellingPrice: '1',
         costPrice: '1',
       }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).rejects.toMatchObject({
+      message: 'SKU already exists in this tenant',
+    });
+  });
+
+  it('does not mislabel a non-SKU unique-constraint violation as a SKU conflict', async () => {
+    const { service, prisma } = createService();
+    mockRefs(prisma);
+    prisma.attributeValue.findMany.mockResolvedValue([
+      { id: '88888888-aaaa-4aaa-8aaa-888888888888' },
+    ]);
+    prisma.product.create.mockRejectedValue({
+      code: 'P2002',
+      meta: { target: ['tenantId', 'productId', 'attributeValueId'] },
+    });
+    await expect(
+      service.create(actor, {
+        sku: 'SKU-002',
+        name: 'Widget',
+        categoryId,
+        unitOfMeasureId: unitId,
+        sellingPrice: '1',
+        costPrice: '1',
+        attributeValueIds: ['88888888-aaaa-4aaa-8aaa-888888888888'],
+      }),
+    ).rejects.toMatchObject({
+      message: 'A related record already exists',
+    });
   });
 
   it('lists only the actor tenant', async () => {
@@ -460,6 +491,74 @@ describe('ProductsService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
+    it('rejects making a product-with-children itself a variant (hidden two-level chain, template-side direction)', async () => {
+      const { service, prisma } = createService();
+      const productId = row().id;
+      prisma.product.findFirst.mockImplementation(
+        ({ where }: { where: { id: string } }) => {
+          if (where.id === productId) return Promise.resolve(row({ id: productId }));
+          if (where.id === templateId)
+            return Promise.resolve({ templateProductId: null });
+          return Promise.resolve(null);
+        },
+      );
+      // This product already has a variant pointing at it.
+      prisma.product.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(actor, productId, { templateProductId: templateId }),
+      ).rejects.toMatchObject({
+        message: 'This product already has variants and cannot itself become a variant',
+      });
+      expect(prisma.product.count).toHaveBeenCalledWith({
+        where: { tenantId: actor.tenantId, templateProductId: productId },
+      });
+      expect(prisma.product.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a candidate template whose own chain leads back to the product being updated (cycle, variant-side direction)', async () => {
+      const { service, prisma } = createService();
+      const productId = row().id;
+      const candidateId = templateId;
+      prisma.product.findFirst.mockImplementation(
+        ({ where }: { where: { id: string } }) => {
+          if (where.id === productId) return Promise.resolve(row({ id: productId }));
+          if (where.id === candidateId)
+            return Promise.resolve({ templateProductId: productId });
+          return Promise.resolve(null);
+        },
+      );
+
+      await expect(
+        service.update(actor, productId, { templateProductId: candidateId }),
+      ).rejects.toMatchObject({
+        message: 'This would create a circular variant relationship',
+      });
+      expect(prisma.product.update).not.toHaveBeenCalled();
+    });
+
+    it('clears templateProductId when explicitly set to null, without ever querying Prisma with id: null', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(
+        row({ templateProductId: templateId }),
+      );
+      prisma.product.update.mockResolvedValue(row({ templateProductId: null }));
+
+      const result = await service.update(actor, row().id, {
+        templateProductId: null,
+      });
+
+      // Only the initial requireProduct() lookup — no template-chain lookup
+      // is ever attempted for an explicit `null`.
+      expect(prisma.product.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ templateProductId: null }),
+        }),
+      );
+      expect(result.templateProductId).toBeNull();
+    });
+
     it('creates a product tagged with attribute values', async () => {
       const { service, prisma } = createService();
       mockRefs(prisma);
@@ -537,6 +636,102 @@ describe('ProductsService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('clearing nullable fields (PATCH contract: absent=unchanged, null=clear, value=set)', () => {
+    it('clears description when explicitly set to null', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(
+        row({ description: 'Original description' }),
+      );
+      prisma.product.update.mockResolvedValue(row({ description: null }));
+
+      const result = await service.update(actor, row().id, { description: null });
+
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ description: null }),
+        }),
+      );
+      expect(result.description).toBeNull();
+    });
+
+    it('leaves description unchanged when the key is omitted', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(
+        row({ description: 'Original description' }),
+      );
+      prisma.product.update.mockResolvedValue(row({ description: 'Original description', name: 'Gadget' }));
+
+      await service.update(actor, row().id, { name: 'Gadget' });
+
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { name: 'Gadget' },
+        }),
+      );
+    });
+
+    it('clears barcode when explicitly set to null', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(row({ barcode: '1234567890' }));
+      prisma.product.update.mockResolvedValue(row({ barcode: null }));
+
+      const result = await service.update(actor, row().id, { barcode: null });
+
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ barcode: null }),
+        }),
+      );
+      expect(result.barcode).toBeNull();
+    });
+
+    it('clears note when explicitly set to null', async () => {
+      const { service, prisma } = createService();
+      prisma.product.findFirst.mockResolvedValue(row({ note: 'Fragile' }));
+      prisma.product.update.mockResolvedValue(row({ note: null }));
+
+      const result = await service.update(actor, row().id, { note: null });
+
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ note: null }),
+        }),
+      );
+      expect(result.note).toBeNull();
+    });
+  });
+
+  describe('tenant isolation on variant assignment checks', () => {
+    it('scopes the "already has variants" check to the actor tenant', async () => {
+      const { service, prisma } = createService();
+      const productId = row().id;
+      const templateId = '77777777-aaaa-4aaa-8aaa-777777777777';
+      prisma.product.findFirst.mockImplementation(
+        ({ where }: { where: { id: string } }) => {
+          if (where.id === productId) return Promise.resolve(row({ id: productId }));
+          if (where.id === templateId)
+            return Promise.resolve({ templateProductId: null });
+          return Promise.resolve(null);
+        },
+      );
+      prisma.product.count.mockResolvedValue(0);
+      prisma.product.update.mockResolvedValue(
+        row({ id: productId, templateProductId: templateId }),
+      );
+
+      await service.update(actor, productId, { templateProductId: templateId });
+
+      expect(prisma.product.count).toHaveBeenCalledWith({
+        where: { tenantId: actor.tenantId, templateProductId: productId },
+      });
+      for (const call of prisma.product.findFirst.mock.calls) {
+        expect((call[0] as { where: { tenantId: string } }).where.tenantId).toBe(
+          actor.tenantId,
+        );
+      }
     });
   });
 });
