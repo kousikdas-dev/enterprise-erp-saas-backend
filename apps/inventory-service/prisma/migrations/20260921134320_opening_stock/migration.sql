@@ -60,10 +60,15 @@ WHERE sm.id = ordered.id;
 ALTER TABLE "stock_movements" ALTER COLUMN "sequenceNumber" SET NOT NULL;
 
 -- Step 4: create the sequence backing future inserts, seeded past the
--- backfilled maximum (setval's two-argument form makes the NEXT nextval()
--- call return value + 1, i.e. exactly "MAX + 1").
+-- backfilled maximum. The 3-arg setval() form is used deliberately: on an
+-- empty table COALESCE returns NULL -> 1 with is_called=false, so the next
+-- nextval() correctly returns 1 (the 2-arg form would call setval(seq, 0),
+-- which Postgres rejects as out of the sequence's bounds); on a populated
+-- table COALESCE returns the real backfilled MAX with is_called=true,
+-- which is byte-for-byte equivalent to the original 2-arg call (next
+-- nextval() still returns exactly "MAX + 1").
 CREATE SEQUENCE "stock_movements_sequenceNumber_seq" OWNED BY "stock_movements"."sequenceNumber";
-SELECT setval('"stock_movements_sequenceNumber_seq"', COALESCE((SELECT MAX("sequenceNumber") FROM "stock_movements"), 0));
+SELECT setval('"stock_movements_sequenceNumber_seq"', COALESCE((SELECT MAX("sequenceNumber") FROM "stock_movements"), 1), (SELECT MAX("sequenceNumber") FROM "stock_movements") IS NOT NULL);
 ALTER TABLE "stock_movements" ALTER COLUMN "sequenceNumber" SET DEFAULT nextval('"stock_movements_sequenceNumber_seq"');
 
 -- Step 5: uniqueness + the composite index used by the subsequent-activity
