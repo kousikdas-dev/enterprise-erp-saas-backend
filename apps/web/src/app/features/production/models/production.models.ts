@@ -255,6 +255,149 @@ export interface ProductionOrderListResponse {
   pageSize: number;
 }
 
+export type WorkOrderStatus =
+  | 'PENDING'
+  | 'IN_PROGRESS'
+  | 'BLOCKED'
+  | 'DONE'
+  | 'CANCELLED';
+
+export const WORK_ORDER_STATUSES: readonly WorkOrderStatus[] = [
+  'PENDING',
+  'IN_PROGRESS',
+  'BLOCKED',
+  'DONE',
+  'CANCELLED',
+] as const;
+
+export interface WorkOrder {
+  id: string;
+  tenantId: string;
+  workOrderNumber: string;
+  productionOrderId: string;
+  productionOrderNumber: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  operationId: string;
+  operationCode: string;
+  operationName: string;
+  workCentreId: string;
+  workCentreCode: string;
+  workCentreName: string;
+  sequence: number;
+  plannedDurationMinutes: number;
+  scheduledStartDate: string | null;
+  scheduledEndDate: string | null;
+  status: WorkOrderStatus | string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWorkOrderRequest {
+  productionOrderId: string;
+  operationId: string;
+  workCentreId: string;
+  sequence: number;
+  plannedDurationMinutes: number;
+  scheduledStartDate?: string;
+  scheduledEndDate?: string;
+  notes?: string;
+}
+
+export interface UpdateWorkOrderRequest {
+  operationId?: string;
+  workCentreId?: string;
+  sequence?: number;
+  plannedDurationMinutes?: number;
+  scheduledStartDate?: string;
+  scheduledEndDate?: string;
+  notes?: string;
+}
+
+export interface WorkOrderListQuery {
+  productionOrderId?: string;
+  workCentreId?: string;
+  status?: WorkOrderStatus;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface WorkOrderListResponse {
+  items: WorkOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type RoutingStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+
+export const ROUTING_STATUSES: readonly RoutingStatus[] = [
+  'DRAFT',
+  'ACTIVE',
+  'INACTIVE',
+] as const;
+
+export interface RoutingStep {
+  id: string;
+  routingId: string;
+  sequence: number;
+  operationId: string;
+  operationCode: string;
+  operationName: string;
+  workCentreId: string;
+  workCentreCode: string;
+  workCentreName: string;
+  setupMinutes: number;
+  runMinutesPerUnit: string;
+  description: string | null;
+}
+
+export interface Routing {
+  id: string;
+  tenantId: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  name: string;
+  version: number;
+  status: RoutingStatus | string;
+  description: string | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  steps: RoutingStep[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutingStepLineInput {
+  operationId: string;
+  workCentreId: string;
+  sequence: number;
+  setupMinutes?: number;
+  runMinutesPerUnit?: string;
+  description?: string;
+}
+
+export interface CreateRoutingRequest {
+  productId: string;
+  name: string;
+  description?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  steps?: RoutingStepLineInput[];
+}
+
+export interface UpdateRoutingRequest {
+  name?: string;
+  description?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  steps?: RoutingStepLineInput[];
+}
+
 export interface ItemList<T> {
   items: T[];
 }

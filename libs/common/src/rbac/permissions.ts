@@ -172,6 +172,21 @@ export const PERMISSIONS = {
   PRODUCTION_ORDERS_COMPLETE: 'production-orders.complete',
   PRODUCTION_ORDERS_CANCEL: 'production-orders.cancel',
   PRODUCTION_ORDERS_CLOSE: 'production-orders.close',
+  PRODUCTION_WORK_ORDERS_CREATE: 'production-work-orders.create',
+  PRODUCTION_WORK_ORDERS_READ: 'production-work-orders.read',
+  PRODUCTION_WORK_ORDERS_UPDATE: 'production-work-orders.update',
+  PRODUCTION_WORK_ORDERS_DELETE: 'production-work-orders.delete',
+  PRODUCTION_WORK_ORDERS_START: 'production-work-orders.start',
+  PRODUCTION_WORK_ORDERS_BLOCK: 'production-work-orders.block',
+  PRODUCTION_WORK_ORDERS_UNBLOCK: 'production-work-orders.unblock',
+  PRODUCTION_WORK_ORDERS_COMPLETE: 'production-work-orders.complete',
+  PRODUCTION_WORK_ORDERS_CANCEL: 'production-work-orders.cancel',
+  PRODUCTION_ROUTINGS_CREATE: 'production-routings.create',
+  PRODUCTION_ROUTINGS_READ: 'production-routings.read',
+  PRODUCTION_ROUTINGS_UPDATE: 'production-routings.update',
+  PRODUCTION_ROUTINGS_DELETE: 'production-routings.delete',
+  PRODUCTION_ROUTINGS_ACTIVATE: 'production-routings.activate',
+  PRODUCTION_ROUTINGS_DEACTIVATE: 'production-routings.deactivate',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

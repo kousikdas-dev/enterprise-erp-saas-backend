@@ -236,9 +236,113 @@
         }
 
         @if (activeTab === 'workOrders') {
-          <p class="text-muted mb-0">
-            Work Orders aren't tracked in this system yet — this phase runs production orders against a BOM only, with no shop-floor routing/work-order steps.
-          </p>
+          @if (isNew) {
+            <p class="text-muted mb-0">Save the production order first, then add Work Orders.</p>
+          } @else {
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>WO #</th>
+                    <th style="min-width: 200px;">Operation</th>
+                    <th style="min-width: 200px;">Work Centre</th>
+                    <th style="min-width: 110px;">Duration</th>
+                    <th style="min-width: 130px;">Scheduled</th>
+                    <th style="min-width: 110px;">Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (wo of workOrders; track wo.id) {
+                    <tr>
+                      <td>{{ wo.workOrderNumber }}</td>
+                      <td>{{ operationLabel(wo.operationId) }}</td>
+                      <td>{{ workCentreLabel(wo.workCentreId) }}</td>
+                      <td>{{ wo.plannedDurationMinutes }}m</td>
+                      <td>{{ wo.scheduledStartDate ? (wo.scheduledStartDate | slice:0:10) : '—' }}</td>
+                      <td>
+                        <span class="badge" [ngClass]="workOrderStatusBadgeClass(wo.status)">
+                          {{ wo.status === 'IN_PROGRESS' ? 'In Progress' : (wo.status | titlecase) }}
+                        </span>
+                      </td>
+                      <td class="text-end">
+                        <div class="d-flex gap-1 justify-content-end flex-wrap">
+                          @if (wo.status === 'PENDING' && canStartWorkOrder) {
+                            <button type="button" class="btn btn-sm btn-outline-warning" [disabled]="!!workOrderActionBusyId" (click)="runWorkOrderAction(wo, 'start')">Start</button>
+                          }
+                          @if (wo.status === 'IN_PROGRESS' && canBlockWorkOrder) {
+                            <button type="button" class="btn btn-sm btn-outline-danger" [disabled]="!!workOrderActionBusyId" (click)="runWorkOrderAction(wo, 'block')">Block</button>
+                          }
+                          @if (wo.status === 'BLOCKED' && canUnblockWorkOrder) {
+                            <button type="button" class="btn btn-sm btn-outline-warning" [disabled]="!!workOrderActionBusyId" (click)="runWorkOrderAction(wo, 'unblock')">Unblock</button>
+                          }
+                          @if ((wo.status === 'IN_PROGRESS' || wo.status === 'BLOCKED') && canCompleteWorkOrder) {
+                            <button type="button" class="btn btn-sm btn-outline-success" [disabled]="!!workOrderActionBusyId" (click)="runWorkOrderAction(wo, 'complete')">Complete</button>
+                          }
+                          @if (['PENDING', 'IN_PROGRESS', 'BLOCKED'].includes(wo.status) && canCancelWorkOrder) {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="!!workOrderActionBusyId" (click)="runWorkOrderAction(wo, 'cancel')">Cancel</button>
+                          }
+                          @if (wo.status === 'PENDING' && canDeleteWorkOrder) {
+                            <button type="button" class="btn btn-sm btn-outline-danger" [disabled]="!!workOrderActionBusyId" (click)="removeWorkOrder(wo)">Remove</button>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                  @if (!workOrders.length) {
+                    <tr>
+                      <td colspan="7" class="text-muted">No work orders yet.</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            @if (canCreateWorkOrder) {
+              <div class="row gy-2 align-items-end mt-2" [formGroup]="workOrderForm">
+                <div class="col-md-3">
+                  <label class="form-label" for="woOperation">Operation</label>
+                  <select id="woOperation" class="form-select form-select-sm" formControlName="operationId">
+                    <option value="">Select…</option>
+                    @for (o of operations; track o.id) {
+                      @if (o.isActive) {
+                        <option [value]="o.id">{{ o.code }} — {{ o.name }}</option>
+                      }
+                    }
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label" for="woWorkCentre">Work Centre</label>
+                  <select id="woWorkCentre" class="form-select form-select-sm" formControlName="workCentreId">
+                    <option value="">Select…</option>
+                    @for (w of workCentres; track w.id) {
+                      @if (w.isActive) {
+                        <option [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+                      }
+                    }
+                  </select>
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label" for="woDuration">Duration (min)</label>
+                  <input id="woDuration" type="number" min="1" class="form-control form-control-sm" formControlName="plannedDurationMinutes" />
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label" for="woStart">Scheduled Start</label>
+                  <input id="woStart" type="datetime-local" class="form-control form-control-sm" formControlName="scheduledStartDate" />
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label" for="woEnd">Scheduled End</label>
+                  <input id="woEnd" type="datetime-local" class="form-control form-control-sm" formControlName="scheduledEndDate" />
+                </div>
+                <div class="col-12">
+                  <button type="button" class="btn btn-sm btn-outline-primary" [disabled]="workOrderForm.invalid || workOrderSaving" (click)="addWorkOrder()">
+                    {{ workOrderSaving ? 'Adding…' : 'Add Work Order' }}
+                  </button>
+                  <a class="btn btn-sm btn-link" routerLink="/production/work-orders/kanban">View on Kanban board →</a>
+                </div>
+              </div>
+            }
+          }
         }
 
         @if (activeTab === 'misc') {

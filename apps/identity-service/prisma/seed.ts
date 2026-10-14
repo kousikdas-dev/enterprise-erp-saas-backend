@@ -765,6 +765,81 @@ const MANAGEMENT_PERMISSIONS: Array<{
     action: 'close',
     description: 'Close production orders (COMPLETED/CANCELLED -> CLOSED)',
   },
+  {
+    resource: 'production-work-orders',
+    action: 'create',
+    description: 'Create work orders',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'read',
+    description: 'Read work orders',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'update',
+    description: 'Update work orders',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'delete',
+    description: 'Delete PENDING work orders',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'start',
+    description: 'Start work orders (PENDING -> IN_PROGRESS)',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'block',
+    description: 'Block work orders (IN_PROGRESS -> BLOCKED)',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'unblock',
+    description: 'Unblock work orders (BLOCKED -> IN_PROGRESS)',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'complete',
+    description: 'Complete work orders (IN_PROGRESS/BLOCKED -> DONE)',
+  },
+  {
+    resource: 'production-work-orders',
+    action: 'cancel',
+    description: 'Cancel work orders',
+  },
+  {
+    resource: 'production-routings',
+    action: 'create',
+    description: 'Create production Manufacturing Routings',
+  },
+  {
+    resource: 'production-routings',
+    action: 'read',
+    description: 'Read production Manufacturing Routings',
+  },
+  {
+    resource: 'production-routings',
+    action: 'update',
+    description: 'Update DRAFT production Manufacturing Routings',
+  },
+  {
+    resource: 'production-routings',
+    action: 'delete',
+    description: 'Delete DRAFT production Manufacturing Routings',
+  },
+  {
+    resource: 'production-routings',
+    action: 'activate',
+    description: 'Activate production Manufacturing Routings',
+  },
+  {
+    resource: 'production-routings',
+    action: 'deactivate',
+    description: 'Deactivate production Manufacturing Routings',
+  },
 ];
 
 async function seedSuperAdminPermissions(

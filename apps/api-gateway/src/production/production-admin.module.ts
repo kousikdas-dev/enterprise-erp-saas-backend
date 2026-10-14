@@ -6,7 +6,9 @@ import { BomsController } from './boms.controller';
 import { OperationsController } from './operations.controller';
 import { ProductionForwardService } from './production-forward.service';
 import { ProductionOrdersController } from './production-orders.controller';
+import { RoutingsController } from './routings.controller';
 import { WorkCentresController } from './work-centres.controller';
+import { WorkOrdersController } from './work-orders.controller';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { WorkCentresController } from './work-centres.controller';
     OperationsController,
     WorkCentresController,
     ProductionOrdersController,
+    WorkOrdersController,
+    RoutingsController,
   ],
   providers: [ProductionForwardService],
 })

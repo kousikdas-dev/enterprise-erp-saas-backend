@@ -118,6 +118,7 @@ model Operation {
   updatedAt   DateTime @updatedAt
 
   bomOperations BomOperation[]
+  routingSteps  RoutingStep[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -172,6 +173,8 @@ model WorkCentre {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  routingSteps RoutingStep[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -270,7 +273,8 @@ model ProductionOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items ProductionOrderItem[]
+  items      ProductionOrderItem[]
+  workOrders WorkOrder[]
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId])
@@ -308,4 +312,167 @@ model ProductionOrderItem {
   @@index([productionOrderId])
   @@index([componentProductId])
   @@map("production_order_items")
+}
+
+// Work Order lifecycle. One-directional, enforced only through the
+// dedicated start/block/unblock/complete/cancel service methods — never via
+// a generic status PATCH, same convention as ProductionOrderStatus above:
+//
+//   PENDING -> IN_PROGRESS -> DONE
+//     |            | ^
+//     |            v |
+//     |          BLOCKED
+//     +--------------+--> CANCELLED
+enum WorkOrderStatus {
+  PENDING
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+// Work Order: a single schedulable shop-floor step against a Production
+// Order, assigned to a Work Centre. There is no Manufacturing Routing
+// feature yet (see ProductionOrder.routingId above), so Work Orders are not
+// auto-generated from a BOM/routing template — they are added directly
+// against a Production Order, each referencing an Operation and a Work
+// Centre from this service's own master data (validated active + existing
+// at create/update time, then snapshotted as code/name so history survives
+// later master-data edits, the same convention used throughout this file).
+model WorkOrder {
+  id              String @id @default(uuid()) @db.Uuid
+  tenantId        String @db.Uuid
+  workOrderNumber String
+
+  productionOrderId     String @db.Uuid
+  productionOrderNumber String
+  productId             String @db.Uuid
+  productSku            String
+  productName           String
+
+  operationId   String @db.Uuid
+  operationCode String
+  operationName String
+
+  workCentreId   String @db.Uuid
+  workCentreCode String
+  workCentreName String
+
+  sequence               Int
+  plannedDurationMinutes Int
+
+  scheduledStartDate DateTime?
+  scheduledEndDate   DateTime?
+
+  status WorkOrderStatus @default(PENDING)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, workOrderNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, workCentreId])
+  @@index([productionOrderId])
+  @@map("work_orders")
+}
+
+enum RoutingStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+// Manufacturing Routing header: defines the ordered sequence of operations
+// and work centres required to manufacture a product, independent of its
+// Bill of Materials (BOM = materials, Routing = operations/work centres —
+// orthogonal concerns, both attached directly to Product, never nested
+// inside each other, mirroring how ProductionOrder already carries separate
+// bomId/bomVersion and routingId/routingVersion column pairs). productId is
+// a logical reference to an inventory-service Product — validated +
+// snapshotted via InventoryProductClient the same way Bom.parentProductId
+// is, never a cross-service FK.
+//
+// Versioning/lifecycle mirrors Bom exactly: version is a plain incrementing
+// Int per (tenantId, productId); DRAFT is the only editable/deletable
+// status; activate() deactivates every other ACTIVE routing for the same
+// product in the same transaction (service-level "only one ACTIVE" — not a
+// DB constraint, same trade-off Bom already accepts); new versions are
+// always forked via a dedicated endpoint from any source status.
+model Routing {
+  id          String        @id @default(uuid()) @db.Uuid
+  tenantId    String        @db.Uuid
+  productId   String        @db.Uuid
+  productSku  String
+  productName String
+
+  name        String
+  version     Int
+  status      RoutingStatus @default(DRAFT)
+  description String?
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  steps RoutingStep[]
+
+  @@unique([tenantId, productId, version])
+  @@index([tenantId])
+  @@index([tenantId, productId])
+  @@index([tenantId, productId, status])
+  @@map("routings")
+}
+
+// A single routing step: WHAT operation, done WHERE (work centre), in what
+// order, and its standard timing. operationId/workCentreId are validated
+// against this service's own Operation/WorkCentre masters (must be active)
+// and snapshotted (code/name) the same way BomOperation snapshots its
+// operation, so a routing's step list stays legible even if the master is
+// later renamed. The same Operation MAY repeat across steps (e.g.
+// Weld -> Inspect -> Weld) — only `sequence` is unique per routing, not
+// operationId; duplicate (operation, work centre) pairs are allowed.
+//
+// setupMinutes (fixed, one-time) + runMinutesPerUnit (scales with produced
+// quantity) is the standard manufacturing time model; no scheduling
+// algorithm consumes them yet (Phase 4+, not part of this delivery) — they
+// exist so a future Work Order duration calculation has a documented
+// formula to use: setupMinutes + ceil(runMinutesPerUnit * plannedQuantity).
+model RoutingStep {
+  id        String @id @default(uuid()) @db.Uuid
+  tenantId  String @db.Uuid
+  routingId String @db.Uuid
+
+  sequence Int
+
+  operationId   String @db.Uuid
+  operationCode String
+  operationName String
+
+  workCentreId   String @db.Uuid
+  workCentreCode String
+  workCentreName String
+
+  setupMinutes      Int     @default(0)
+  runMinutesPerUnit Decimal @default(0) @db.Decimal(19, 6)
+
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  routing    Routing    @relation(fields: [routingId], references: [id], onDelete: Cascade)
+  operation  Operation  @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  workCentre WorkCentre @relation(fields: [workCentreId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, routingId, sequence])
+  @@index([tenantId])
+  @@index([routingId])
+  @@index([operationId])
+  @@index([workCentreId])
+  @@map("routing_steps")
 }

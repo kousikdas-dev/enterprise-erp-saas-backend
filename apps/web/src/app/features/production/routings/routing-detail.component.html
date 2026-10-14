@@ -1,0 +1,187 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <div class="d-flex align-items-center gap-2">
+      <a routerLink="/production/routings" class="btn btn-sm btn-outline-secondary">← Routings</a>
+      <span class="card-header-title mb-0">
+        {{ routing ? (routing.name + ' (v' + routing.version + ')') : 'New Routing' }}
+      </span>
+      @if (routing) {
+        <span class="badge" [ngClass]="statusBadgeClass(routing.status)">{{ routing.status }}</span>
+      }
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      @if (isEditable) {
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="discard()" [disabled]="saving">
+          Discard
+        </button>
+        <button type="button" class="btn btn-sm btn-primary" (click)="save()" [disabled]="saving">
+          {{ saving ? 'Saving…' : 'Save' }}
+        </button>
+      }
+      @if (canActivateRouting) {
+        <button type="button" class="btn btn-sm btn-success" (click)="runAction('activate')" [disabled]="actionBusy">
+          Activate
+        </button>
+      }
+      @if (canDeactivateRouting) {
+        <button type="button" class="btn btn-sm btn-outline-warning" (click)="runAction('deactivate')" [disabled]="actionBusy">
+          Deactivate
+        </button>
+      }
+      @if (canNewVersion) {
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="runAction('new-version')" [disabled]="actionBusy">
+          New Version
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="card-body">
+    @if (loading) {
+      <p class="text-muted">Loading…</p>
+    }
+    @if (error) {
+      <p class="text-danger">{{ error }}</p>
+    }
+    @if (!loading) {
+      <form [formGroup]="form">
+        <div class="row gy-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label" for="routingProduct">Product</label>
+            @if (isNew) {
+              <select id="routingProduct" class="form-select" formControlName="productId">
+                <option value="">Product to build…</option>
+                @for (p of eligibleProducts; track p.id) {
+                  <option [value]="p.id">{{ p.sku }} — {{ p.name }}</option>
+                }
+              </select>
+              @if (form.get('productId')?.touched && form.get('productId')?.invalid) {
+                <div class="text-danger small">Product is required.</div>
+              }
+            } @else {
+              <div class="form-control-plaintext">{{ routing?.productName }} (<code>{{ routing?.productSku }}</code>)</div>
+            }
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="routingName">Name</label>
+            @if (isEditable) {
+              <input id="routingName" class="form-control" formControlName="name" maxlength="160" placeholder="Standard Route" />
+              @if (form.get('name')?.touched && form.get('name')?.invalid) {
+                <div class="text-danger small">Name is required (max 160).</div>
+              }
+            } @else {
+              <div class="form-control-plaintext">{{ routing?.name }}</div>
+            }
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="routingEffectiveFrom">Effective From</label>
+            @if (isEditable) {
+              <input id="routingEffectiveFrom" type="date" class="form-control" formControlName="effectiveFrom" />
+            } @else {
+              <div class="form-control-plaintext">{{ routing?.effectiveFrom ? (routing?.effectiveFrom | slice:0:10) : '—' }}</div>
+            }
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="routingEffectiveTo">Effective To</label>
+            @if (isEditable) {
+              <input id="routingEffectiveTo" type="date" class="form-control" formControlName="effectiveTo" />
+            } @else {
+              <div class="form-control-plaintext">{{ routing?.effectiveTo ? (routing?.effectiveTo | slice:0:10) : '—' }}</div>
+            }
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Version</label>
+            <div class="form-control-plaintext">{{ routing ? ('v' + routing.version) : 'v1 (new)' }}</div>
+          </div>
+          <div class="col-md-12">
+            <label class="form-label" for="routingDescription">Description</label>
+            @if (isEditable) {
+              <textarea id="routingDescription" class="form-control" rows="2" formControlName="description" maxlength="500"></textarea>
+            } @else {
+              <div class="form-control-plaintext">{{ routing?.description || '—' }}</div>
+            }
+          </div>
+        </div>
+
+        <h6 class="mb-2">Routing Steps</h6>
+        <div class="table-responsive" formArrayName="steps">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th style="min-width: 80px;">Seq</th>
+                <th style="min-width: 200px;">Operation</th>
+                <th style="min-width: 200px;">Work Centre</th>
+                <th style="min-width: 110px;">Setup (min)</th>
+                <th style="min-width: 130px;">Run (min/unit)</th>
+                <th style="min-width: 160px;">Description</th>
+                @if (isEditable) {
+                  <th></th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (step of steps.controls; track step; let i = $index) {
+                <tr [formGroupName]="i">
+                  @if (isEditable) {
+                    <td>
+                      <input class="form-control form-control-sm" type="number" min="1" formControlName="sequence" />
+                    </td>
+                    <td>
+                      <select class="form-select form-select-sm" formControlName="operationId">
+                        <option value="">Select operation…</option>
+                        @for (o of activeOperations; track o.id) {
+                          <option [value]="o.id">{{ o.code }} — {{ o.name }}</option>
+                        }
+                      </select>
+                      @if (step.get('operationId')?.touched && step.get('operationId')?.invalid) {
+                        <div class="text-danger small">Required.</div>
+                      }
+                    </td>
+                    <td>
+                      <select class="form-select form-select-sm" formControlName="workCentreId">
+                        <option value="">Select work centre…</option>
+                        @for (w of activeWorkCentres; track w.id) {
+                          <option [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+                        }
+                      </select>
+                      @if (step.get('workCentreId')?.touched && step.get('workCentreId')?.invalid) {
+                        <div class="text-danger small">Required.</div>
+                      }
+                    </td>
+                    <td>
+                      <input class="form-control form-control-sm" type="number" min="0" formControlName="setupMinutes" />
+                    </td>
+                    <td>
+                      <input class="form-control form-control-sm" formControlName="runMinutesPerUnit" placeholder="2.500000" />
+                    </td>
+                    <td>
+                      <input class="form-control form-control-sm" formControlName="description" maxlength="500" />
+                    </td>
+                    <td class="text-end">
+                      <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeStepRow(i)" [disabled]="steps.length <= 1">
+                        Remove
+                      </button>
+                    </td>
+                  } @else {
+                    <td>{{ step.value.sequence }}</td>
+                    <td>{{ operationLabel(step.value.operationId) }}</td>
+                    <td>{{ workCentreLabel(step.value.workCentreId) }}</td>
+                    <td>{{ step.value.setupMinutes }}</td>
+                    <td>{{ step.value.runMinutesPerUnit }}</td>
+                    <td>{{ step.value.description || '—' }}</td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        @if (isEditable) {
+          <button type="button" class="btn btn-sm btn-outline-primary" (click)="addStepRow()">Add Step</button>
+          <div class="form-text mt-2">
+            The same operation may repeat across steps. Only the sequence number must be unique. At least one step is required to activate this routing.
+          </div>
+        }
+      </form>
+    }
+  </div>
+</div>

@@ -1,0 +1,98 @@
+<div class="main-card mb-3 card kanban-card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <span class="card-header-title mb-0">Work Orders Planning</span>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button
+        type="button"
+        class="btn btn-sm rounded-pill filter-chip"
+        [class.btn-primary]="showOpenOnly"
+        [class.btn-outline-secondary]="!showOpenOnly"
+        (click)="toggleOpenOnly()"
+      >
+        To Do or Blocked or In Progress
+      </button>
+      <button
+        type="button"
+        class="btn btn-sm rounded-pill filter-chip"
+        [class.btn-primary]="showPlannedOnly"
+        [class.btn-outline-secondary]="!showPlannedOnly"
+        (click)="togglePlannedOnly()"
+      >
+        Planned
+      </button>
+      <input
+        type="search"
+        class="form-control form-control-sm search-box"
+        placeholder="Search…"
+        [(ngModel)]="searchTerm"
+      />
+    </div>
+  </div>
+
+  <div class="card-body">
+    @if (loading) {
+      <p class="text-muted">Loading…</p>
+    }
+    @if (error) {
+      <p class="text-danger">{{ error }}</p>
+    }
+
+    @if (!loading && !error) {
+      @if (!workCentres.length) {
+        <p class="text-muted mb-0">
+          No active Work Centres configured yet. <a routerLink="/production/work-centres">Add one</a> to start planning.
+        </p>
+      } @else if (!filteredWorkOrders.length) {
+        <div class="kanban-empty text-center py-5">
+          <h4 class="fw-bold mb-2">No Work Orders to do!</h4>
+          <p class="text-muted mb-3">
+            Work orders are added from a Production Order's Work Orders tab.
+          </p>
+          <a class="btn btn-primary" routerLink="/production/production-orders">Go to Production Orders</a>
+        </div>
+      } @else {
+        <div class="kanban-board" cdkDropListGroup>
+          @for (centre of workCentres; track centre.id) {
+            <div class="kanban-column">
+              <div class="kanban-column-header">
+                <span class="fw-bold">{{ centre.name }}</span>
+                <span class="badge bg-light text-dark">{{ columnWorkOrders(centre.id).length }}</span>
+              </div>
+              <div
+                class="kanban-column-body"
+                cdkDropList
+                [cdkDropListData]="columnWorkOrders(centre.id)"
+                (cdkDropListDropped)="onDrop($event, centre)"
+              >
+                @for (wo of columnWorkOrders(centre.id); track wo.id) {
+                  <a
+                    class="kanban-card"
+                    cdkDrag
+                    [cdkDragData]="wo"
+                    [routerLink]="['/production/production-orders', wo.productionOrderId]"
+                  >
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                      <span class="fw-semibold">{{ wo.productName }}</span>
+                      <span class="badge" [ngClass]="statusBadgeClass(wo.status)">
+                        {{ wo.status === 'IN_PROGRESS' ? 'In Progress' : (wo.status | titlecase) }}
+                      </span>
+                    </div>
+                    <div class="text-muted small">{{ wo.productionOrderNumber }} · {{ wo.operationName }}</div>
+                    <div class="text-muted small d-flex justify-content-between mt-1">
+                      <span>{{ formatDuration(wo.plannedDurationMinutes) }}</span>
+                      @if (wo.scheduledStartDate) {
+                        <span>{{ wo.scheduledStartDate | date:'MMM d, h:mm a' }}</span>
+                      }
+                    </div>
+                  </a>
+                } @empty {
+                  <div class="kanban-column-empty text-muted small">No work orders</div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
+    }
+  </div>
+</div>

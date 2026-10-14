@@ -13,15 +13,32 @@
           {{ group.label }}
         </button>
         <div ngbDropdownMenu class="dropdown-menu-sm">
-          @for (groupItem of group.items; track groupItem.label) {
-            @if (groupItem.route) {
-              <a class="dropdown-item" [routerLink]="groupItem.route" routerLinkActive="active">
-                {{ groupItem.label }}
-              </a>
-            } @else {
-              <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
-                {{ groupItem.label }}
-              </button>
+          @if (group.sections; as sections) {
+            @for (section of sections; track section.header; let isFirst = $first) {
+              <h6 class="dropdown-header" [class.mt-0]="isFirst">{{ section.header }}</h6>
+              @for (groupItem of section.items; track groupItem.label) {
+                @if (groupItem.route) {
+                  <a class="dropdown-item" [routerLink]="groupItem.route" routerLinkActive="active">
+                    {{ groupItem.label }}
+                  </a>
+                } @else {
+                  <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+                    {{ groupItem.label }}
+                  </button>
+                }
+              }
+            }
+          } @else {
+            @for (groupItem of group.items; track groupItem.label) {
+              @if (groupItem.route) {
+                <a class="dropdown-item" [routerLink]="groupItem.route" routerLinkActive="active">
+                  {{ groupItem.label }}
+                </a>
+              } @else {
+                <button type="button" class="dropdown-item" disabled title="Will be implemented in a future phase.">
+                  {{ groupItem.label }}
+                </button>
+              }
             }
           }
         </div>

@@ -1,0 +1,122 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="card-header-title mb-0">Work Orders</div>
+    <div class="ms-auto d-flex gap-2">
+      <a routerLink="/production/work-orders/kanban" class="btn btn-sm btn-outline-secondary">Kanban</a>
+      <a routerLink="/production/work-orders/planning" class="btn btn-sm btn-outline-secondary">Planning</a>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label" for="woSearch">Search</label>
+        <input
+          id="woSearch"
+          type="search"
+          class="form-control form-control-sm"
+          placeholder="WO # / MO # / Product"
+          [(ngModel)]="search"
+          (keyup.enter)="search$()" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="woFilterStatus">Status</label>
+        <select id="woFilterStatus" class="form-select form-select-sm" [(ngModel)]="filterStatus">
+          <option value="">All</option>
+          <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="woFilterWorkCentre">Work Centre</label>
+        <select id="woFilterWorkCentre" class="form-select form-select-sm" [(ngModel)]="filterWorkCentreId">
+          <option value="">All</option>
+          <option *ngFor="let w of workCentres" [value]="w.id">{{ w.code }} — {{ w.name }}</option>
+        </select>
+      </div>
+      <div class="col-md-4 d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-primary" (click)="search$()" [disabled]="loading">
+          Search
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="load()" [disabled]="loading">
+          Refresh
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="clearFilters()">
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!items.length"
+      emptyMessage="No work orders found. Add one from a Production Order's Work Orders tab."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>WO #</th>
+              <th>Production Order</th>
+              <th>Product</th>
+              <th>Operation</th>
+              <th>Work Centre</th>
+              <th class="text-end">Duration</th>
+              <th>Scheduled</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of items">
+              <td><code>{{ item.workOrderNumber }}</code></td>
+              <td>
+                <a [routerLink]="['/production/production-orders', item.productionOrderId]">
+                  <code>{{ item.productionOrderNumber }}</code>
+                </a>
+              </td>
+              <td>{{ item.productName }}</td>
+              <td>{{ item.operationName }}</td>
+              <td>{{ item.workCentreName }}</td>
+              <td class="text-end">{{ item.plannedDurationMinutes }}m</td>
+              <td>{{ item.scheduledStartDate ? (item.scheduledStartDate | slice:0:10) : '—' }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">
+                  {{ item.status === 'IN_PROGRESS' ? 'In Progress' : item.status }}
+                </span>
+              </td>
+              <td class="text-end text-nowrap">
+                <button *ngIf="item.status === 'PENDING' && canStart" type="button" class="btn btn-sm btn-outline-warning me-1" [disabled]="!!actionBusyId" (click)="runAction(item, 'start')">
+                  Start
+                </button>
+                <button *ngIf="item.status === 'IN_PROGRESS' && canBlock" type="button" class="btn btn-sm btn-outline-danger me-1" [disabled]="!!actionBusyId" (click)="runAction(item, 'block')">
+                  Block
+                </button>
+                <button *ngIf="item.status === 'BLOCKED' && canUnblock" type="button" class="btn btn-sm btn-outline-warning me-1" [disabled]="!!actionBusyId" (click)="runAction(item, 'unblock')">
+                  Unblock
+                </button>
+                <button *ngIf="(item.status === 'IN_PROGRESS' || item.status === 'BLOCKED') && canComplete" type="button" class="btn btn-sm btn-outline-success me-1" [disabled]="!!actionBusyId" (click)="runAction(item, 'complete')">
+                  Complete
+                </button>
+                <button *ngIf="['PENDING','IN_PROGRESS','BLOCKED'].includes(item.status) && canCancel" type="button" class="btn btn-sm btn-outline-secondary me-1" [disabled]="!!actionBusyId" (click)="runAction(item, 'cancel')">
+                  Cancel
+                </button>
+                <a [routerLink]="['/production/production-orders', item.productionOrderId]" class="btn btn-sm btn-outline-secondary">
+                  View
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mt-3" *ngIf="totalPages > 1">
+        <span class="text-muted small">Page {{ page }} of {{ totalPages }} ({{ total }} total)</span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="page <= 1" (click)="goToPage(page - 1)">Prev</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="page >= totalPages" (click)="goToPage(page + 1)">Next</button>
+        </div>
+      </div>
+    </app-list-state>
+  </div>
+</div>

@@ -1,0 +1,100 @@
+<div class="main-card mb-3 card planning-card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+    <span class="card-header-title mb-0">Work Orders Planning</span>
+    <div class="d-flex align-items-center gap-2">
+      @if (unscheduledCount > 0) {
+        <span class="badge rounded-pill bg-warning text-dark" title="Work orders with no scheduled date yet">
+          {{ unscheduledCount }} to schedule
+        </span>
+      }
+      <input
+        type="search"
+        class="form-control form-control-sm search-box"
+        placeholder="Search…"
+        [(ngModel)]="searchTerm"
+      />
+    </div>
+  </div>
+
+  <div class="card-body">
+    @if (loading) {
+      <p class="text-muted">Loading…</p>
+    }
+    @if (error) {
+      <p class="text-danger">{{ error }}</p>
+    }
+
+    @if (!loading && !error) {
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="prevMonth()">←</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="nextMonth()">→</button>
+        <span class="fw-bold">{{ rangeLabel }}</span>
+        <button type="button" class="btn btn-sm btn-outline-primary ms-2" (click)="goToday()">Today</button>
+      </div>
+
+      @if (!workCentres.length) {
+        <p class="text-muted mb-0">
+          No active Work Centres configured yet. <a routerLink="/production/work-centres">Add one</a> to start planning.
+        </p>
+      } @else {
+        <div class="planning-wrap">
+          <div class="planning-labels">
+            <div class="planning-corner">Operations</div>
+            @for (centre of workCentres; track centre.id) {
+              <div class="planning-label-row" [style.height.px]="lanesForCentre(centre.id).length * 34 + 14">
+                <div class="fw-bold d-flex align-items-center gap-1">
+                  {{ centre.name }}
+                  @if (hasBlocked(centre.id)) {
+                    <span class="blocked-dot" title="Has a blocked work order"></span>
+                  }
+                </div>
+                <div class="text-muted small">{{ hoursForCentre(centre.id) }}h</div>
+              </div>
+            }
+          </div>
+
+          <div class="planning-timeline">
+            <div class="planning-month-band" [style.grid-template-columns]="'repeat(' + days.length + ', 34px)'">
+              @for (day of days; track day.date; let i = $index) {
+                @if (day.monthLabel) {
+                  <div class="month-label" [style.grid-column]="(i + 1) + ' / -1'">{{ day.monthLabel }}</div>
+                }
+              }
+            </div>
+            <div class="planning-day-band" [style.grid-template-columns]="'repeat(' + days.length + ', 34px)'">
+              @for (day of days; track day.date) {
+                <div class="day-cell" [class.today]="day.isToday">{{ day.date.getDate() }}</div>
+              }
+            </div>
+
+            @for (centre of workCentres; track centre.id) {
+              <div
+                class="planning-row"
+                [style.grid-template-columns]="'repeat(' + days.length + ', 34px)'"
+                [style.height.px]="lanesForCentre(centre.id).length * 34 + 14"
+              >
+                @for (day of days; track day.date) {
+                  <div class="day-grid-cell" [class.today]="day.isToday"></div>
+                }
+                @for (lane of lanesForCentre(centre.id); track $index; let laneIndex = $index) {
+                  @for (bar of lane; track bar.workOrder.id) {
+                    <a
+                      class="planning-bar"
+                      [ngClass]="statusBarClass(bar.workOrder.status)"
+                      [style.grid-column]="(bar.startCol + 1) + ' / span ' + bar.span"
+                      [style.grid-row]="laneIndex + 1"
+                      [title]="barTitle(bar.workOrder)"
+                      [routerLink]="['/production/production-orders', bar.workOrder.productionOrderId]"
+                    >
+                      {{ bar.workOrder.productName }}
+                    </a>
+                  }
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+    }
+  </div>
+</div>

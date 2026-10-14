@@ -7,7 +7,9 @@ import { ProductionEnvironmentVariables } from './config/production-env';
 import { OperationsModule } from './operations/operations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductionOrdersModule } from './production-orders/production-orders.module';
+import { RoutingsModule } from './routings/routings.module';
 import { WorkCentresModule } from './work-centres/work-centres.module';
+import { WorkOrdersModule } from './work-orders/work-orders.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { WorkCentresModule } from './work-centres/work-centres.module';
     OperationsModule,
     WorkCentresModule,
     ProductionOrdersModule,
+    WorkOrdersModule,
+    RoutingsModule,
     MessagingModule.register(),
   ],
 })

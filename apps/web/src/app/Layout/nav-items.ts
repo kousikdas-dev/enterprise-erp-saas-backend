@@ -9,10 +9,18 @@ export interface TopNavConfigItem {
   route?: string;
 }
 
-/** A named dropdown group in the secondary nav strip (e.g. Odoo-style "Operations ▾"). Items without a `route` show as disabled placeholders, same as TopNavConfigItem. */
+/** A labeled sub-section inside a dropdown group (e.g. Odoo-style "Planning ▾" split into "Work Orders" / "Employees" / "MPS"). */
+export interface TopNavDropdownSection {
+  header: string;
+  items: TopNavConfigItem[];
+}
+
+/** A named dropdown group in the secondary nav strip (e.g. Odoo-style "Operations ▾"). Items without a `route` show as disabled placeholders, same as TopNavConfigItem.
+ *  Use `items` for a flat list, or `sections` to group items under headers; `sections` takes precedence when both would apply. */
 export interface TopNavDropdownGroup {
   label: string;
-  items: TopNavConfigItem[];
+  items?: TopNavConfigItem[];
+  sections?: TopNavDropdownSection[];
 }
 
 export interface TopNavItem {
@@ -100,23 +108,36 @@ export const NAV_ITEMS: TopNavItem[] = [
       {
         label: 'Operations', items: [
           { label: 'Manufacturing Orders', route: '/production/production-orders' },
-          { label: 'Work Orders' },
+          { label: 'Work Orders', route: '/production/work-orders' },
           { label: 'Unbuild Orders' },
           { label: 'Scrap' },
         ]
       },
       {
-        label: 'Planning', items: [
-          { label: 'Work Orders Planning' },
-          { label: 'Kanban' },
-          { label: 'Employees Planning' },
-          { label: 'Master Production Schedule' },
+        label: 'Planning', sections: [
+          {
+            header: 'Work Orders', items: [
+              { label: 'Planning', route: '/production/work-orders/planning' },
+              { label: 'Kanban', route: '/production/work-orders/kanban' },
+            ]
+          },
+          {
+            header: 'Employees', items: [
+              { label: 'Planning' },
+            ]
+          },
+          {
+            header: 'MPS', items: [
+              { label: 'Master Production Schedule' },
+            ]
+          },
         ]
       },
       {
         label: 'Products', items: [
           { label: 'Products', route: '/inventory/products' },
           { label: 'Bills of Materials', route: '/production/boms' },
+          { label: 'Routings', route: '/production/routings' },
           { label: 'Lots/Serial Numbers' },
         ]
       },

@@ -26,16 +26,23 @@ import { apiErrorMessage } from '../../../shared/utils/api-error.util';
 import { isPositiveDecimal } from '../../../shared/utils/decimal.util';
 import {
   Bom,
+  Operation,
   PRODUCTION_ORDER_PRIORITIES,
   ProductionOrder,
   ProductionOrderItemLineInput,
   ProductionOrderPriority,
   ProductionOrderStatus,
+  WorkCentre,
+  WorkOrder,
 } from '../models/production.models';
 import { BomService } from '../boms/bom.service';
+import { OperationService } from '../operations/operation.service';
+import { WorkCentreService } from '../work-centres/work-centre.service';
+import { WorkOrderService } from '../work-orders/work-order.service';
 import { ProductionOrderService } from './production-order.service';
 
 type PendingActionType = 'plan' | 'release' | 'start' | 'cancel' | 'close';
+type WorkOrderActionType = 'start' | 'block' | 'unblock' | 'complete' | 'cancel';
 
 /** The main Draft→Planned→Released→In Progress→Completed path; Cancelled is a side branch handled separately. */
 const STATUS_STEPS: readonly ProductionOrderStatus[] = [
@@ -69,6 +76,9 @@ export class ProductionOrderDetailComponent implements OnInit {
   private readonly productService = inject(ProductService);
   private readonly unitService = inject(UnitService);
   private readonly warehouseService = inject(WarehouseService);
+  private readonly operationService = inject(OperationService);
+  private readonly workCentreService = inject(WorkCentreService);
+  private readonly workOrderService = inject(WorkOrderService);
   private readonly fb = inject(FormBuilder);
   private readonly toast = inject(ToastService);
   private readonly permissions = inject(PermissionService);
@@ -82,6 +92,14 @@ export class ProductionOrderDetailComponent implements OnInit {
   readonly canCancel = this.permissions.has(AppPermissions.PRODUCTION_ORDERS_CANCEL);
   readonly canClose = this.permissions.has(AppPermissions.PRODUCTION_ORDERS_CLOSE);
 
+  readonly canCreateWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_CREATE);
+  readonly canDeleteWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_DELETE);
+  readonly canStartWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_START);
+  readonly canBlockWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_BLOCK);
+  readonly canUnblockWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_UNBLOCK);
+  readonly canCompleteWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_COMPLETE);
+  readonly canCancelWorkOrder = this.permissions.has(AppPermissions.PRODUCTION_WORK_ORDERS_CANCEL);
+
   readonly priorities: readonly ProductionOrderPriority[] = PRODUCTION_ORDER_PRIORITIES;
   readonly statusSteps = STATUS_STEPS;
 
@@ -94,6 +112,19 @@ export class ProductionOrderDetailComponent implements OnInit {
   warehouses: Warehouse[] = [];
   units: Unit[] = [];
   private readonly productUnitsByProduct = new Map<string, ProductUnit[]>();
+
+  operations: Operation[] = [];
+  workCentres: WorkCentre[] = [];
+  workOrders: WorkOrder[] = [];
+  workOrderForm = this.fb.group({
+    operationId: ['', Validators.required],
+    workCentreId: ['', Validators.required],
+    plannedDurationMinutes: ['', [Validators.required, Validators.min(1)]],
+    scheduledStartDate: [''],
+    scheduledEndDate: [''],
+  });
+  workOrderSaving = false;
+  workOrderActionBusyId: string | null = null;
 
   loading = false;
   saving = false;
@@ -152,15 +183,32 @@ export class ProductionOrderDetailComponent implements OnInit {
       products: this.productService.list(),
       units: this.unitService.list(),
       warehouses: this.warehouseService.list(),
+      operations: this.operationService.list(),
+      workCentres: this.workCentreService.list(),
     }).subscribe({
-      next: ({ products, units, warehouses }) => {
+      next: ({ products, units, warehouses, operations, workCentres }) => {
         this.products = products.items ?? [];
         this.units = units.items ?? [];
         this.warehouses = warehouses.items ?? [];
+        this.operations = operations.items ?? [];
+        this.workCentres = workCentres.items ?? [];
         this.cdr.detectChanges();
       },
       error: (err) => {
         this.toast.error(apiErrorMessage(err, 'Failed to load product/UOM/warehouse lookups'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  private loadWorkOrders(productionOrderId: string): void {
+    this.workOrderService.list({ productionOrderId }).subscribe({
+      next: (res) => {
+        this.workOrders = res.items ?? [];
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.toast.error(apiErrorMessage(err, 'Failed to load work orders'));
         this.cdr.detectChanges();
       },
     });
@@ -208,6 +256,7 @@ export class ProductionOrderDetailComponent implements OnInit {
           this.ensureProductUnitsLoaded(item.componentProductId);
         }
 
+        this.loadWorkOrders(order.id);
         this.loading = false;
         this.cdr.detectChanges();
       },
@@ -448,6 +497,143 @@ export class ProductionOrderDetailComponent implements OnInit {
       },
       error: (err) => {
         this.actionBusy = false;
+        this.toast.error(apiErrorMessage(err, 'Action failed'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  operationLabel(id: string): string {
+    const o = this.operations.find((x) => x.id === id);
+    return o ? `${o.code} — ${o.name}` : id.slice(0, 8);
+  }
+
+  workCentreLabel(id: string): string {
+    const w = this.workCentres.find((x) => x.id === id);
+    return w ? `${w.code} — ${w.name}` : id.slice(0, 8);
+  }
+
+  workOrderStatusBadgeClass(status: string): string {
+    switch (status) {
+      case 'PENDING':
+        return 'bg-secondary';
+      case 'IN_PROGRESS':
+        return 'bg-warning text-dark';
+      case 'BLOCKED':
+        return 'bg-danger';
+      case 'DONE':
+        return 'bg-success';
+      case 'CANCELLED':
+        return 'bg-dark';
+      default:
+        return 'bg-secondary';
+    }
+  }
+
+  addWorkOrder(): void {
+    if (!this.order || this.workOrderForm.invalid || this.workOrderSaving) {
+      this.workOrderForm.markAllAsTouched();
+      return;
+    }
+    const value = this.workOrderForm.getRawValue();
+    if (
+      value.scheduledStartDate &&
+      value.scheduledEndDate &&
+      value.scheduledEndDate < value.scheduledStartDate
+    ) {
+      this.toast.error('Scheduled End cannot be before Scheduled Start.');
+      return;
+    }
+    this.workOrderSaving = true;
+    this.cdr.detectChanges();
+    this.workOrderService
+      .create({
+        productionOrderId: this.order.id,
+        operationId: value.operationId!,
+        workCentreId: value.workCentreId!,
+        sequence: this.workOrders.length + 1,
+        plannedDurationMinutes: Number(value.plannedDurationMinutes),
+        scheduledStartDate: value.scheduledStartDate?.trim() || undefined,
+        scheduledEndDate: value.scheduledEndDate?.trim() || undefined,
+      })
+      .subscribe({
+        next: (workOrder) => {
+          this.workOrderSaving = false;
+          this.workOrders = [...this.workOrders, workOrder];
+          this.workOrderForm.reset({
+            operationId: '',
+            workCentreId: '',
+            plannedDurationMinutes: '',
+            scheduledStartDate: '',
+            scheduledEndDate: '',
+          });
+          this.toast.success(`Work Order ${workOrder.workOrderNumber} added`);
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.workOrderSaving = false;
+          this.toast.error(apiErrorMessage(err, 'Failed to add work order'));
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  removeWorkOrder(workOrder: WorkOrder): void {
+    if (this.workOrderActionBusyId) {
+      return;
+    }
+    this.workOrderActionBusyId = workOrder.id;
+    this.cdr.detectChanges();
+    this.workOrderService.remove(workOrder.id).subscribe({
+      next: () => {
+        this.workOrderActionBusyId = null;
+        this.workOrders = this.workOrders.filter((w) => w.id !== workOrder.id);
+        this.toast.success('Work order removed');
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.workOrderActionBusyId = null;
+        this.toast.error(apiErrorMessage(err, 'Failed to remove work order'));
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  runWorkOrderAction(workOrder: WorkOrder, type: WorkOrderActionType): void {
+    if (this.workOrderActionBusyId) {
+      return;
+    }
+    this.workOrderActionBusyId = workOrder.id;
+    this.cdr.detectChanges();
+
+    const request$ =
+      type === 'start'
+        ? this.workOrderService.start(workOrder.id)
+        : type === 'block'
+          ? this.workOrderService.block(workOrder.id)
+          : type === 'unblock'
+            ? this.workOrderService.unblock(workOrder.id)
+            : type === 'complete'
+              ? this.workOrderService.complete(workOrder.id)
+              : this.workOrderService.cancel(workOrder.id);
+
+    const successMessage: Record<WorkOrderActionType, string> = {
+      start: 'Work order started',
+      block: 'Work order blocked',
+      unblock: 'Work order unblocked',
+      complete: 'Work order completed',
+      cancel: 'Work order cancelled',
+    };
+
+    request$.subscribe({
+      next: (updated) => {
+        this.workOrderActionBusyId = null;
+        this.workOrders = this.workOrders.map((w) => (w.id === updated.id ? updated : w));
+        this.toast.success(successMessage[type]);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.workOrderActionBusyId = null;
         this.toast.error(apiErrorMessage(err, 'Action failed'));
         this.cdr.detectChanges();
       },

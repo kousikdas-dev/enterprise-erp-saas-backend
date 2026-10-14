@@ -1,0 +1,105 @@
+<div class="main-card mb-3 card">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <a *ngIf="canCreate" routerLink="/production/routings/new" class="btn btn-sm btn-success">
+      New
+    </a>
+    <div class="card-header-title mb-0">Manufacturing Routings</div>
+    <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" (click)="load()" [disabled]="loading">
+      Refresh
+    </button>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-4">
+        <label class="form-label" for="routingSearch">Search</label>
+        <input
+          id="routingSearch"
+          type="search"
+          class="form-control form-control-sm"
+          placeholder="Product SKU / Name / Routing name"
+          [(ngModel)]="filter" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="routingFilterStatus">Status</label>
+        <select id="routingFilterStatus" class="form-select form-select-sm" [(ngModel)]="filterStatus">
+          <option value="">All</option>
+          <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+        </select>
+      </div>
+    </div>
+
+    <app-list-state
+      [loading]="loading"
+      [error]="error"
+      [empty]="!filtered.length"
+      emptyMessage="No routings yet. Create one for a manufacturable product."
+      (retry)="load()">
+      <div class="table-responsive">
+        <table class="align-middle mb-0 table table-borderless table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Name</th>
+              <th class="text-center">Version</th>
+              <th class="text-center">Status</th>
+              <th class="text-center">Steps</th>
+              <th>Effective</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filtered">
+              <td>{{ item.productSku }} — {{ item.productName }}</td>
+              <td>
+                <a [routerLink]="['/production/routings', item.id]">{{ item.name }}</a>
+              </td>
+              <td class="text-center">v{{ item.version }}</td>
+              <td class="text-center">
+                <span class="badge" [ngClass]="statusBadgeClass(item.status)">{{ item.status }}</span>
+              </td>
+              <td class="text-center">{{ item.steps.length }}</td>
+              <td>
+                <span *ngIf="item.effectiveFrom || item.effectiveTo; else noDates">
+                  {{ item.effectiveFrom ? (item.effectiveFrom | slice:0:10) : '…' }}
+                  –
+                  {{ item.effectiveTo ? (item.effectiveTo | slice:0:10) : '…' }}
+                </span>
+                <ng-template #noDates>—</ng-template>
+              </td>
+              <td class="text-end text-nowrap">
+                <a [routerLink]="['/production/routings', item.id]" class="btn btn-sm btn-outline-secondary me-1">
+                  View
+                </a>
+                <button
+                  *ngIf="canActivateRouting(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-success me-1"
+                  [disabled]="!!actionBusyId"
+                  (click)="runAction(item, 'activate')">
+                  Activate
+                </button>
+                <button
+                  *ngIf="canDeactivateRouting(item)"
+                  type="button"
+                  class="btn btn-sm btn-outline-warning me-1"
+                  [disabled]="!!actionBusyId"
+                  (click)="runAction(item, 'deactivate')">
+                  Deactivate
+                </button>
+                <button
+                  *ngIf="canCreate"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  [disabled]="!!actionBusyId"
+                  (click)="runAction(item, 'new-version')">
+                  New Version
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </app-list-state>
+  </div>
+</div>
