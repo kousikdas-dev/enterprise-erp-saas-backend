@@ -48,14 +48,14 @@
     "prisma:generate:purchase": "prisma generate --schema=apps/purchase-service/prisma/schema.prisma",
     "prisma:generate:master-data": "prisma generate --schema=apps/master-data-service/prisma/schema.prisma",
     "prisma:generate:production": "prisma generate --schema=apps/production-service/prisma/schema.prisma",
-    "prisma:migrate:identity": "prisma migrate dev --schema=apps/identity-service/prisma/schema.prisma",
-    "prisma:migrate:sales": "prisma migrate dev --schema=apps/sales-service/prisma/schema.prisma",
-    "prisma:migrate:inventory": "prisma migrate dev --schema=apps/inventory-service/prisma/schema.prisma",
-    "prisma:migrate:accounting": "prisma migrate dev --schema=apps/accounting-service/prisma/schema.prisma",
-    "prisma:migrate:purchase": "prisma migrate dev --schema=apps/purchase-service/prisma/schema.prisma",
-    "prisma:migrate:master-data": "prisma migrate dev --schema=apps/master-data-service/prisma/schema.prisma",
-    "prisma:migrate:production": "prisma migrate dev --schema=apps/production-service/prisma/schema.prisma",
-    "prisma:seed:identity": "ts-node --transpile-only apps/identity-service/prisma/seed.ts"
+    "prisma:migrate:identity": "node scripts/run-with-db.js identity -- prisma migrate dev --schema=apps/identity-service/prisma/schema.prisma",
+    "prisma:migrate:sales": "node scripts/run-with-db.js sales -- prisma migrate dev --schema=apps/sales-service/prisma/schema.prisma",
+    "prisma:migrate:inventory": "node scripts/run-with-db.js inventory -- prisma migrate dev --schema=apps/inventory-service/prisma/schema.prisma",
+    "prisma:migrate:accounting": "node scripts/run-with-db.js accounting -- prisma migrate dev --schema=apps/accounting-service/prisma/schema.prisma",
+    "prisma:migrate:purchase": "node scripts/run-with-db.js purchase -- prisma migrate dev --schema=apps/purchase-service/prisma/schema.prisma",
+    "prisma:migrate:master-data": "node scripts/run-with-db.js master-data -- prisma migrate dev --schema=apps/master-data-service/prisma/schema.prisma",
+    "prisma:migrate:production": "node scripts/run-with-db.js production -- prisma migrate dev --schema=apps/production-service/prisma/schema.prisma",
+    "prisma:seed:identity": "node scripts/run-with-db.js identity -- ts-node --transpile-only apps/identity-service/prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

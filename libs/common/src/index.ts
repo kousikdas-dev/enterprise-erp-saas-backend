@@ -1,5 +1,6 @@
 export * from './bootstrap/bootstrap-http';
 export * from './config/env.validation';
+export * from './config/resolve-service-database-url';
 export * from './config/validate-env';
 export * from './constants';
 export * from './health/health.module';
